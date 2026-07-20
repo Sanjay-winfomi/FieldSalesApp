@@ -1,0 +1,171 @@
+/* FieldTrack CSS Design System */
+
+:root {
+  --primary-blue: #0082D1;
+  --teal: #4FD29F;
+  --dark-teal: #1E6B4B;
+  --amber: #E9C03C;
+  --dark-amber: #8E6C0C;
+  --charcoal: #434343;
+  --secondary-text: #8A8A8A;
+  --muted-text: #A0A0A0;
+  
+  --error-bg: #FBEAE9;
+  --error-text: #D8534A;
+
+  /* Surfaces */
+  --bg-color: #FAFAFA;
+  --card-bg: #FFFFFF;
+  --blue-tint: #F2F9FD;
+  --teal-tint: #F4FBF8;
+  --amber-tint: #FDF3E0;
+
+  /* Borders & Radius */
+  --border-color: #E0E0E0;
+  --border-hairline: 0.5px solid var(--border-color);
+  
+  --radius-card: 12px;
+  --radius-button: 8px;
+  --radius-badge: 20px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--charcoal);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Headings and Labels: Medium Weight (500) */
+h1, h2, h3, h4, h5, h6, label, th {
+  font-weight: 500;
+  color: var(--charcoal);
+}
+
+/* Sentence case utility */
+.sentence-case {
+  text-transform: lowercase;
+}
+.sentence-case::first-letter {
+  text-transform: uppercase;
+}
+
+/* Core Buttons */
+button {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-button);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+}
+
+button.primary {
+  background-color: var(--primary-blue);
+  color: #FFFFFF;
+}
+
+button.primary:hover {
+  background-color: #0070B5;
+}
+
+button.secondary {
+  background-color: transparent;
+  color: var(--primary-blue);
+  border: var(--border-hairline);
+  border-color: var(--primary-blue);
+}
+
+button.secondary:hover {
+  background-color: var(--blue-tint);
+}
+
+/* Inputs & Form Fields */
+input, select {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--charcoal);
+  border: var(--border-hairline);
+  border-radius: var(--radius-button);
+  padding: 10px 14px;
+  outline: none;
+  background-color: #FFFFFF;
+  transition: border-color 0.2s ease;
+}
+
+input:focus, select:focus {
+  border-color: var(--primary-blue);
+}
+
+/* Status Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border-radius: var(--radius-badge);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.badge-teal {
+  background-color: var(--teal-tint);
+  color: var(--dark-teal);
+  border: 0.5px solid var(--teal);
+}
+
+.badge-amber {
+  background-color: var(--amber-tint);
+  color: var(--dark-amber);
+  border: 0.5px solid var(--amber);
+}
+
+.badge-red {
+  background-color: var(--error-bg);
+  color: var(--error-text);
+  border: 0.5px solid var(--error-text);
+}
+
+.badge-blue {
+  background-color: var(--blue-tint);
+  color: var(--primary-blue);
+  border: 0.5px solid var(--primary-blue);
+}
+
+/* Scrollbars styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D8D8D8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B0B0B0;
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env*.local
+.expo/
+dist/
+dist-ssr/
+web-build/
+*.log
+.vscode/
+.idea/
+.DS_Store
+walkthrough.md
