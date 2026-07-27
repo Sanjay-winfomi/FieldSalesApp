@@ -1,27 +1,51 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "FieldTrack",
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.winfomi.fieldtrack"
     },
     "android": {
+      "package": "com.winfomi.fieldtrack",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FBFBFB",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FieldTrack uses your location to verify dealer check-ins/check-outs and record attendance accurately. It is only read at the moment of check-in, check-out, and periodic in-visit verification — never tracked continuously in the background."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F8FAFC"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4380602a-3a21-4dd8-9e40-ec200b572e9f"
+      }
+    },
+    "owner": "sanjay_winfomi"
   }
 }

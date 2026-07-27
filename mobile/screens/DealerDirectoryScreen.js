@@ -1,30 +1,66 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, ScrollView, View, ActivityIndicator, RefreshControl } from 'react-native';
-import { Search } from 'lucide-react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { StyleSheet, Text, View, ScrollView, RefreshControl } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Store, WifiOff } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../src/services/api';
+import { useAppState } from '../src/context/AppStateContext';
+import { SearchBar, DealerCard, EmptyState, FadeSlideIn } from '../src/components';
+import { SkeletonCard } from '../src/components/loaders/Skeleton';
+import { colors, typography, spacing } from '../src/theme';
 
-export default function DealerDirectoryScreen({ onSelectDealer }) {
+// Cache the last successful (unfiltered) dealer list so the directory still
+// shows something useful if the device is offline when the screen opens —
+// without this, an offline rep sees an empty "No dealers found" and can't
+// check in at any dealer at all, defeating the app's offline-first design.
+const DEALER_CACHE_KEY = '@dealer_directory_cache';
+
+export default function DealerDirectoryScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const { visits, onSelectDealer } = useAppState();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState(null); // No dealer is selected by default
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [usingCache, setUsingCache] = useState(false);
+  // Sequences requests so a slower, stale response can't overwrite a newer
+  // one if the user types quickly (each fetch checks it's still the latest).
+  const requestSeqRef = useRef(0);
 
-  useEffect(() => {
-    fetchDealers();
-  }, []);
+  const visitedDealerIds = useMemo(() => new Set(visits.map((v) => v.dealer_id)), [visits]);
 
   const fetchDealers = async (query = '') => {
+    const seq = ++requestSeqRef.current;
     setLoading(true);
     try {
       const response = await api.get('/dealers', {
         params: { search: query }
       });
-      setDealers(response.data.dealers || []);
+      if (seq !== requestSeqRef.current) return; // a newer request has since started
+      const list = response.data.dealers || [];
+      setDealers(list);
+      setUsingCache(false);
+      if (!query) {
+        AsyncStorage.setItem(DEALER_CACHE_KEY, JSON.stringify(list)).catch(() => {});
+      }
     } catch (error) {
+      if (seq !== requestSeqRef.current) return;
       console.error('Error fetching dealers:', error);
+      if (!query) {
+        try {
+          const cached = await AsyncStorage.getItem(DEALER_CACHE_KEY);
+          if (cached) {
+            setDealers(JSON.parse(cached));
+            setUsingCache(true);
+          }
+        } catch (cacheErr) {
+          console.error('Error reading cached dealers:', cacheErr);
+        }
+      }
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) setLoading(false);
     }
   };
 
@@ -34,7 +70,8 @@ export default function DealerDirectoryScreen({ onSelectDealer }) {
     setRefreshing(false);
   };
 
-  // Debounce search
+  // Debounce search — skips the redundant immediate fetch on mount (searchQuery
+  // starts as '', so this effect already covers the initial load 500ms later).
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       fetchDealers(searchQuery);
@@ -43,162 +80,99 @@ export default function DealerDirectoryScreen({ onSelectDealer }) {
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Dealer directory</Text>
+  const handleCardPress = (dealer) => {
+    const isSelected = dealer.id === selectedId;
+    if (isSelected) {
+      onSelectDealer(dealer, true, navigation);
+    } else {
+      setSelectedId(dealer.id);
+      onSelectDealer(dealer, false, navigation);
+    }
+  };
 
-      {/* Search Input */}
-      <View style={styles.searchContainer}>
-        <Search size={18} color="#8A8A8A" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search dealers"
-          placeholderTextColor="#A0A0A0"
-        />
+  return (
+    <View style={styles.screen}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.title}>Dealer directory</Text>
+        <SearchBar value={searchQuery} onChangeText={setSearchQuery} placeholder="Search dealers" />
       </View>
 
-      {/* Dealer List */}
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.listContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        showsVerticalScrollIndicator={false}
       >
-        {loading && !refreshing && <ActivityIndicator size="small" color="#0082D1" style={{ marginTop: 20 }} />}
-        {!loading && dealers.length === 0 && (
-          <Text style={{ textAlign: 'center', color: '#8A8A8A', marginTop: 20 }}>No dealers found.</Text>
+        {usingCache && (
+          <View style={styles.offlineBanner}>
+            <WifiOff size={14} color={colors.warningDark} style={{ marginRight: 8 }} />
+            <Text style={styles.offlineBannerText}>Offline — showing last saved dealer list</Text>
+          </View>
         )}
-        {!loading && dealers.map(dealer => {
-          const isSelected = dealer.id === selectedId;
-          return (
-            <TouchableOpacity
-              key={dealer.id}
-              style={[
-                styles.dealerCard,
-                isSelected && styles.dealerCardSelected
-              ]}
-              onPress={() => {
-                if (isSelected) {
-                  if (onSelectDealer) {
-                    onSelectDealer(dealer, true);
-                  }
-                } else {
-                  setSelectedId(dealer.id);
-                  if (onSelectDealer) {
-                    onSelectDealer(dealer, false);
-                  }
-                }
-              }}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={styles.dealerName}>{dealer.name}</Text>
-                {isSelected && (
-                  <View style={styles.selectedBadge}>
-                    <Text style={styles.selectedBadgeText}>Selected</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.dealerAddress}>{dealer.address}</Text>
-              
-              {isSelected && (
-                <View style={styles.actionPrompt}>
-                  <Text style={styles.actionPromptText}>Tap again to check in</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+
+        {loading && !refreshing && dealers.length === 0 && (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        )}
+
+        {!loading && dealers.length === 0 && (
+          <EmptyState
+            icon={<Store size={40} color={colors.textMuted} />}
+            title="No dealers found"
+            subtitle={searchQuery ? 'Try a different search term.' : 'Dealers added by your manager will appear here.'}
+          />
+        )}
+
+        {dealers.map((dealer, index) => (
+          <FadeSlideIn key={dealer.id} delay={Math.min(index, 6) * 30}>
+            <DealerCard
+              dealer={dealer}
+              selected={dealer.id === selectedId}
+              visited={visitedDealerIds.has(dealer.id)}
+              onPress={() => handleCardPress(dealer)}
+            />
+          </FadeSlideIn>
+        ))}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+  screen: { flex: 1, backgroundColor: colors.background },
+  header: {
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.screenHorizontal,
+    paddingBottom: spacing.lg,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
   },
-  heading: {
+  title: {
+    ...typography.sectionTitle,
+    color: colors.text,
     fontSize: 22,
-    fontWeight: '500',
-    color: '#434343',
-    marginBottom: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 0.5,
-    borderColor: '#D0D0D0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 44,
-    marginBottom: 20,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#434343',
+    marginBottom: spacing.md,
   },
   listContainer: {
-    paddingBottom: 24,
+    padding: spacing.screenHorizontal,
+    paddingBottom: spacing.xxxl,
   },
-  dealerCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 0.5,
-    borderColor: '#E0E0E0',
-    marginBottom: 12,
-  },
-  dealerCardSelected: {
-    borderColor: '#0082D1',
-    backgroundColor: '#F2F9FD',
-  },
-  cardHeader: {
+  offlineBanner: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    backgroundColor: colors.warningLight,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 14,
+    padding: spacing.md,
+    marginBottom: spacing.cardGap,
   },
-  dealerName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#434343',
+  offlineBannerText: {
+    ...typography.caption,
+    color: colors.warningDark,
+    fontWeight: '600',
     flex: 1,
-  },
-  dealerAddress: {
-    fontSize: 13,
-    color: '#8A8A8A',
-  },
-  selectedBadge: {
-    backgroundColor: '#0082D1',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 20,
-  },
-  selectedBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  actionPrompt: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 0.5,
-    borderTopColor: '#D0E3F0',
-    alignItems: 'flex-end',
-  },
-  actionPromptText: {
-    fontSize: 12,
-    color: '#0082D1',
-    fontWeight: '500',
   },
 });

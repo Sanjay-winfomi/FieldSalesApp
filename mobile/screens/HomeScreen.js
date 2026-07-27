@@ -1,283 +1,320 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, ScrollView, RefreshControl } from 'react-native';
-import { Home, Store, Clock, User, Check, LogOut } from 'lucide-react-native';
-import DealerDirectoryScreen from './DealerDirectoryScreen';
+import React, { useMemo } from 'react';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, History,
+} from 'lucide-react-native';
+import { useAppState } from '../src/context/AppStateContext';
+import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn } from '../src/components';
+import { colors, typography, spacing } from '../src/theme';
 
-export default function HomeScreen({ 
-  employee,
-  dayStatus = 'not_checked_in', // 'not_checked_in' | 'checked_in' | 'day_ended'
-  visitsCount = 0,
-  distanceTravelled = '0.0 km',
-  attendance,
-  visits = [],
-  refreshing = false,
-  onRefresh,
-  onNavigateToDayCheckIn,
-  onNavigateToDayCheckOut,
-  onSelectDealer,
-  onLogout
-}) {
-  const [activeTab, setActiveTab] = useState('home');
+function formatTime(isoString) {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
 
-  const formatTime = (isoString) => {
-    if (!isoString) return '';
-    const d = new Date(isoString);
-    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  };
+function formatDuration(minutes) {
+  if (!minutes || minutes < 1) return '0h 0m';
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return `${h}h ${m}m`;
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+export default function HomeScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const {
+    employee,
+    dayStatus,
+    visitsCount,
+    distanceTravelled,
+    attendance,
+    visits,
+    refreshing,
+    pendingSyncCount,
+    locationPermissionDenied,
+    locationPermissionCanAskAgain,
+    onOpenLocationSettings,
+    fetchTodayState,
+    onSelectDealer,
+  } = useAppState();
 
   const checkInTime = attendance?.check_in_time ? formatTime(attendance.check_in_time) : '';
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.greeting}>Good morning</Text>
-        <Text style={styles.userName}>{employee?.name || 'User'}</Text>
-      </View>
-    </View>
-  );
+  const workingMinutes = useMemo(() => {
+    if (!attendance?.check_in_time) return 0;
+    if (attendance.total_duration_minutes != null) return attendance.total_duration_minutes;
+    return Math.max(0, Math.round((Date.now() - new Date(attendance.check_in_time)) / 60000));
+  }, [attendance]);
 
-  const renderHomeContent = () => (
-    <ScrollView 
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      {/* Day Status Card */}
-      {dayStatus === 'not_checked_in' && (
-        <TouchableOpacity 
-          style={[styles.statusCard, styles.statusCardNotCheckedIn]}
-          onPress={onNavigateToDayCheckIn}
-        >
-          <View style={styles.statusLeft}>
-            <Text style={styles.statusLabel}>Day status</Text>
-            <Text style={styles.statusValue}>Not checked in</Text>
-          </View>
-          <View style={styles.actionBtn}>
-            <Text style={styles.actionBtnText}>Check in</Text>
-          </View>
-        </TouchableOpacity>
-      )}
+  const uniqueDealersVisited = useMemo(() => {
+    return new Set(visits.map((v) => v.dealer_id)).size;
+  }, [visits]);
 
-      {dayStatus === 'checked_in' && (
-        <View style={[styles.statusCard, styles.statusCardCheckedIn]}>
-          <View style={styles.statusLeft}>
-            <Text style={styles.statusLabel}>Day status</Text>
-            <Text style={styles.statusValueCheckedIn}>Checked in {checkInTime}</Text>
-          </View>
-          <View style={styles.checkIconContainer}>
-            <Check size={18} color="#1E6B4B" />
-          </View>
-        </View>
-      )}
-
-      {dayStatus === 'day_ended' && (
-        <View style={[styles.statusCard, styles.statusCardDayEnded]}>
-          <View style={styles.statusLeft}>
-            <Text style={styles.statusLabel}>Day status</Text>
-            <Text style={styles.statusValueDayEnded}>Day ended</Text>
-          </View>
-          <View style={styles.dayEndedPill}>
-            <Text style={styles.dayEndedPillText}>Completed</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Active Dealer Visit Card */}
-      {(() => {
-        const activeVisit = visits.find(v => !v.check_out_time);
-        if (!activeVisit) return null;
-        return (
-          <View style={[styles.statusCard, styles.statusCardActiveVisit]}>
-            <View style={styles.statusLeft}>
-              <Text style={styles.statusLabel}>Active visit</Text>
-              <Text style={styles.statusValueActiveVisit}>
-                At {activeVisit.dealer_name || `Dealer #${activeVisit.dealer_id}`}
-              </Text>
-            </View>
-            <TouchableOpacity 
-              style={styles.actionBtnCheckOut}
-              onPress={() => {
-                const dl = { id: activeVisit.dealer_id, name: activeVisit.dealer_name };
-                onSelectDealer(dl, true);
-              }}
-            >
-              <Text style={styles.actionBtnText}>Check out</Text>
-            </TouchableOpacity>
-          </View>
-        );
-      })()}
-
-      {/* Stats Cards Row */}
-      <View style={styles.statsRow}>
-        <View style={[styles.statCard, styles.statCardBlue]}>
-          <Text style={[styles.statNumber, styles.textBlue]}>{visitsCount}</Text>
-          <Text style={styles.statLabel}>visits today</Text>
-        </View>
-
-        <View style={[styles.statCard, styles.statCardAmber]}>
-          <Text style={[styles.statNumber, styles.textAmber]}>{distanceTravelled}</Text>
-          <Text style={styles.statLabel}>travelled</Text>
-        </View>
-      </View>
-
-      {dayStatus === 'checked_in' && (
-        <TouchableOpacity 
-          style={styles.outlineButton}
-          onPress={onNavigateToDayCheckOut}
-        >
-          <Text style={styles.outlineButtonText}>Proceed to day check-out</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
-  );
-
-  const renderHistoryContent = () => (
-    <ScrollView 
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      <Text style={styles.tabHeading}>Visit history</Text>
-      <View style={styles.historyList}>
-        {visits.length === 0 ? (
-          <Text style={styles.emptyText}>No visits recorded yet today.</Text>
-        ) : (
-          [...visits].reverse().map((visit) => (
-            <View key={visit.id} style={styles.historyCard}>
-              <View style={styles.historyHeader}>
-                <Text style={styles.historyDealer}>{visit.dealer_name || `Dealer #${visit.dealer_id}`}</Text>
-                <Text style={styles.historyTime}>{formatTime(visit.check_in_time)}</Text>
-              </View>
-              <Text style={styles.historyDetails}>
-                {visit.check_out_time 
-                  ? `Checked out after ${visit.visit_duration_minutes || 0} min`
-                  : 'Currently checked in'
-                }
-              </Text>
-              {visit.justification_note && (
-                <Text style={styles.justificationNote}>
-                  Note: {visit.justification_note}
-                </Text>
-              )}
-            </View>
-          ))
-        )}
-      </View>
-    </ScrollView>
-  );
-
-  const renderProfileContent = () => (
-    <ScrollView 
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      <Text style={styles.tabHeading}>Your profile</Text>
-      <View style={styles.profileCard}>
-        <Text style={styles.profileName}>{employee?.name || 'User'}</Text>
-        <Text style={styles.profileRole}>{employee?.role === 'manager' ? 'Manager' : 'Field sales representative'}</Text>
-        <Text style={styles.profileDetail}>Username: {employee?.username}</Text>
-        <Text style={styles.profileDetail}>Region: {employee?.region}</Text>
-      </View>
-
-      <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
-        <LogOut size={16} color="#D8534A" style={styles.logoutIcon} />
-        <Text style={styles.logoutText}>Log out</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  const renderBody = () => {
-    switch (activeTab) {
-      case 'home': return renderHomeContent();
-      case 'dealers': return <DealerDirectoryScreen onSelectDealer={onSelectDealer} />;
-      case 'history': return renderHistoryContent();
-      case 'profile': return renderProfileContent();
-      default: return renderHomeContent();
-    }
-  };
+  const activeVisit = visits.find((v) => !v.check_out_time);
+  const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <View style={styles.container}>
-      {renderHeader()}
-      <View style={styles.body}>{renderBody()}</View>
-      <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('home')}>
-          <Home size={22} color={activeTab === 'home' ? '#0082D1' : '#8A8A8A'} />
-          <Text style={[styles.tabLabel, activeTab === 'home' && styles.tabLabelActive]}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('dealers')}>
-          <Store size={22} color={activeTab === 'dealers' ? '#0082D1' : '#8A8A8A'} />
-          <Text style={[styles.tabLabel, activeTab === 'dealers' && styles.tabLabelActive]}>Dealers</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('history')}>
-          <Clock size={22} color={activeTab === 'history' ? '#0082D1' : '#8A8A8A'} />
-          <Text style={[styles.tabLabel, activeTab === 'history' && styles.tabLabelActive]}>History</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('profile')}>
-          <User size={22} color={activeTab === 'profile' ? '#0082D1' : '#8A8A8A'} />
-          <Text style={[styles.tabLabel, activeTab === 'profile' && styles.tabLabelActive]}>Profile</Text>
-        </TouchableOpacity>
+    <View style={styles.screen}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.greeting}>{getGreeting()}</Text>
+        <Text style={styles.userName} numberOfLines={1}>{employee?.name || 'User'}</Text>
+        <View style={styles.metaRow}>
+          <View style={styles.rolePill}>
+            <Text style={styles.rolePillText}>{employee?.role === 'manager' ? 'Manager' : 'Field rep'}</Text>
+          </View>
+          <Text style={styles.dateText}>{todayLabel}</Text>
+        </View>
       </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchTodayState} tintColor={colors.primary} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {locationPermissionDenied && (
+          <FadeSlideIn>
+            <View style={styles.warningBanner}>
+              <AlertTriangle size={16} color={colors.dangerDark} style={styles.bannerIcon} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.warningBannerText}>
+                  Location permission is off — check-in/check-out won't work until it's re-enabled.
+                </Text>
+                {!locationPermissionCanAskAgain && (
+                  <Pressable onPress={onOpenLocationSettings} accessibilityRole="button">
+                    <Text style={styles.warningBannerLink}>Open Settings to re-enable</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          </FadeSlideIn>
+        )}
+
+        {pendingSyncCount > 0 && (
+          <FadeSlideIn>
+            <View style={styles.syncBanner}>
+              <RefreshCw size={14} color={colors.primary} style={styles.bannerIcon} />
+              <Text style={styles.syncBannerText}>
+                {pendingSyncCount} action{pendingSyncCount !== 1 ? 's' : ''} waiting to sync
+              </Text>
+            </View>
+          </FadeSlideIn>
+        )}
+
+        <FadeSlideIn delay={40}>
+          {dayStatus === 'not_checked_in' && (
+            <StatusCard
+              label="Day status"
+              value="Not checked in"
+              tone="neutral"
+              icon={<Clock size={22} color={colors.textSecondary} />}
+              onPress={() => navigation.navigate('DayCheckIn')}
+              action={
+                <View style={styles.smallActionBtn}>
+                  <Text style={styles.smallActionBtnText}>Check in</Text>
+                </View>
+              }
+            />
+          )}
+
+          {dayStatus === 'checked_in' && (
+            <StatusCard
+              label="Day status"
+              value={`Checked in ${checkInTime}`}
+              tone="success"
+              icon={<Check size={22} color={colors.successDark} />}
+            />
+          )}
+
+          {dayStatus === 'day_ended' && (
+            <StatusCard
+              label="Day status"
+              value="Day ended"
+              tone="warning"
+              icon={<Check size={22} color={colors.warningDark} />}
+              action={
+                <View style={[styles.smallActionBtn, styles.completedPill]}>
+                  <Text style={[styles.smallActionBtnText, { color: colors.warningDark }]}>Completed</Text>
+                </View>
+              }
+            />
+          )}
+        </FadeSlideIn>
+
+        {activeVisit && (
+          <FadeSlideIn delay={80}>
+            <StatusCard
+              label="Active visit"
+              value={`At ${activeVisit.dealer_name || `Dealer #${activeVisit.dealer_id}`}`}
+              tone="info"
+              icon={<MapPin size={22} color={colors.primary} />}
+              action={
+                <Pressable
+                  style={styles.checkOutBtn}
+                  onPress={() => {
+                    const dl = { id: activeVisit.dealer_id, name: activeVisit.dealer_name };
+                    onSelectDealer(dl, true, navigation);
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.checkOutBtnText}>Check out</Text>
+                </Pressable>
+              }
+            />
+          </FadeSlideIn>
+        )}
+
+        <FadeSlideIn delay={120}>
+          <Text style={styles.sectionLabel}>Today's summary</Text>
+          <View style={styles.summaryGrid}>
+            <SummaryCard
+              icon={<Store size={20} color={colors.primary} />}
+              value={visitsCount}
+              label="Visits today"
+              tone="primary"
+            />
+            <View style={{ width: spacing.md }} />
+            <SummaryCard
+              icon={<TrendingUp size={20} color={colors.warningDark} />}
+              value={distanceTravelled}
+              label="Distance travelled"
+              tone="warning"
+            />
+          </View>
+          <View style={[styles.summaryGrid, { marginTop: spacing.md }]}>
+            <SummaryCard
+              icon={<Timer size={20} color={colors.successDark} />}
+              value={formatDuration(workingMinutes)}
+              label="Working hours"
+              tone="success"
+            />
+            <View style={{ width: spacing.md }} />
+            <SummaryCard
+              icon={<MapPin size={20} color={colors.primary} />}
+              value={uniqueDealersVisited}
+              label="Dealers visited"
+              tone="primary"
+            />
+          </View>
+        </FadeSlideIn>
+
+        {dayStatus === 'checked_in' && (
+          <FadeSlideIn delay={160} style={{ marginTop: spacing.cardGap }}>
+            <PrimaryButton
+              title="Proceed to day check-out"
+              onPress={() => {
+                if (activeVisit) {
+                  // Guard preserved from the original flow: can't end the day
+                  // with an open dealer visit still running.
+                  return;
+                }
+                navigation.navigate('DayCheckOut');
+              }}
+              disabled={!!activeVisit}
+            />
+            {activeVisit && (
+              <Text style={styles.blockedHint}>
+                Check out from "{activeVisit.dealer_name || 'the dealer'}" first.
+              </Text>
+            )}
+          </FadeSlideIn>
+        )}
+
+        <FadeSlideIn delay={200} style={{ marginTop: spacing.xxl }}>
+          <Text style={styles.sectionLabel}>Quick actions</Text>
+          <Pressable
+            style={styles.quickAction}
+            onPress={() => navigation.navigate('Dealers')}
+            accessibilityRole="button"
+          >
+            <View style={styles.quickActionIcon}>
+              <Store size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.quickActionText}>Check in at a dealer</Text>
+            <ChevronRight size={18} color={colors.textMuted} />
+          </Pressable>
+          <Pressable
+            style={styles.quickAction}
+            onPress={() => navigation.navigate('History')}
+            accessibilityRole="button"
+          >
+            <View style={styles.quickActionIcon}>
+              <History size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.quickActionText}>View visit history</Text>
+            <ChevronRight size={18} color={colors.textMuted} />
+          </Pressable>
+        </FadeSlideIn>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  header: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 48, paddingBottom: 16, borderBottomWidth: 0.5, borderColor: '#E0E0E0' },
-  greeting: { fontSize: 12, color: '#8A8A8A' },
-  userName: { fontSize: 18, fontWeight: '500', color: '#434343', marginTop: 2 },
-  body: { flex: 1 },
-  scrollContent: { padding: 20 },
-  tabHeading: { fontSize: 20, fontWeight: '500', color: '#434343', marginBottom: 16 },
-  statusCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderWidth: 0.5, borderColor: '#E0E0E0' },
-  statusCardNotCheckedIn: { borderLeftWidth: 4, borderLeftColor: '#8A8A8A' },
-  statusCardCheckedIn: { borderLeftWidth: 4, borderLeftColor: '#4FD29F', backgroundColor: '#F4FBF8', borderColor: '#D4F3E6' },
-  statusCardDayEnded: { borderLeftWidth: 4, borderLeftColor: '#E9C03C', backgroundColor: '#FDF3E0', borderColor: '#FBEAD0' },
-  statusCardActiveVisit: { borderLeftWidth: 4, borderLeftColor: '#0082D1', backgroundColor: '#F2F9FD', borderColor: '#D0E3F0' },
-  statusLeft: { flex: 1 },
-  statusLabel: { fontSize: 12, color: '#8A8A8A', marginBottom: 4 },
-  statusValue: { fontSize: 16, fontWeight: '500', color: '#434343' },
-  statusValueCheckedIn: { fontSize: 16, fontWeight: '500', color: '#1E6B4B' },
-  statusValueDayEnded: { fontSize: 16, fontWeight: '500', color: '#8E6C0C' },
-  statusValueActiveVisit: { fontSize: 16, fontWeight: '500', color: '#0082D1' },
-  actionBtn: { backgroundColor: '#0082D1', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  actionBtnCheckOut: { backgroundColor: '#D8534A', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  actionBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '500' },
-  checkIconContainer: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 0.5, borderColor: '#4FD29F', justifyContent: 'center', alignItems: 'center' },
-  dayEndedPill: { backgroundColor: '#FDF3E0', borderWidth: 0.5, borderColor: '#E9C03C', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  dayEndedPillText: { fontSize: 11, fontWeight: '500', color: '#8E6C0C' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  statCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 0.5, borderColor: '#E0E0E0', padding: 16, alignItems: 'center' },
-  statCardBlue: { backgroundColor: '#F2F9FD', borderColor: '#D0E3F0', marginRight: 10 },
-  statCardAmber: { backgroundColor: '#FDF3E0', borderColor: '#FBEAD0', marginLeft: 10 },
-  statNumber: { fontSize: 22, fontWeight: '500', marginBottom: 4 },
-  textBlue: { color: '#0082D1' },
-  textAmber: { color: '#8E6C0C' },
-  statLabel: { fontSize: 12, color: '#8A8A8A', textAlign: 'center' },
-  outlineButton: { borderWidth: 0.5, borderColor: '#0082D1', borderRadius: 8, height: 44, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
-  outlineButtonText: { color: '#0082D1', fontSize: 14, fontWeight: '500' },
-  tabBar: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderTopWidth: 0.5, borderColor: '#E0E0E0', height: 56, paddingBottom: 6 },
-  tabItem: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 6 },
-  tabLabel: { fontSize: 10, color: '#8A8A8A', marginTop: 3 },
-  tabLabelActive: { color: '#0082D1', fontWeight: '500' },
-  historyList: { marginTop: 8 },
-  historyCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 0.5, borderColor: '#E0E0E0', padding: 16, marginBottom: 12 },
-  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  historyDealer: { fontSize: 14, fontWeight: '500', color: '#434343' },
-  historyTime: { fontSize: 12, color: '#8A8A8A' },
-  historyDetails: { fontSize: 12, color: '#8A8A8A' },
-  justificationNote: { fontSize: 12, color: '#D8534A', marginTop: 4, fontStyle: 'italic' },
-  profileCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 0.5, borderColor: '#E0E0E0', padding: 16, marginBottom: 20 },
-  profileName: { fontSize: 16, fontWeight: '500', color: '#434343', marginBottom: 2 },
-  profileRole: { fontSize: 13, color: '#8A8A8A', marginBottom: 12 },
-  profileDetail: { fontSize: 12, color: '#8A8A8A', marginBottom: 6 },
-  logoutButton: { flexDirection: 'row', height: 44, borderWidth: 0.5, borderColor: '#D8534A', backgroundColor: '#FBEAE9', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  logoutIcon: { marginRight: 8 },
-  logoutText: { color: '#D8534A', fontSize: 14, fontWeight: '500' },
-  emptyText: { color: '#8A8A8A', textAlign: 'center', marginTop: 20, fontSize: 14 }
+  screen: { flex: 1, backgroundColor: colors.background },
+  header: {
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.screenHorizontal,
+    paddingBottom: spacing.lg,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  greeting: { ...typography.caption, color: colors.textSecondary },
+  userName: { ...typography.sectionTitle, color: colors.text, marginTop: 2, fontSize: 22 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
+  rolePill: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    marginRight: spacing.sm,
+  },
+  rolePillText: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  dateText: { ...typography.caption, color: colors.textMuted },
+
+  scrollContent: {
+    padding: spacing.screenHorizontal,
+    paddingBottom: spacing.xxxl,
+  },
+
+  bannerIcon: { marginRight: spacing.sm },
+  warningBanner: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.dangerLight,
+    borderWidth: 1, borderColor: '#FECACA', borderRadius: 14, padding: spacing.md, marginBottom: spacing.cardGap,
+  },
+  warningBannerText: { ...typography.caption, color: colors.dangerDark, fontWeight: '600' },
+  warningBannerLink: { ...typography.caption, color: colors.dangerDark, fontWeight: '700', textDecorationLine: 'underline', marginTop: 4 },
+  syncBanner: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primaryLight,
+    borderWidth: 1, borderColor: '#DBEAFE', borderRadius: 14, padding: spacing.md, marginBottom: spacing.cardGap,
+  },
+  syncBannerText: { flex: 1, ...typography.caption, color: colors.primary, fontWeight: '600' },
+
+  smallActionBtn: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  smallActionBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+  completedPill: { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: '#FDE68A' },
+  checkOutBtn: { backgroundColor: colors.danger, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  checkOutBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+
+  sectionLabel: { ...typography.cardTitle, fontSize: 16, color: colors.text, marginBottom: spacing.md },
+  summaryGrid: { flexDirection: 'row' },
+
+  blockedHint: { ...typography.caption, color: colors.dangerDark, textAlign: 'center', marginTop: spacing.sm },
+
+  quickAction: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.border, padding: spacing.md, marginBottom: spacing.sm,
+  },
+  quickActionIcon: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight,
+    justifyContent: 'center', alignItems: 'center', marginRight: spacing.md,
+  },
+  quickActionText: { flex: 1, ...typography.body, color: colors.text, fontWeight: '600' },
 });

@@ -36,7 +36,7 @@ ALTER USER postgres PASSWORD 'postgres';
 
 ## Step 2 — Set your password in `.env`
 
-Open [.env](file:///c:/Users/sanja/OneDrive/Desktop/Winfomi/FIELD_SALES/backend/.env) and set:
+Open `.env` and set:
 ```
 DB_PASSWORD=your_actual_password
 ```
@@ -60,6 +60,22 @@ SELECT username, role FROM employees;
 
 ---
 
+## Step 3b — Google Maps API key (dealer geocoding)
+
+The manager dashboard's dealer-registration map, address search, and nearby-places
+lookup are backed by Google's Geocoding API + Places API (proxied through
+`geocode.routes.js` so the key never reaches the browser). To set this up:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a project and enable **Geocoding API** and **Places API** (billing must be enabled on the project — both stay within the free monthly quota for normal usage).
+2. Create an API key and set it in `backend/.env`:
+   ```
+   GOOGLE_MAPS_API_KEY=your_key_here
+   ```
+3. Optionally restrict the key to your server's IP in Cloud Console (it's never sent to a browser, so this is just extra hardening, not required).
+4. The web dashboard needs a **second**, separately-restricted key for the Maps JavaScript API itself — see `web/.env.example`.
+
+---
+
 ## Step 4 — Start the backend
 
 ```bash
@@ -74,7 +90,7 @@ Server starts at: **http://localhost:3001**
 
 ## Step 5 — Test with the .http file
 
-Open [fieldtrack.http](file:///c:/Users/sanja/OneDrive/Desktop/Winfomi/FIELD_SALES/backend/fieldtrack.http) in VS Code with the **REST Client** extension.
+Open `fieldtrack.http` in VS Code with the **REST Client** extension.
 
 **Test sequence:**
 1. Run `### Login as rep` → copy the `accessToken` value
@@ -103,11 +119,11 @@ Open [fieldtrack.http](file:///c:/Users/sanja/OneDrive/Desktop/Winfomi/FIELD_SAL
 - [x] `POST /api/attendance/check-in` — records GPS + creates attendance row
 - [x] `POST /api/attendance/check-out` — calculates `total_duration_minutes`
 - [x] `POST /api/visits/check-in` — Haversine `distance_from_previous_km`
-- [x] `POST /api/visits/check-out` — radius check + required justification if `out_of_radius`
+- [x] `POST /api/visits/check-out` — blocks outside dealer radius unless GPS matches check-in (≤20m) or a ≥20-char justification is given; logs an exception
 - [x] `GET /api/dealers` — with `?search=` param
 - [x] `GET /api/attendance/today` — restores full day state
 - [x] **9/9 Haversine unit tests passing**
-- [x] Radius tolerance configurable via `CHECKIN_RADIUS_METERS` env var OR `dealers.radius_meters` column
+- [x] Radius tolerance configurable system-wide via `CHECKIN_RADIUS_METERS` env var
 
 ### Stage 10 — Dashboard API
 - [x] `GET /api/dashboard/today` — manager-only, all reps' live status + last coordinates

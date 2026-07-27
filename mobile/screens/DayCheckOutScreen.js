@@ -1,15 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
-import { MapPin } from 'lucide-react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, Alert, ScrollView } from 'react-native';
+import { Clock, TrendingUp } from 'lucide-react-native';
 import { getCurrentLocation, getReadableAddress } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { AppHeader, LocationCard, PrimaryButton, Card, FadeSlideIn } from '../src/components';
+import { colors, typography, spacing } from '../src/theme';
 
-export default function DayCheckOutScreen({ attendance, onCheckOut, onCancel }) {
+export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }) {
   const [loading, setLoading] = useState(false);
   const [coords, setCoords] = useState(null);
   const [address, setAddress] = useState('');
   const [locationStatus, setLocationStatus] = useState('');
+  // Guards against setState after the user navigates away mid-acquisition.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
   useEffect(() => {
     acquireLocation();
@@ -18,10 +23,12 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, onCancel }) 
   const acquireLocation = async () => {
     setLocationStatus('Getting GPS location...');
     const loc = await getCurrentLocation();
+    if (!isMountedRef.current) return;
     if (loc) {
       setCoords(loc);
       setLocationStatus('Resolving address...');
       const addr = await getReadableAddress(loc.lat, loc.lng);
+      if (!isMountedRef.current) return;
       setAddress(addr);
       setLocationStatus('');
     } else {
@@ -87,66 +94,50 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, onCancel }) 
     : '0.0';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Day check-out</Text>
+    <View style={styles.screen}>
+      <AppHeader title="Day check-out" onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={styles.container}>
+        <FadeSlideIn>
+          <Card style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLeft}>
+                <Clock size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Check-in</Text>
+              </View>
+              <Text style={styles.summaryValue}>{formatTime(attendance?.check_in_time)}</Text>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLeft}>
+                <TrendingUp size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Distance travelled</Text>
+              </View>
+              <Text style={styles.summaryValue}>{distanceKm} km</Text>
+            </View>
+          </Card>
 
-      {/* Summary Card */}
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Check-in</Text>
-          <Text style={styles.summaryValue}>{formatTime(attendance?.check_in_time)}</Text>
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Distance travelled</Text>
-          <Text style={styles.summaryValue}>{distanceKm} km</Text>
-        </View>
-      </View>
+          <LocationCard address={address} coords={coords} statusMessage={locationStatus} />
 
-      {/* Location Status Box */}
-      <View style={styles.locationBox}>
-        <MapPin size={18} color={coords ? '#0082D1' : '#8A8A8A'} style={{ marginRight: 8 }} />
-        <Text style={styles.locationText}>
-          {address ? address : coords
-            ? `GPS: ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`
-            : locationStatus || 'Acquiring location...'}
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.primaryButton, (!coords || loading) && styles.primaryButtonDisabled]}
-        onPress={handleCheckOut}
-        disabled={!coords || loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
-        ) : (
-          <Text style={styles.primaryButtonText}>Check out for the day</Text>
-        )}
-      </TouchableOpacity>
-
-      {onCancel && (
-        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-      )}
+          <PrimaryButton
+            title="Check out for the day"
+            onPress={handleCheckOut}
+            disabled={!coords}
+            loading={loading}
+            variant="danger"
+          />
+        </FadeSlideIn>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA', padding: 20, justifyContent: 'center' },
-  heading: { fontSize: 22, fontWeight: '500', color: '#434343', marginBottom: 20 },
-  summaryCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 0.5, borderColor: '#E0E0E0', padding: 16, marginBottom: 16 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  summaryLabel: { fontSize: 14, color: '#8A8A8A' },
-  summaryValue: { fontSize: 14, fontWeight: '500', color: '#434343' },
-  divider: { height: 0.5, backgroundColor: '#E0E0E0' },
-  locationBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 12, borderWidth: 0.5, borderColor: '#E0E0E0', marginBottom: 20 },
-  locationText: { fontSize: 13, color: '#434343', flex: 1 },
-  primaryButton: { height: 48, backgroundColor: '#0082D1', borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  primaryButtonDisabled: { backgroundColor: '#A0C8E8' },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500' },
-  cancelButton: { height: 44, borderWidth: 0.5, borderColor: '#D0D0D0', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  cancelButtonText: { color: '#8A8A8A', fontSize: 14 },
+  screen: { flex: 1, backgroundColor: colors.background },
+  container: { flexGrow: 1, padding: spacing.screenHorizontal, justifyContent: 'center' },
+  summaryCard: { marginBottom: spacing.cardGap },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm },
+  summaryLeft: { flexDirection: 'row', alignItems: 'center' },
+  summaryLabel: { ...typography.body, color: colors.textSecondary },
+  summaryValue: { ...typography.bodyMedium, color: colors.text },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
 });

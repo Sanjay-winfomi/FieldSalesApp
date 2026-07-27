@@ -5,8 +5,28 @@
  * requireRole  — factory for role-based access control
  */
 const jwt = require('jsonwebtoken');
+const pool = require('../db/pool');
 
-function requireAuth(req, res, next) {
+// A deactivated employee's still-valid access token (up to JWT_EXPIRES_IN,
+// default 8h) would otherwise keep working until it naturally expires — a
+// manager deactivating a terminated/compromised account expects it to stop
+// working immediately, not hours later. Cached briefly per-token to avoid a
+// DB round trip on every single request.
+const activeStatusCache = new Map();
+const ACTIVE_STATUS_CACHE_TTL_MS = 30 * 1000;
+
+async function isEmployeeActive(employeeId) {
+  const cached = activeStatusCache.get(employeeId);
+  if (cached && Date.now() - cached.time < ACTIVE_STATUS_CACHE_TTL_MS) {
+    return cached.isActive;
+  }
+  const result = await pool.query('SELECT is_active FROM employees WHERE id = $1', [employeeId]);
+  const isActive = result.rows.length > 0 && result.rows[0].is_active === true;
+  activeStatusCache.set(employeeId, { isActive, time: Date.now() });
+  return isActive;
+}
+
+async function requireAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing or malformed Authorization header' });
@@ -15,6 +35,12 @@ function requireAuth(req, res, next) {
   const token = authHeader.slice(7); // strip "Bearer "
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    const active = await isEmployeeActive(payload.sub);
+    if (!active) {
+      return res.status(401).json({ error: 'Account is deactivated' });
+    }
+
     req.employee = {
       id:       payload.sub,
       role:     payload.role,

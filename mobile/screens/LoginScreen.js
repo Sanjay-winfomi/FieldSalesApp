@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
+import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Eye, EyeOff } from 'lucide-react-native';
+import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../src/services/api';
+import { PrimaryButton, TextField, FadeSlideIn } from '../src/components';
+import { colors, spacing, typography } from '../src/theme';
 
 export default function LoginScreen({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -20,19 +24,19 @@ export default function LoginScreen({ onLoginSuccess }) {
     setLoading(true);
     try {
       const response = await api.post('/auth/login', { username, password });
-      
+
       const { accessToken, refreshToken, employee } = response.data;
-      
+
       // Store tokens securely, store display metadata in normal AsyncStorage
       await SecureStore.setItemAsync('accessToken', accessToken);
       await SecureStore.setItemAsync('refreshToken', refreshToken);
       await AsyncStorage.setItem('employeeData', JSON.stringify(employee));
-      
+
       if (onLoginSuccess) onLoginSuccess();
     } catch (error) {
       console.error('Login error:', error);
       Alert.alert(
-        'Login Failed', 
+        'Login Failed',
         error.response?.data?.error || 'Could not connect to the server. Please try again later.'
       );
     } finally {
@@ -41,145 +45,147 @@ export default function LoginScreen({ onLoginSuccess }) {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.heading}>Log in</Text>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + spacing.xxl, paddingBottom: insets.bottom + spacing.xxl }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <FadeSlideIn>
+          <View style={styles.logoMark}>
+            <View style={styles.logoRow}>
+              <View style={[styles.logoBlock, { backgroundColor: colors.success }]} />
+              <View style={[styles.logoBlock, { backgroundColor: colors.warning }]} />
+            </View>
+            <View style={styles.logoRow}>
+              <View style={[styles.logoBlock, { backgroundColor: colors.primary }]} />
+              <View style={[styles.logoBlock, { backgroundColor: colors.text }]} />
+            </View>
+          </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            style={styles.input}
-            value={username}
-            onChangeText={setUsername}
-            placeholder="Enter your username"
-            placeholderTextColor="#A0A0A0"
-            autoCapitalize="none"
-          />
-        </View>
+          <Text style={styles.brand}>FieldTrack</Text>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.passwordContainer}>
-            <TextInput
-              style={styles.passwordInput}
+          <View style={styles.card}>
+            <Text style={styles.heading}>Log in</Text>
+            <Text style={styles.subheading}>Enter your credentials to continue</Text>
+
+            <TextField
+              label="Username"
+              value={username}
+              onChangeText={setUsername}
+              placeholder="Enter your username"
+              autoCapitalize="none"
+              icon={<User size={18} color={colors.textMuted} />}
+              style={styles.field}
+            />
+
+            <TextField
+              label="Password"
               value={password}
               onChangeText={setPassword}
               placeholder="Enter your password"
-              placeholderTextColor="#A0A0A0"
-              secureTextEntry={!showPassword}
               autoCapitalize="none"
+              secureTextEntry={!showPassword}
+              icon={<Lock size={18} color={colors.textMuted} />}
+              rightAccessory={
+                <View
+                  onTouchEnd={() => setShowPassword((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff size={20} color={colors.textMuted} />
+                  ) : (
+                    <Eye size={20} color={colors.textMuted} />
+                  )}
+                </View>
+              }
+              style={styles.field}
             />
-            <TouchableOpacity 
-              style={styles.eyeButton} 
-              onPress={() => setShowPassword(!showPassword)}
-            >
-              {showPassword ? (
-                <EyeOff size={20} color="#8A8A8A" />
-              ) : (
-                <Eye size={20} color="#8A8A8A" />
-              )}
-            </TouchableOpacity>
+
+            <PrimaryButton
+              title="Log in"
+              onPress={handleLogin}
+              loading={loading}
+              style={styles.submitButton}
+            />
+
+            <Text style={styles.helperText}>
+              Field representatives and managers use the same login screen; role decides where you land.
+            </Text>
           </View>
-        </View>
-
-        <TouchableOpacity 
-          style={styles.primaryButton}
-          onPress={handleLogin}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Log in</Text>
-          )}
-        </TouchableOpacity>
-
-        <Text style={styles.helperText}>
-          Field representatives and managers use the same login screen; role decides where you land.
-        </Text>
-      </View>
-    </View>
+        </FadeSlideIn>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: spacing.screenHorizontal,
+  },
+  logoMark: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    overflow: 'hidden',
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    flex: 1,
+  },
+  logoBlock: {
+    flex: 1,
+  },
+  brand: {
+    ...typography.sectionTitle,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.xxl,
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 24,
-    borderWidth: 0.5,
-    borderColor: '#E0E0E0',
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   heading: {
-    fontSize: 22,
-    fontWeight: '500',
-    color: '#434343',
-    marginBottom: 24,
+    ...typography.pageTitle,
+    fontSize: 24,
+    color: colors.text,
+    marginBottom: spacing.xs,
   },
-  inputGroup: {
-    marginBottom: 16,
+  subheading: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.xxl,
   },
-  label: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#8A8A8A',
-    marginBottom: 6,
+  field: {
+    marginBottom: spacing.lg,
   },
-  input: {
-    height: 48,
-    borderWidth: 0.5,
-    borderColor: '#D0D0D0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#434343',
-    backgroundColor: '#FFFFFF',
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 48,
-    borderWidth: 0.5,
-    borderColor: '#D0D0D0',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-  },
-  passwordInput: {
-    flex: 1,
-    height: '100%',
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#434343',
-  },
-  eyeButton: {
-    padding: 10,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  primaryButton: {
-    height: 48,
-    backgroundColor: '#0082D1',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
+  submitButton: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
   helperText: {
-    fontSize: 12,
-    color: '#A0A0A0',
+    ...typography.caption,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },

@@ -10,3 +10,11 @@ web-build/
 .idea/
 .DS_Store
 walkthrough.md
+
+# Business/client documents and personal scratch notes — not part of the
+# app codebase, and Documents/ has historically included data exports with
+# real employee names/attendance records that must never reach a shared repo.
+Documents/
+.claude/
+Commands.txt
+db.txt

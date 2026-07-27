@@ -4,7 +4,9 @@
  * GET /api/dashboard/today — manager-only: all reps' current status for today
  */
 const express = require('express');
+const logger = require('../utils/logger');
 const pool    = require('../db/pool');
+const { isCurrentBusinessDay } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -33,7 +35,7 @@ router.get('/today', async (req, res) => {
       FROM employees e
       LEFT JOIN attendance a
         ON a.employee_id = e.id
-        AND DATE(a.check_in_time AT TIME ZONE 'Asia/Kolkata') = CURRENT_DATE
+        AND ${isCurrentBusinessDay('a.check_in_time')}
       LEFT JOIN LATERAL (
         SELECT cv.check_in_time, cv.check_out_time, cv.check_in_lat, cv.check_in_lng,
                d.name AS dealer_name
@@ -91,7 +93,7 @@ router.get('/today', async (req, res) => {
 
     return res.json({ reps, generated_at: new Date().toISOString() });
   } catch (err) {
-    console.error('Dashboard error:', err);
+    logger.error('Dashboard error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -99,6 +101,9 @@ router.get('/today', async (req, res) => {
 // GET /api/dashboard/rep/:id/today
 router.get('/rep/:id/today', async (req, res) => {
   const repId = parseInt(req.params.id);
+  if (!Number.isInteger(repId)) {
+    return res.status(400).json({ error: 'Invalid rep id' });
+  }
 
   try {
     // 1. Fetch representative info
@@ -120,7 +125,7 @@ router.get('/rep/:id/today', async (req, res) => {
               total_distance_km, total_duration_minutes, sync_status
        FROM attendance
        WHERE employee_id = $1
-         AND DATE(check_in_time AT TIME ZONE 'Asia/Kolkata') = CURRENT_DATE
+         AND ${isCurrentBusinessDay('check_in_time')}
        LIMIT 1`,
       [repId]
     );
@@ -151,7 +156,7 @@ router.get('/rep/:id/today', async (req, res) => {
       visits: visitsResult.rows
     });
   } catch (err) {
-    console.error('Fetch rep details error:', err);
+    logger.error('Fetch rep details error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

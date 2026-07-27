@@ -6,48 +6,68 @@
  * GET  /api/attendance/today      — restore state on app reopen
  */
 const express = require('express');
+const logger = require('../utils/logger');
 const pool    = require('../db/pool');
+const { logDayCheckIn, logDayCheckOut } = require('../utils/activityLog');
+const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
+
+// Coerces lat/lng to finite numbers within valid geographic ranges, or returns
+// null. Guards against string/NaN/out-of-range payloads reaching the DB or
+// activityLog's `.toFixed()` calls (which throw on non-numbers and would turn
+// an already-committed check-in into a false 500 for the client).
+function parseCoord(value, min, max) {
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/attendance/check-in
 // ──────────────────────────────────────────────────────────────────────────────
 router.post('/check-in', async (req, res) => {
-  const { lat, lng } = req.body;
   const employeeId = req.employee.id;
 
-  if (lat === undefined || lng === undefined) {
+  if (req.body.lat === undefined || req.body.lng === undefined) {
     return res.status(400).json({ error: 'lat and lng are required' });
+  }
+  const lat = parseCoord(req.body.lat, -90, 90);
+  const lng = parseCoord(req.body.lng, -180, 180);
+  if (lat === null || lng === null) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
   try {
-    // Prevent a second check-in on the same day
-    const existing = await pool.query(
-      `SELECT id FROM attendance
-       WHERE employee_id = $1
-         AND DATE(check_in_time AT TIME ZONE 'Asia/Kolkata') = CURRENT_DATE
-       LIMIT 1`,
-      [employeeId]
-    );
-
-    if (existing.rows.length > 0) {
-      return res.status(409).json({
-        error: 'Already checked in today',
-        attendance_id: existing.rows[0].id,
-      });
-    }
-
+    // Atomic guard against a second check-in on the same business day: the
+    // unique index on (employee_id, business_date) makes two concurrent
+    // check-in requests (double-tap, retry-on-timeout) resolve to exactly one
+    // row, instead of a separate SELECT-then-INSERT which leaves a race window.
     const result = await pool.query(
-      `INSERT INTO attendance (employee_id, check_in_time, check_in_lat, check_in_lng, sync_status)
-       VALUES ($1, NOW(), $2, $3, 'synced')
+      `INSERT INTO attendance (employee_id, business_date, check_in_time, check_in_lat, check_in_lng, sync_status)
+       VALUES ($1, ${businessDateExpr('NOW()')}, NOW(), $2, $3, 'synced')
+       ON CONFLICT (employee_id, business_date) WHERE business_date IS NOT NULL DO NOTHING
        RETURNING id, check_in_time, check_in_lat, check_in_lng`,
       [employeeId, lat, lng]
     );
 
+    if (result.rows.length === 0) {
+      const existing = await pool.query(
+        `SELECT id FROM attendance
+         WHERE employee_id = $1 AND business_date = ${businessDateExpr('NOW()')}
+         LIMIT 1`,
+        [employeeId]
+      );
+      return res.status(409).json({
+        error: 'Already checked in today',
+        attendance_id: existing.rows[0]?.id,
+      });
+    }
+
+    logDayCheckIn(req.employee.username, lat, lng);
     return res.status(201).json({ attendance: result.rows[0] });
   } catch (err) {
-    console.error('Attendance check-in error:', err);
+    logger.error('Attendance check-in error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -56,16 +76,21 @@ router.post('/check-in', async (req, res) => {
 // POST /api/attendance/check-out
 // ──────────────────────────────────────────────────────────────────────────────
 router.post('/check-out', async (req, res) => {
-  const { attendance_id, lat, lng } = req.body;
+  const { attendance_id } = req.body;
   const employeeId = req.employee.id;
 
-  if (!attendance_id || lat === undefined || lng === undefined) {
+  if (!attendance_id || req.body.lat === undefined || req.body.lng === undefined) {
     return res.status(400).json({ error: 'attendance_id, lat, and lng are required' });
+  }
+  const lat = parseCoord(req.body.lat, -90, 90);
+  const lng = parseCoord(req.body.lng, -180, 180);
+  if (lat === null || lng === null) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
   try {
     const existing = await pool.query(
-      `SELECT id, check_in_time, total_distance_km
+      `SELECT id, check_in_time, check_out_time, total_distance_km
        FROM attendance
        WHERE id = $1 AND employee_id = $2`,
       [attendance_id, employeeId]
@@ -78,6 +103,15 @@ router.post('/check-out', async (req, res) => {
     const att = existing.rows[0];
     if (!att.check_in_time) {
       return res.status(400).json({ error: 'No check-in time recorded' });
+    }
+    if (att.check_out_time) {
+      // Reconciliation, not a dead end: a retried/offline-queued check-out
+      // racing an already-succeeded one shouldn't be silently dropped by the
+      // client — return the authoritative record so it can adopt server truth.
+      return res.status(409).json({
+        error: 'Already checked out today',
+        attendance: { id: att.id, check_out_time: att.check_out_time },
+      });
     }
 
     const checkInTime  = new Date(att.check_in_time);
@@ -101,6 +135,7 @@ router.post('/check-out', async (req, res) => {
       [attendance_id]
     );
 
+    logDayCheckOut(req.employee.username, durationMins, result.rows[0].total_distance_km);
     return res.json({
       attendance: result.rows[0],
       summary: {
@@ -110,7 +145,7 @@ router.post('/check-out', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Attendance check-out error:', err);
+    logger.error('Attendance check-out error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -128,7 +163,7 @@ router.get('/today', async (req, res) => {
               total_distance_km, total_duration_minutes, sync_status
        FROM attendance
        WHERE employee_id = $1
-         AND DATE(check_in_time AT TIME ZONE 'Asia/Kolkata') = CURRENT_DATE
+         AND ${isCurrentBusinessDay('check_in_time')}
        LIMIT 1`,
       [employeeId]
     );
@@ -141,9 +176,11 @@ router.get('/today', async (req, res) => {
 
     const visitsResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
+              d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters,
               cv.check_in_time, cv.check_out_time,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
-              cv.out_of_radius, cv.justification_note, cv.sync_status
+              cv.out_of_radius, cv.interrupted, cv.interrupted_at,
+              cv.justification_note, cv.sync_status
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
        WHERE cv.attendance_id = $1
@@ -153,7 +190,100 @@ router.get('/today', async (req, res) => {
 
     return res.json({ attendance: att, visits: visitsResult.rows });
   } catch (err) {
-    console.error('GET today error:', err);
+    logger.error('GET today error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/attendance — generic list, date-range filterable.
+// Reps see only their own records; managers may filter by ?employee_id=.
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/', async (req, res) => {
+  const { from, to, employee_id } = req.query;
+  const isManager = req.employee.role === 'manager';
+
+  try {
+    const conditions = [];
+    const params = [];
+
+    if (isManager) {
+      // Managers see everyone by default, or one rep if employee_id is given.
+      if (employee_id) {
+        params.push(parseInt(employee_id));
+        conditions.push(`a.employee_id = $${params.length}`);
+      }
+    } else {
+      // Reps only ever see their own records, regardless of any employee_id param.
+      params.push(req.employee.id);
+      conditions.push(`a.employee_id = $${params.length}`);
+    }
+
+    if (from) {
+      params.push(from);
+      conditions.push(`a.check_in_time >= $${params.length}`);
+    }
+    if (to) {
+      params.push(to);
+      conditions.push(`a.check_in_time <= $${params.length}::date + INTERVAL '1 day'`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `SELECT a.id, a.employee_id, e.name AS employee_name,
+              a.check_in_time, a.check_in_lat, a.check_in_lng,
+              a.check_out_time, a.check_out_lat, a.check_out_lng,
+              a.total_distance_km, a.total_duration_minutes, a.sync_status
+       FROM attendance a
+       JOIN employees e ON e.id = a.employee_id
+       ${whereClause}
+       ORDER BY a.check_in_time DESC
+       LIMIT 1000`,
+      params
+    );
+
+    return res.json({ attendance: result.rows });
+  } catch (err) {
+    logger.error('GET /api/attendance error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/attendance/:id
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid attendance id' });
+  }
+  const isManager = req.employee.role === 'manager';
+
+  try {
+    const result = await pool.query(
+      `SELECT a.id, a.employee_id, e.name AS employee_name,
+              a.check_in_time, a.check_in_lat, a.check_in_lng,
+              a.check_out_time, a.check_out_lat, a.check_out_lng,
+              a.total_distance_km, a.total_duration_minutes, a.sync_status
+       FROM attendance a
+       JOIN employees e ON e.id = a.employee_id
+       WHERE a.id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance record not found' });
+    }
+
+    const record = result.rows[0];
+    if (!isManager && record.employee_id !== req.employee.id) {
+      return res.status(403).json({ error: 'Not authorized to view this record' });
+    }
+
+    return res.json({ attendance: record });
+  } catch (err) {
+    logger.error('GET /api/attendance/:id error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

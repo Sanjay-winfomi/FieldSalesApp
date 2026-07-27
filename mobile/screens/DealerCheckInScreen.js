@@ -1,15 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
-import { Store, Check, AlertTriangle, MapPin } from 'lucide-react-native';
-import { getCurrentLocation, getReadableAddress } from '../src/services/location';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Alert, ScrollView } from 'react-native';
+import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { AppHeader, GPSStatusCard, PrimaryButton, TextField, FadeSlideIn } from '../src/components';
+import { colors, spacing } from '../src/theme';
 
-export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onCancel }) {
+const MIN_REASON_LENGTH = 20;
+
+export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, navigation }) {
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [coords, setCoords] = useState(null);
   const [address, setAddress] = useState('');
+  const [reason, setReason] = useState('');
+  const [reasonRequired, setReasonRequired] = useState(null);
+  // Guards against setState after the user navigates away mid-acquisition.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
   useEffect(() => {
     acquireLocation();
@@ -18,10 +26,12 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onC
   const acquireLocation = async () => {
     setLocationStatus('Getting GPS location...');
     const loc = await getCurrentLocation();
+    if (!isMountedRef.current) return;
     if (loc) {
       setCoords(loc);
       setLocationStatus('Resolving address...');
       const addr = await getReadableAddress(loc.lat, loc.lng);
+      if (!isMountedRef.current) return;
       setAddress(addr);
       setLocationStatus('');
     } else {
@@ -46,6 +56,8 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onC
         dealer_id: dealer.id,
         lat: coords.lat,
         lng: coords.lng,
+        accuracy_meters: coords.accuracyMeters,
+        reason: reason.trim() || undefined,
       };
 
       let visitData = null;
@@ -57,10 +69,11 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onC
       } catch (error) {
         if (!error.response) {
           // Network error — enqueue and proceed
-          await enqueueAction('post', '/visits/check-in', payload);
+          const localId = 'offline-' + Date.now();
+          await enqueueAction('post', '/visits/check-in', payload, { localId, resolves: 'visit' });
           Alert.alert('Offline Mode', 'Dealer check-in saved locally and will sync when online.');
           visitData = {
-            id: 'offline-' + Date.now(),
+            id: localId,
             check_in_time: new Date().toISOString(),
             dealer_id: dealer.id,
             dealer_name: dealer.name,
@@ -68,6 +81,12 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onC
             check_in_lng: coords.lng,
             within_radius: true,
           };
+        } else if (error.response.data?.error === 'reason_required') {
+          setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
+          return;
+        } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
+          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to check in. Move to an open area for a stronger signal.');
+          return;
         } else {
           throw error;
         }
@@ -84,72 +103,53 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, onC
     }
   };
 
+  const accuracyOk = !!coords && coords.accuracyMeters != null && coords.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS;
+  const accuracyMessage = coords && !accuracyOk
+    ? `GPS accuracy is ±${Math.round(coords.accuracyMeters)}m — move to an open area for a stronger signal.`
+    : locationStatus;
+  const needsReason = !!reasonRequired;
+  const reasonOk = reason.trim().length >= MIN_REASON_LENGTH;
+
   const dealerName = dealer?.name || 'Selected Dealer';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Dealer check-in</Text>
-      <Text style={styles.subtitle}>{dealerName}</Text>
+    <View style={styles.screen}>
+      <AppHeader title="Dealer check-in" subtitle={dealerName} onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={styles.container}>
+        <FadeSlideIn>
+          <GPSStatusCard
+            address={address}
+            coords={coords}
+            statusMessage={accuracyMessage}
+            accuracyMeters={coords?.accuracyMeters}
+          />
 
-      {/* Location Placeholder */}
-      <View style={styles.storePlaceholder}>
-        <View style={styles.storeCircle}>
-          {coords ? <Store size={32} color="#0082D1" /> : <MapPin size={32} color="#8A8A8A" />}
-        </View>
-        <Text style={styles.storeText}>
-          {address ? address : coords ? `GPS: ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'Acquiring location...'}
-        </Text>
-        {locationStatus ? (
-          <Text style={styles.locationStatus}>{locationStatus}</Text>
-        ) : null}
-      </View>
+          {needsReason && (
+            <TextField
+              label={`You're ~${Math.round(reasonRequired.distanceMeters)}m from the dealer. Enter a reason (min ${MIN_REASON_LENGTH} characters) to continue.`}
+              value={reason}
+              onChangeText={setReason}
+              placeholder="e.g. Dealer requested meeting at nearby warehouse"
+              style={styles.reasonField}
+            />
+          )}
 
-      {/* Radius Status Row (shown after acquiring coords) */}
-      {coords && (
-        <View style={styles.statusRow}>
-          <View style={styles.checkCircle}>
-            <Check size={16} color="#1E6B4B" />
-          </View>
-          <Text style={styles.statusText}>Location acquired — ready to check in</Text>
-        </View>
-      )}
-
-      {/* Primary Action */}
-      <TouchableOpacity
-        style={[styles.primaryButton, (!coords || loading) && styles.primaryButtonDisabled]}
-        onPress={handleCheckIn}
-        disabled={!coords || loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
-        ) : (
-          <Text style={styles.primaryButtonText}>Check in at dealer</Text>
-        )}
-      </TouchableOpacity>
-
-      {onCancel && (
-        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-      )}
+          <PrimaryButton
+            title={needsReason ? 'Submit reason & check in' : 'Check in at dealer'}
+            onPress={handleCheckIn}
+            disabled={!coords || !accuracyOk || (needsReason && !reasonOk)}
+            loading={loading}
+            style={styles.submitButton}
+          />
+        </FadeSlideIn>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA', padding: 20, justifyContent: 'center' },
-  heading: { fontSize: 22, fontWeight: '500', color: '#434343', marginBottom: 4 },
-  subtitle: { fontSize: 16, color: '#8A8A8A', marginBottom: 24 },
-  storePlaceholder: { height: 200, backgroundColor: '#F2F9FD', borderRadius: 12, borderWidth: 0.5, borderColor: '#D0E3F0', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-  storeCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginBottom: 10, borderWidth: 0.5, borderColor: '#0082D1' },
-  storeText: { fontSize: 12, color: '#8A8A8A' },
-  locationStatus: { fontSize: 12, color: '#0082D1', marginTop: 6 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F4FBF8', padding: 16, borderRadius: 12, borderWidth: 0.5, borderColor: '#4FD29F', marginBottom: 24 },
-  checkCircle: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF', borderWidth: 0.5, borderColor: '#4FD29F', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  statusText: { fontSize: 14, fontWeight: '500', color: '#1E6B4B' },
-  primaryButton: { height: 48, backgroundColor: '#0082D1', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  primaryButtonDisabled: { backgroundColor: '#A0C8E8' },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500' },
-  cancelButton: { height: 44, borderWidth: 0.5, borderColor: '#D0D0D0', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  cancelButtonText: { color: '#8A8A8A', fontSize: 14 },
+  screen: { flex: 1, backgroundColor: colors.background },
+  container: { flexGrow: 1, padding: spacing.screenHorizontal, justifyContent: 'center' },
+  reasonField: { marginBottom: spacing.buttonMargin },
+  submitButton: { marginTop: spacing.buttonMargin },
 });

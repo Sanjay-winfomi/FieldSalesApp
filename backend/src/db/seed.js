@@ -90,10 +90,17 @@ async function seed() {
   ];
 
   for (const dealer of dealers) {
+    // dealers has no unique constraint to hang an ON CONFLICT off of (unlike
+    // employees.username), so re-running this script would otherwise insert
+    // a fresh duplicate row every time — check by name first instead.
+    const existing = await client.query('SELECT id FROM dealers WHERE name = $1', [dealer.name]);
+    if (existing.rows.length > 0) {
+      console.log(`- Dealer already exists: ${dealer.name}`);
+      continue;
+    }
     await client.query(
       `INSERT INTO dealers (name, address, latitude, longitude, contact_person, contact_phone)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT DO NOTHING`,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         dealer.name,
         dealer.address,
