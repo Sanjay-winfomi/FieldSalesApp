@@ -1,0 +1,67 @@
+databases:
+  - name: fieldtrack-db
+    plan: free
+    databaseName: fieldtrack
+    user: fieldtrack
+
+services:
+  - type: web
+    name: fieldtrack-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    # Applies schema.sql (safe to re-run — CREATE TABLE IF NOT EXISTS) before
+    # every boot, then starts the API. Seeding is deliberately NOT run here —
+    # do that once by hand via the Render shell (`npm run seed`) so restarts
+    # don't matter, but it's also not repeated on every deploy.
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: fieldtrack-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: fieldtrack-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: fieldtrack-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: fieldtrack-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: fieldtrack-db
+          property: password
+      - key: DB_SSL
+        value: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: TRUST_PROXY_HOPS
+        value: 1
+      # Set this once you know your Vercel URL, e.g. https://your-app.vercel.app
+      # — comma-separated if there's more than one (preview + production).
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: CHECKIN_RADIUS_METERS
+        value: 200
+      - key: GPS_ACCURACY_THRESHOLD_METERS
+        value: 30
+      - key: CHECKIN_MATCH_TOLERANCE_METERS
+        value: 20
+      - key: DAY_BOUNDARY_HOUR
+        value: 5
+      # Server-side only — set your own key/leave blank if geocoding isn't needed yet.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false

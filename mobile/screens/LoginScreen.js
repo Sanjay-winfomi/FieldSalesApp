@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,12 +10,20 @@ import { colors, spacing, typography } from '../src/theme';
 
 const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 
+// After this long waiting on a login response, it's more likely the free-tier
+// backend is waking from an idle sleep than that something is actually stuck
+// — surfacing that explains the delay instead of leaving a bare spinner that
+// looks identical to a hang.
+const COLD_START_HINT_DELAY_MS = 4000;
+
 export default function LoginScreen({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showColdStartHint, setShowColdStartHint] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const insets = useSafeAreaInsets();
+  const coldStartTimerRef = useRef(null);
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -24,6 +32,7 @@ export default function LoginScreen({ onLoginSuccess }) {
     }
 
     setLoading(true);
+    coldStartTimerRef.current = setTimeout(() => setShowColdStartHint(true), COLD_START_HINT_DELAY_MS);
     try {
       const response = await api.post('/auth/login', { username, password });
 
@@ -42,6 +51,8 @@ export default function LoginScreen({ onLoginSuccess }) {
         error.response?.data?.error || 'Could not connect to the server. Please try again later.'
       );
     } finally {
+      clearTimeout(coldStartTimerRef.current);
+      setShowColdStartHint(false);
       setLoading(false);
     }
   };
@@ -103,6 +114,12 @@ export default function LoginScreen({ onLoginSuccess }) {
               style={styles.submitButton}
             />
 
+            {showColdStartHint && (
+              <Text style={styles.coldStartHint}>
+                Starting server... This may take up to a minute on the first request.
+              </Text>
+            )}
+
             <Text style={styles.helperText}>
               Field representatives and managers use the same login screen; role decides where you land.
             </Text>
@@ -157,6 +174,13 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  coldStartHint: {
+    ...typography.caption,
+    color: colors.primary,
+    textAlign: 'center',
+    marginTop: -spacing.sm,
     marginBottom: spacing.lg,
   },
   helperText: {

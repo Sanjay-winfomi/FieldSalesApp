@@ -24,9 +24,13 @@ const getBaseUrl = () => {
 
 const BASE_URL = getBaseUrl();
 
+// 60s, not the usual few-second default: a free-tier host (e.g. Render's free
+// web service) spins its instance down after idling and takes 30-60s to wake
+// on the next request — a short timeout would abort right as the server was
+// about to respond, misreporting a slow-but-working backend as unreachable.
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 60000,
 });
 
 // Called once (by App.js) so that a refresh-token failure — meaning the

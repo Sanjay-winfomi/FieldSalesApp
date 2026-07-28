@@ -14,32 +14,43 @@ const fs = require('fs');
 const path = require('path');
 
 async function migrate() {
-  // Step 1: connect to the default "postgres" db to create fieldtrack db
-  const adminClient = new Client({
-    host:     process.env.DB_HOST     || 'localhost',
-    port:     parseInt(process.env.DB_PORT || '5432'),
-    database: 'postgres',
-    user:     process.env.DB_USER     || 'postgres',
-    password: process.env.DB_PASSWORD || '',
-  });
-
-  await adminClient.connect();
-  console.log('✓ Connected to postgres (admin)');
-
   const dbName = process.env.DB_NAME || 'fieldtrack';
-  const exists = await adminClient.query(
-    `SELECT 1 FROM pg_database WHERE datname = $1`,
-    [dbName]
-  );
 
-  if (exists.rows.length === 0) {
-    await adminClient.query(`CREATE DATABASE "${dbName}"`);
-    console.log(`✓ Created database: ${dbName}`);
-  } else {
-    console.log(`ℹ Database already exists: ${dbName}`);
+  // Step 1: connect to the default "postgres" db to create the app database
+  // if it's missing. This only works against a self-managed Postgres where
+  // the app user has CREATEDB and the admin "postgres" database is reachable
+  // — most managed providers (Render, RDS, etc.) provision exactly one
+  // database per instance up front and lock down access to just that one, so
+  // this step is expected to fail there. That's fine: the database already
+  // exists in that case, so we just skip ahead to applying the schema.
+  try {
+    const adminClient = new Client({
+      host:     process.env.DB_HOST     || 'localhost',
+      port:     parseInt(process.env.DB_PORT || '5432'),
+      database: 'postgres',
+      user:     process.env.DB_USER     || 'postgres',
+      password: process.env.DB_PASSWORD || '',
+    });
+
+    await adminClient.connect();
+    console.log('✓ Connected to postgres (admin)');
+
+    const exists = await adminClient.query(
+      `SELECT 1 FROM pg_database WHERE datname = $1`,
+      [dbName]
+    );
+
+    if (exists.rows.length === 0) {
+      await adminClient.query(`CREATE DATABASE "${dbName}"`);
+      console.log(`✓ Created database: ${dbName}`);
+    } else {
+      console.log(`ℹ Database already exists: ${dbName}`);
+    }
+
+    await adminClient.end();
+  } catch (err) {
+    console.log(`ℹ Skipping database creation (${err.message}) — assuming "${dbName}" already exists, as it does on managed hosts like Render.`);
   }
-
-  await adminClient.end();
 
   // Step 2: connect to fieldtrack and apply schema
   const appClient = new Client({
