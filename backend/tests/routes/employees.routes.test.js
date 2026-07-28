@@ -45,6 +45,32 @@ describe('POST /api/x/', () => {
   });
 });
 
+describe('DELETE /api/x/:id', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('400 when trying to delete your own account', async () => {
+    const app = makeApp(employeesRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete(`/api/x/${MANAGER.id}`);
+    expect(res.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test('404 when the employee does not exist', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(employeesRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/999');
+    expect(res.status).toBe(404);
+  });
+
+  test('200 deletes an existing employee', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5 }] });
+    const app = makeApp(employeesRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/5');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
 describe('POST /api/x/:id/reset-password', () => {
   afterEach(() => jest.clearAllMocks());
 

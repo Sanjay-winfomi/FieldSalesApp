@@ -1,10 +1,11 @@
 /**
  * dealers.routes.js — Stage 5 + admin CRUD + not-visited alert
  *
- * GET  /api/dealers              — list all dealers (supports ?search= query param)
- * GET  /api/dealers/not-visited  — manager-only: dealers with no visit in the last N days
- * POST /api/dealers              — manager-only: create a dealer
- * PUT  /api/dealers/:id          — manager-only: update a dealer
+ * GET    /api/dealers              — list all dealers (supports ?search= query param)
+ * GET    /api/dealers/not-visited  — manager-only: dealers with no visit in the last N days
+ * POST   /api/dealers              — manager-only: create a dealer
+ * PUT    /api/dealers/:id          — manager-only: update a dealer
+ * DELETE /api/dealers/:id          — manager-only: remove a dealer with no recorded visits
  */
 const express = require('express');
 const logger = require('../utils/logger');
@@ -129,6 +130,39 @@ router.put('/:id', requireRole('manager'), async (req, res) => {
     return res.json({ dealer: result.rows[0] });
   } catch (err) {
     logger.error('PUT /api/dealers/:id error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/dealers/:id
+router.delete('/:id', requireRole('manager'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid dealer id' });
+  }
+
+  try {
+    const existing = await pool.query('SELECT id FROM dealers WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Dealer not found' });
+    }
+
+    // Unlike employees, dealers aren't ON DELETE CASCADE from client_visits /
+    // exception_log (visit history shouldn't silently vanish just because a
+    // dealer record is removed) — so a dealer with recorded visits can't be
+    // deleted outright. Check up front for a clear message instead of
+    // surfacing the raw foreign-key violation as a generic 500.
+    const visitCount = await pool.query('SELECT COUNT(*)::int AS count FROM client_visits WHERE dealer_id = $1', [id]);
+    if (visitCount.rows[0].count > 0) {
+      return res.status(409).json({
+        error: `Cannot delete — ${visitCount.rows[0].count} recorded visit(s) reference this dealer. Edit it instead if it's no longer active.`,
+      });
+    }
+
+    await pool.query('DELETE FROM dealers WHERE id = $1', [id]);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/dealers/:id error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

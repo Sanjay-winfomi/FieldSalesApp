@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { UserPlus, KeyRound, Power, Pencil, Users, UserCheck, UserX, Shield, Briefcase } from 'lucide-react';
+import { UserPlus, KeyRound, Power, Pencil, Trash2, Users, UserCheck, UserX, Shield, Briefcase } from 'lucide-react';
 import { apiClient } from '../../api';
 import {
   SectionHeader, MetricCard, SearchBar, DataTable, StatusBadge, Button, Modal,
@@ -17,7 +17,7 @@ function initials(name) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 }
 
-export default function EmployeesTab() {
+export default function EmployeesTab({ currentEmployeeId }) {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -40,6 +40,9 @@ export default function EmployeesTab() {
 
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [deactivateSubmitting, setDeactivateSubmitting] = useState(false);
+
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
@@ -146,6 +149,20 @@ export default function EmployeesTab() {
     }
   };
 
+  const confirmDelete = async () => {
+    setDeleteSubmitting(true);
+    try {
+      await apiClient.delete(`/employees/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      fetchEmployees();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete employee.');
+      setDeleteTarget(null);
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   const activateDirectly = async (emp) => {
     try {
       await apiClient.put(`/employees/${emp.id}`, { is_active: true });
@@ -199,6 +216,17 @@ export default function EmployeesTab() {
           >
             <Power size={14} color={emp.is_active ? colors.danger : colors.success} />
           </button>
+          {emp.id !== currentEmployeeId && (
+            <button
+              className="ft-icon-btn"
+              style={styles.actionBtn}
+              title="Delete"
+              aria-label={`Delete ${emp.name}`}
+              onClick={() => setDeleteTarget(emp)}
+            >
+              <Trash2 size={14} color={colors.danger} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -301,6 +329,17 @@ export default function EmployeesTab() {
         loading={deactivateSubmitting}
         onConfirm={confirmDeactivate}
         onCancel={() => setDeactivateTarget(null)}
+      />
+
+      <ConfirmationModal
+        open={!!deleteTarget}
+        title="Delete employee?"
+        message={`This permanently deletes ${deleteTarget?.name}'s account, including all of their attendance and visit history. This cannot be undone — deactivate instead if you just need to revoke access.`}
+        confirmLabel="Delete"
+        danger
+        loading={deleteSubmitting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
       />
     </div>
   );

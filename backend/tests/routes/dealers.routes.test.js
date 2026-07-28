@@ -62,3 +62,40 @@ describe('PUT /api/x/:id — manager only', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('DELETE /api/x/:id — manager only', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('403 for a rep', async () => {
+    const app = makeApp(dealersRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).delete('/api/x/1');
+    expect(res.status).toBe(403);
+  });
+
+  test('404 when dealer does not exist', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/999');
+    expect(res.status).toBe(404);
+  });
+
+  test('409 when the dealer has recorded visits', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // existence check
+      .mockResolvedValueOnce({ rows: [{ count: 3 }] }); // visit count
+    const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/1');
+    expect(res.status).toBe(409);
+  });
+
+  test('200 deletes a dealer with no recorded visits', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // existence check
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] }) // visit count
+      .mockResolvedValueOnce({ rows: [] }); // delete
+    const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/1');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});

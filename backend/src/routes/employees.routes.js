@@ -1,10 +1,11 @@
 /**
  * employees.routes.js — manager-only admin CRUD for field reps and managers.
  *
- * GET  /api/employees        — list employees (optional ?role=)
- * POST /api/employees        — create a new employee
- * PUT  /api/employees/:id    — update name/phone/region/role/is_active
- * POST /api/employees/:id/reset-password — set a new password
+ * GET    /api/employees        — list employees (optional ?role=)
+ * POST   /api/employees        — create a new employee
+ * PUT    /api/employees/:id    — update name/phone/region/role/is_active
+ * DELETE /api/employees/:id    — permanently remove an employee
+ * POST   /api/employees/:id/reset-password — set a new password
  */
 const express = require('express');
 const logger = require('../utils/logger');
@@ -113,6 +114,36 @@ router.put('/:id', async (req, res) => {
     return res.json({ employee: result.rows[0] });
   } catch (err) {
     logger.error('PUT /api/employees/:id error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/employees/:id
+router.delete('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid employee id' });
+  }
+
+  // A manager deleting their own account mid-session would invalidate the
+  // token they're using for this very request on the next call — deactivating
+  // (or having another manager delete them) is the supported path instead.
+  if (id === req.employee.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account.' });
+  }
+
+  try {
+    // Deleting an employee cascades to their attendance + client_visits +
+    // exception_log rows (ON DELETE CASCADE in schema.sql) — this permanently
+    // erases their attendance/visit history, not just the account. Deactivate
+    // instead (PUT is_active=false) when the history should be kept.
+    const result = await pool.query('DELETE FROM employees WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/employees/:id error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

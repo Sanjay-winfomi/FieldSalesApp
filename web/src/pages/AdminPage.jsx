@@ -9,7 +9,7 @@ const TABS = [
   { key: 'dealers', label: 'Dealers', icon: Store },
 ];
 
-export default function AdminPage() {
+export default function AdminPage({ currentEmployeeId }) {
   const [activeTab, setActiveTab] = useState('employees');
 
   return (
@@ -33,7 +33,7 @@ export default function AdminPage() {
         })}
       </div>
 
-      {activeTab === 'employees' ? <EmployeesTab /> : <DealersTab />}
+      {activeTab === 'employees' ? <EmployeesTab currentEmployeeId={currentEmployeeId} /> : <DealersTab />}
     </div>
   );
 }

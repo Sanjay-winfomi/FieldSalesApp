@@ -128,7 +128,7 @@ export default function App() {
       )}
 
       {activeView === 'reports' && <ReportsPage />}
-      {activeView === 'admin' && <AdminPage />}
+      {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} />}
     </div>
   );
 }

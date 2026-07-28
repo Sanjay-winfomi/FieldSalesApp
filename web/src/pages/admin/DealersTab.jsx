@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Store, MapPin, Pencil } from 'lucide-react';
+import { Store, MapPin, Pencil, Trash2 } from 'lucide-react';
 import { apiClient } from '../../api';
 import LocationPreviewMap from '../../components/LocationPreviewMap';
 import {
-  SectionHeader, MetricCard, SearchBar, DataTable, Button, Modal, TextField, EmptyState,
+  SectionHeader, MetricCard, SearchBar, DataTable, Button, Modal, TextField, EmptyState, ConfirmationModal,
 } from '../../components';
 import { colors, spacing } from '../../theme';
 
@@ -26,6 +26,9 @@ export default function DealersTab() {
   const [resolvingPin, setResolvingPin] = useState(false);
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [loadingNearby, setLoadingNearby] = useState(false);
+
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -183,6 +186,20 @@ export default function DealersTab() {
     handlePinMoved(place.latitude, place.longitude);
   };
 
+  const confirmDelete = async () => {
+    setDeleteSubmitting(true);
+    try {
+      await apiClient.delete(`/dealers/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      fetchDealers();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete dealer.');
+      setDeleteTarget(null);
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   const startEdit = (dealer) => {
     setForm({
       name: dealer.name,
@@ -216,9 +233,14 @@ export default function DealersTab() {
     {
       key: 'actions', label: '', sortable: false,
       render: (d) => (
-        <button className="ft-icon-btn" style={{ width: 32, height: 32 }} title="Edit" aria-label={`Edit ${d.name}`} onClick={() => startEdit(d)}>
-          <Pencil size={14} />
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="ft-icon-btn" style={{ width: 32, height: 32 }} title="Edit" aria-label={`Edit ${d.name}`} onClick={() => startEdit(d)}>
+            <Pencil size={14} />
+          </button>
+          <button className="ft-icon-btn" style={{ width: 32, height: 32 }} title="Delete" aria-label={`Delete ${d.name}`} onClick={() => setDeleteTarget(d)}>
+            <Trash2 size={14} color={colors.danger} />
+          </button>
+        </div>
       ),
     },
   ];
@@ -329,6 +351,17 @@ export default function DealersTab() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmationModal
+        open={!!deleteTarget}
+        title="Delete dealer?"
+        message={`This permanently removes ${deleteTarget?.name}. Dealers with recorded visits can't be deleted — edit the record instead if it's no longer active.`}
+        confirmLabel="Delete"
+        danger
+        loading={deleteSubmitting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
