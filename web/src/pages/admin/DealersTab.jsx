@@ -341,34 +341,38 @@ export default function DealersTab() {
         width={560}
       >
         <form onSubmit={handleSubmit}>
+          {/* Full width, not one of the narrow formGrid columns below — a real
+              address wraps to 3+ cramped lines in a ~160px column, which reads
+              as an unreadable jumble once suggestions are involved. */}
+          <div style={{ position: 'relative', marginBottom: spacing.md }} onBlur={() => setTimeout(() => setAddressSuggestions([]), 150)}>
+            <TextField
+              label="Address"
+              value={form.address}
+              onChange={handleAddressChange}
+              autoComplete="off"
+            />
+            {(addressSuggestions.length > 0 || suggestionsLoading) && (
+              <div style={styles.suggestionsDropdown}>
+                {suggestionsLoading && addressSuggestions.length === 0 ? (
+                  <div style={styles.suggestionLoading}>Searching...</div>
+                ) : (
+                  addressSuggestions.map((s) => (
+                    <button
+                      type="button"
+                      key={s.place_id}
+                      style={styles.suggestionItem}
+                      onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(s); }}
+                    >
+                      {s.description}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
           <div style={styles.formGrid}>
             <TextField label="Dealer name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
-            <div style={{ position: 'relative' }} onBlur={() => setTimeout(() => setAddressSuggestions([]), 150)}>
-              <TextField
-                label="Address"
-                value={form.address}
-                onChange={handleAddressChange}
-                autoComplete="off"
-              />
-              {(addressSuggestions.length > 0 || suggestionsLoading) && (
-                <div style={styles.suggestionsDropdown}>
-                  {suggestionsLoading && addressSuggestions.length === 0 ? (
-                    <div style={styles.suggestionLoading}>Searching...</div>
-                  ) : (
-                    addressSuggestions.map((s) => (
-                      <button
-                        type="button"
-                        key={s.place_id}
-                        style={styles.suggestionItem}
-                        onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(s); }}
-                      >
-                        {s.description}
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
             <TextField label="Latitude" value={form.latitude} onChange={(v) => setForm({ ...form, latitude: v })} />
             <TextField label="Longitude" value={form.longitude} onChange={(v) => setForm({ ...form, longitude: v })} />
             <TextField label="Radius (metres)" type="number" value={form.radius_meters} onChange={(v) => setForm({ ...form, radius_meters: v })} />
@@ -468,8 +472,8 @@ const styles = {
     boxShadow: shadows.dropdown, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column',
   },
   suggestionItem: {
-    textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: `1px solid ${colors.border}`,
-    backgroundColor: 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', width: '100%',
+    display: 'block', textAlign: 'left', padding: '12px 14px', border: 'none', borderBottom: `1px solid ${colors.border}`,
+    backgroundColor: 'transparent', color: colors.text, fontSize: 13, lineHeight: 1.5, cursor: 'pointer', width: '100%',
   },
   suggestionLoading: { padding: '10px 12px', fontSize: 13, color: colors.textMuted },
   pinAddressText: { fontSize: 13, fontWeight: 600, color: colors.text, margin: '8px 0 0' },
