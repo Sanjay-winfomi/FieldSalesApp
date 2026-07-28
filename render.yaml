@@ -43,6 +43,11 @@ services:
           property: password
       - key: DB_SSL
         value: true
+      # Render's internal Postgres connection presents a cert that doesn't
+      # chain to a standard root CA — rejecting unauthorized certs (the
+      # default) makes every query throw right after connecting.
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
