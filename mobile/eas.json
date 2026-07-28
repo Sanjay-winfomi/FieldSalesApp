@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://immunology-mrs-whom-satisfy.trycloudflare.com/api"
+        "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-kvmt.onrender.com/api"
       }
     },
     "production": {
