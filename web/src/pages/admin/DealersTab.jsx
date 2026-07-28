@@ -481,6 +481,14 @@ const styles = {
     display: 'block', textAlign: 'left', padding: '14px 16px', borderRadius: 10,
     border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text,
     fontSize: 13, lineHeight: 1.6, cursor: 'pointer', width: '100%', boxSizing: 'border-box', appearance: 'none',
+    // The dropdown is a flex column with a maxHeight — without this, flexbox's
+    // default flex-shrink:1 squeezes every box to fit within that maxHeight
+    // once several suggestions' combined height exceeds it, compressing boxes
+    // below their real content height while the wrapped text (which can't
+    // shrink) spills out. flexShrink:0 makes each box keep its full natural
+    // height no matter how many lines the address wraps to or how many
+    // suggestions there are — anything beyond maxHeight just scrolls instead.
+    flexShrink: 0,
   },
   suggestionLoading: { padding: '10px 12px', fontSize: 13, color: colors.textMuted },
   pinAddressText: { fontSize: 13, fontWeight: 600, color: colors.text, margin: '8px 0 0' },
