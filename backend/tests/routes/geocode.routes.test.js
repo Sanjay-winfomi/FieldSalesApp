@@ -56,8 +56,7 @@ describe('GET /api/x/autocomplete', () => {
 
   test('returns predictions on a successful lookup', async () => {
     mockFetchOnce({
-      status: 'OK',
-      predictions: [{ place_id: 'abc123', description: 'Winfomi - Salesforce Partner, Coimbatore' }],
+      suggestions: [{ placePrediction: { placeId: 'abc123', text: { text: 'Winfomi - Salesforce Partner, Coimbatore' } } }],
     });
     const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).get('/api/x/autocomplete').query({ input: 'winf' });
@@ -84,8 +83,8 @@ describe('GET /api/x/place-details', () => {
 
   test('returns lat/lng and formatted address on success', async () => {
     mockFetchOnce({
-      status: 'OK',
-      result: { geometry: { location: { lat: 11.01, lng: 76.95 } }, formatted_address: 'Winfomi, Coimbatore, TN' },
+      location: { latitude: 11.01, longitude: 76.95 },
+      formattedAddress: 'Winfomi, Coimbatore, TN',
     });
     const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).get('/api/x/place-details').query({ place_id: 'abc123' });
@@ -98,7 +97,7 @@ describe('GET /api/x/place-details', () => {
     // Distinct place_id from the previous test — place-details caches
     // successful lookups by place_id, and reusing one would return the
     // earlier test's cached result instead of hitting this mock.
-    mockFetchOnce({ status: 'OK', result: {} });
+    mockFetchOnce({});
     const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).get('/api/x/place-details').query({ place_id: 'no-location-xyz' });
     expect(res.status).toBe(502);

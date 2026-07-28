@@ -23,9 +23,11 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 const GOOGLE_GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
-const GOOGLE_PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
-const GOOGLE_PLACES_AUTOCOMPLETE_URL = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
-const GOOGLE_PLACES_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+// Places autocomplete/details/nearby use the newer "Places API (New)" family
+// (places.googleapis.com/v1/...) rather than the legacy maps.googleapis.com
+// place/* endpoints — a separate enablement in Google Cloud from Geocoding,
+// and the one that matches a key provisioned with "Places UI Kit" scopes.
+const PLACES_API_BASE = 'https://places.googleapis.com/v1';
 
 // Simple in-memory cache — dealer addresses and check-in coordinates repeat
 // constantly (same dealers, same day), so this avoids re-querying Google for
@@ -65,6 +67,33 @@ async function googleFetch(baseUrl, params) {
   const data = await response.json();
   if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
     throw new Error(`Google Maps API status ${data.status}: ${data.error_message || 'no details'}`);
+  }
+  return data;
+}
+
+// Places API (New) uses POST + JSON bodies and an API-key header (rather
+// than a `key` query param) and reports errors via normal HTTP status codes
+// with a JSON body (rather than a 200 + internal `status` field), so it
+// needs its own fetch helper distinct from googleFetch's legacy-API shape.
+async function placesApiFetch(path, { method = 'GET', body, fieldMask } = {}) {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    throw new Error('GOOGLE_MAPS_API_KEY is not configured');
+  }
+  const headers = { 'X-Goog-Api-Key': apiKey };
+  if (fieldMask) headers['X-Goog-FieldMask'] = fieldMask;
+  if (body) headers['Content-Type'] = 'application/json';
+
+  const response = await fetch(`${PLACES_API_BASE}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`Places API error ${response.status}: ${data.error?.message || 'no details'}`);
   }
   return data;
 }
@@ -172,14 +201,18 @@ router.get('/nearby', async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
-    const data = await googleFetch(GOOGLE_PLACES_NEARBY_URL, { location: `${lat},${lng}`, radius: String(radius) });
+    const data = await placesApiFetch('/places:searchNearby', {
+      method: 'POST',
+      fieldMask: 'places.displayName,places.location,places.types',
+      body: { maxResultCount: 20, locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } } },
+    });
 
-    const places = (data.results || [])
-      .map((r) => ({
-        name: r.name,
-        latitude: r.geometry?.location?.lat,
-        longitude: r.geometry?.location?.lng,
-        type: r.types?.[0] || 'place',
+    const places = (data.places || [])
+      .map((p) => ({
+        name: p.displayName?.text,
+        latitude: p.location?.latitude,
+        longitude: p.location?.longitude,
+        type: p.types?.[0] || 'place',
       }))
       .filter((p) => p.name && p.latitude != null && p.longitude != null)
       .slice(0, 30);
@@ -205,18 +238,21 @@ router.get('/autocomplete', async (req, res) => {
   }
 
   try {
-    const params = { input, components: 'country:in' };
+    const body = { input, includedRegionCodes: ['in'] };
     // Google bills a full autocomplete-then-details sequence as one cheaper
     // "session" when the same token is passed on every call in that sequence
     // — the frontend generates one per address search and discards it once a
     // suggestion is picked (or the field is abandoned).
-    if (req.query.sessiontoken) params.sessiontoken = req.query.sessiontoken;
+    if (req.query.sessiontoken) body.sessionToken = req.query.sessiontoken;
 
-    const data = await googleFetch(GOOGLE_PLACES_AUTOCOMPLETE_URL, params);
-    const predictions = (data.predictions || []).slice(0, 6).map((p) => ({
-      place_id: p.place_id,
-      description: p.description,
-    }));
+    const data = await placesApiFetch('/places:autocomplete', { method: 'POST', body });
+    const predictions = (data.suggestions || [])
+      .filter((s) => s.placePrediction)
+      .slice(0, 6)
+      .map((s) => ({
+        place_id: s.placePrediction.placeId,
+        description: s.placePrediction.text?.text || '',
+      }));
     return res.json({ predictions });
   } catch (err) {
     logger.error('Geocode autocomplete error', { error: err.message, stack: err.stack });
@@ -236,19 +272,18 @@ router.get('/place-details', async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
-    const params = { place_id: placeId, fields: 'geometry,formatted_address' };
-    if (req.query.sessiontoken) params.sessiontoken = req.query.sessiontoken;
-
-    const data = await googleFetch(GOOGLE_PLACES_DETAILS_URL, params);
-    const location = data.result?.geometry?.location;
-    if (!location) {
+    const qs = req.query.sessiontoken ? `?sessionToken=${encodeURIComponent(req.query.sessiontoken)}` : '';
+    const data = await placesApiFetch(`/places/${encodeURIComponent(placeId)}${qs}`, {
+      fieldMask: 'location,formattedAddress',
+    });
+    if (!data.location) {
       return res.status(502).json({ error: 'No location found for that place' });
     }
 
     const payload = {
-      latitude: location.lat,
-      longitude: location.lng,
-      display_name: data.result.formatted_address,
+      latitude: data.location.latitude,
+      longitude: data.location.longitude,
+      display_name: data.formattedAddress,
     };
     setCached(cacheKey, payload);
     return res.json(payload);
