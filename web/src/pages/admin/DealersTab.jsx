@@ -467,13 +467,17 @@ const styles = {
   candidateList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: spacing.md },
   candidateItem: { textAlign: 'left', padding: '10px 12px', borderRadius: 8, border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text, fontSize: 13, cursor: 'pointer', width: '100%' },
   suggestionsDropdown: {
-    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, zIndex: 20,
-    backgroundColor: colors.card, border: `1px solid ${colors.border}`, borderRadius: 10,
-    boxShadow: shadows.dropdown, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 20,
+    backgroundColor: colors.background, border: `1px solid ${colors.border}`, borderRadius: 12, padding: 8,
+    boxShadow: shadows.dropdown, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6,
   },
+  // Each suggestion its own bordered/rounded card — same look as candidateItem
+  // above, so a suggestion picked while typing and one picked from the manual
+  // "Look up coordinates" results read as the same kind of thing.
   suggestionItem: {
-    display: 'block', textAlign: 'left', padding: '12px 14px', border: 'none', borderBottom: `1px solid ${colors.border}`,
-    backgroundColor: 'transparent', color: colors.text, fontSize: 13, lineHeight: 1.5, cursor: 'pointer', width: '100%',
+    display: 'block', textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+    border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text,
+    fontSize: 13, lineHeight: 1.5, cursor: 'pointer', width: '100%',
   },
   suggestionLoading: { padding: '10px 12px', fontSize: 13, color: colors.textMuted },
   pinAddressText: { fontSize: 13, fontWeight: 600, color: colors.text, margin: '8px 0 0' },
