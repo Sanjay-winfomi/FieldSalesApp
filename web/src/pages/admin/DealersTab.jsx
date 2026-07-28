@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Store, MapPin, Pencil, Trash2 } from 'lucide-react';
 import { apiClient } from '../../api';
 import LocationPreviewMap from '../../components/LocationPreviewMap';
 import {
   SectionHeader, MetricCard, SearchBar, DataTable, Button, Modal, TextField, EmptyState, ConfirmationModal,
 } from '../../components';
-import { colors, spacing } from '../../theme';
+import { colors, spacing, shadows } from '../../theme';
 
 export default function DealersTab() {
   const [dealers, setDealers] = useState([]);
@@ -29,6 +29,18 @@ export default function DealersTab() {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  // Live "type-ahead" address suggestions (Google-Maps-search-box style),
+  // separate from the manual "Look up coordinates" button/candidates flow
+  // below — this fires as the manager types, that fires on an explicit click.
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const addressDebounceRef = useRef(null);
+  // One token per address search, shared across every autocomplete keystroke
+  // and the final place-details call — this is what makes Google bill the
+  // whole search as one cheaper "session" instead of separate calls.
+  const sessionTokenRef = useRef(null);
+  const newSessionToken = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -64,6 +76,58 @@ export default function DealersTab() {
     setCandidates([]);
     setPinAddress('');
     setNearbyPlaces([]);
+    setAddressSuggestions([]);
+    clearTimeout(addressDebounceRef.current);
+    sessionTokenRef.current = null;
+  };
+
+  // Fires on every keystroke in the Address field — debounced so a burst of
+  // typing sends one request, not one per character, and skips the call
+  // entirely below 3 characters (too short for Google to return anything
+  // useful, per the backend's own guard).
+  const handleAddressChange = (value) => {
+    setForm((f) => ({ ...f, address: value }));
+    clearTimeout(addressDebounceRef.current);
+
+    if (value.trim().length < 3) {
+      setAddressSuggestions([]);
+      return;
+    }
+    if (!sessionTokenRef.current) sessionTokenRef.current = newSessionToken();
+
+    addressDebounceRef.current = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const res = await apiClient.get('/geocode/autocomplete', {
+          params: { input: value, sessiontoken: sessionTokenRef.current },
+        });
+        setAddressSuggestions(res.data.predictions || []);
+      } catch {
+        setAddressSuggestions([]);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, 300);
+  };
+
+  const handleSelectSuggestion = async (prediction) => {
+    setAddressSuggestions([]);
+    setGeocodeStatus('');
+    try {
+      const res = await apiClient.get('/geocode/place-details', {
+        params: { place_id: prediction.place_id, sessiontoken: sessionTokenRef.current },
+      });
+      const { latitude, longitude, display_name } = res.data;
+      setForm((f) => ({ ...f, address: display_name, latitude: String(latitude), longitude: String(longitude) }));
+      setPinAddress(display_name);
+      fetchNearby(latitude, longitude);
+    } catch (err) {
+      setFormError(err.response?.data?.error || 'Failed to load details for that address.');
+    } finally {
+      // A session ends once a place is chosen — the next address search (if
+      // any) should start (and bill) as a fresh session, not continue this one.
+      sessionTokenRef.current = null;
+    }
   };
 
   // Standard map tiles only show a name for places that happen to be
@@ -279,7 +343,32 @@ export default function DealersTab() {
         <form onSubmit={handleSubmit}>
           <div style={styles.formGrid}>
             <TextField label="Dealer name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
-            <TextField label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} />
+            <div style={{ position: 'relative' }} onBlur={() => setTimeout(() => setAddressSuggestions([]), 150)}>
+              <TextField
+                label="Address"
+                value={form.address}
+                onChange={handleAddressChange}
+                autoComplete="off"
+              />
+              {(addressSuggestions.length > 0 || suggestionsLoading) && (
+                <div style={styles.suggestionsDropdown}>
+                  {suggestionsLoading && addressSuggestions.length === 0 ? (
+                    <div style={styles.suggestionLoading}>Searching...</div>
+                  ) : (
+                    addressSuggestions.map((s) => (
+                      <button
+                        type="button"
+                        key={s.place_id}
+                        style={styles.suggestionItem}
+                        onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(s); }}
+                      >
+                        {s.description}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             <TextField label="Latitude" value={form.latitude} onChange={(v) => setForm({ ...form, latitude: v })} />
             <TextField label="Longitude" value={form.longitude} onChange={(v) => setForm({ ...form, longitude: v })} />
             <TextField label="Radius (metres)" type="number" value={form.radius_meters} onChange={(v) => setForm({ ...form, radius_meters: v })} />
@@ -373,6 +462,16 @@ const styles = {
   geocodeStatus: { fontSize: 12, color: colors.textSecondary, margin: '0 0 12px' },
   candidateList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: spacing.md },
   candidateItem: { textAlign: 'left', padding: '10px 12px', borderRadius: 8, border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text, fontSize: 13, cursor: 'pointer', width: '100%' },
+  suggestionsDropdown: {
+    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, zIndex: 20,
+    backgroundColor: colors.card, border: `1px solid ${colors.border}`, borderRadius: 10,
+    boxShadow: shadows.dropdown, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+  },
+  suggestionItem: {
+    textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: `1px solid ${colors.border}`,
+    backgroundColor: 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', width: '100%',
+  },
+  suggestionLoading: { padding: '10px 12px', fontSize: 13, color: colors.textMuted },
   pinAddressText: { fontSize: 13, fontWeight: 600, color: colors.text, margin: '8px 0 0' },
   mapPreviewCaption: { fontSize: 12, color: colors.textSecondary, margin: '4px 0 0' },
   formError: { fontSize: 13, color: colors.danger, margin: `${spacing.md}px 0` },

@@ -7,6 +7,10 @@
  *   used by the mobile app to show a readable address at check-in/out.
  * GET /api/geocode/nearby?lat=&lng=&radius= — named places near a point, used
  *   by the Admin panel to let a manager snap the dealer pin onto a landmark.
+ * GET /api/geocode/autocomplete?input=&sessiontoken= — live address suggestions
+ *   as the manager types a dealer's address, Google-Maps-search-box style.
+ * GET /api/geocode/place-details?place_id=&sessiontoken= — resolves a chosen
+ *   autocomplete suggestion to actual lat/lng + formatted address.
  *
  * Proxied through our own backend (rather than called directly from phones or
  * browsers) so the Google Maps API key never leaves the server, and so one
@@ -20,6 +24,8 @@ const router = express.Router();
 
 const GOOGLE_GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
 const GOOGLE_PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+const GOOGLE_PLACES_AUTOCOMPLETE_URL = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
+const GOOGLE_PLACES_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 
 // Simple in-memory cache — dealer addresses and check-in coordinates repeat
 // constantly (same dealers, same day), so this avoids re-querying Google for
@@ -184,6 +190,71 @@ router.get('/nearby', async (req, res) => {
   } catch (err) {
     logger.error('Geocode nearby error', { error: err.message, stack: err.stack });
     return res.status(502).json({ error: 'Nearby-places lookup unavailable', places: [] });
+  }
+});
+
+// GET /api/geocode/autocomplete?input=<partial text>&sessiontoken=<uuid>
+// Fires on close to every keystroke while typing a dealer address, so this
+// deliberately doesn't cache (the input string is different on every call
+// anyway) and treats an empty/short input as "no suggestions yet" rather
+// than an error — the UI calls this continuously, not on an explicit submit.
+router.get('/autocomplete', async (req, res) => {
+  const input = (req.query.input || '').trim();
+  if (input.length < 3) {
+    return res.json({ predictions: [] });
+  }
+
+  try {
+    const params = { input, components: 'country:in' };
+    // Google bills a full autocomplete-then-details sequence as one cheaper
+    // "session" when the same token is passed on every call in that sequence
+    // — the frontend generates one per address search and discards it once a
+    // suggestion is picked (or the field is abandoned).
+    if (req.query.sessiontoken) params.sessiontoken = req.query.sessiontoken;
+
+    const data = await googleFetch(GOOGLE_PLACES_AUTOCOMPLETE_URL, params);
+    const predictions = (data.predictions || []).slice(0, 6).map((p) => ({
+      place_id: p.place_id,
+      description: p.description,
+    }));
+    return res.json({ predictions });
+  } catch (err) {
+    logger.error('Geocode autocomplete error', { error: err.message, stack: err.stack });
+    return res.status(502).json({ error: 'Autocomplete unavailable', predictions: [] });
+  }
+});
+
+// GET /api/geocode/place-details?place_id=<id>&sessiontoken=<uuid>
+router.get('/place-details', async (req, res) => {
+  const placeId = (req.query.place_id || '').trim();
+  if (!placeId) {
+    return res.status(400).json({ error: 'place_id is required' });
+  }
+
+  const cacheKey = `place-details:${placeId}`;
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
+    const params = { place_id: placeId, fields: 'geometry,formatted_address' };
+    if (req.query.sessiontoken) params.sessiontoken = req.query.sessiontoken;
+
+    const data = await googleFetch(GOOGLE_PLACES_DETAILS_URL, params);
+    const location = data.result?.geometry?.location;
+    if (!location) {
+      return res.status(502).json({ error: 'No location found for that place' });
+    }
+
+    const payload = {
+      latitude: location.lat,
+      longitude: location.lng,
+      display_name: data.result.formatted_address,
+    };
+    setCached(cacheKey, payload);
+    return res.json(payload);
+  } catch (err) {
+    logger.error('Geocode place-details error', { error: err.message, stack: err.stack });
+    return res.status(502).json({ error: 'Place lookup unavailable' });
   }
 });
 

@@ -10,12 +10,19 @@ const bcrypt = require('bcryptjs');
 const SALT_ROUNDS = 10;
 
 async function seed() {
+  // See migrate.js — pg's Client has no default connection timeout, so a
+  // momentarily slow/unreachable DB would otherwise hang this step forever
+  // instead of failing fast, blocking npm start (and the deploy's health
+  // check) behind it.
+  const useSsl = process.env.DB_SSL === 'true';
   const client = new Client({
     host:     process.env.DB_HOST     || 'localhost',
     port:     parseInt(process.env.DB_PORT || '5432'),
     database: process.env.DB_NAME     || 'fieldtrack',
     user:     process.env.DB_USER     || 'postgres',
     password: process.env.DB_PASSWORD || '',
+    ssl:      useSsl ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false,
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '10000'),
   });
 
   await client.connect();

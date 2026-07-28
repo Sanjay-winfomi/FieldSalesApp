@@ -42,6 +42,69 @@ describe('GET /api/x/search', () => {
   });
 });
 
+describe('GET /api/x/autocomplete', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('returns no predictions for a too-short input, without calling Google', async () => {
+    global.fetch = jest.fn();
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/autocomplete').query({ input: 'wi' });
+    expect(res.status).toBe(200);
+    expect(res.body.predictions).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('returns predictions on a successful lookup', async () => {
+    mockFetchOnce({
+      status: 'OK',
+      predictions: [{ place_id: 'abc123', description: 'Winfomi - Salesforce Partner, Coimbatore' }],
+    });
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/autocomplete').query({ input: 'winf' });
+    expect(res.status).toBe(200);
+    expect(res.body.predictions[0].place_id).toBe('abc123');
+  });
+
+  test('502 when the upstream API call fails', async () => {
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('network down'));
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/autocomplete').query({ input: 'winf' });
+    expect(res.status).toBe(502);
+  });
+});
+
+describe('GET /api/x/place-details', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('400 when place_id missing', async () => {
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/place-details');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns lat/lng and formatted address on success', async () => {
+    mockFetchOnce({
+      status: 'OK',
+      result: { geometry: { location: { lat: 11.01, lng: 76.95 } }, formatted_address: 'Winfomi, Coimbatore, TN' },
+    });
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/place-details').query({ place_id: 'abc123' });
+    expect(res.status).toBe(200);
+    expect(res.body.latitude).toBe(11.01);
+    expect(res.body.display_name).toBe('Winfomi, Coimbatore, TN');
+  });
+
+  test('502 when the place has no location', async () => {
+    // Distinct place_id from the previous test — place-details caches
+    // successful lookups by place_id, and reusing one would return the
+    // earlier test's cached result instead of hitting this mock.
+    mockFetchOnce({ status: 'OK', result: {} });
+    const app = makeApp(geocodeRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/place-details').query({ place_id: 'no-location-xyz' });
+    expect(res.status).toBe(502);
+  });
+});
+
 describe('GET /api/x/reverse', () => {
   afterEach(() => jest.restoreAllMocks());
 

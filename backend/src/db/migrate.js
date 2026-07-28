@@ -13,6 +13,25 @@ const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
+// pg's Client has no default connection timeout — if the DB is momentarily
+// slow or unreachable, .connect() hangs forever rather than rejecting, which
+// on a host like Render means the process never reaches app.listen() and the
+// deploy's health check eventually times out waiting for a response that was
+// never coming. A generous-but-finite timeout turns that into a fast, clear
+// failure instead. Mirrors pool.js's ssl/timeout handling for the same reason.
+function clientConfig(database) {
+  const useSsl = process.env.DB_SSL === 'true';
+  return {
+    host:     process.env.DB_HOST     || 'localhost',
+    port:     parseInt(process.env.DB_PORT || '5432'),
+    database,
+    user:     process.env.DB_USER     || 'postgres',
+    password: process.env.DB_PASSWORD || '',
+    ssl:      useSsl ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false,
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '10000'),
+  };
+}
+
 async function migrate() {
   const dbName = process.env.DB_NAME || 'fieldtrack';
 
@@ -24,13 +43,7 @@ async function migrate() {
   // this step is expected to fail there. That's fine: the database already
   // exists in that case, so we just skip ahead to applying the schema.
   try {
-    const adminClient = new Client({
-      host:     process.env.DB_HOST     || 'localhost',
-      port:     parseInt(process.env.DB_PORT || '5432'),
-      database: 'postgres',
-      user:     process.env.DB_USER     || 'postgres',
-      password: process.env.DB_PASSWORD || '',
-    });
+    const adminClient = new Client(clientConfig('postgres'));
 
     await adminClient.connect();
     console.log('✓ Connected to postgres (admin)');
@@ -53,13 +66,7 @@ async function migrate() {
   }
 
   // Step 2: connect to fieldtrack and apply schema
-  const appClient = new Client({
-    host:     process.env.DB_HOST     || 'localhost',
-    port:     parseInt(process.env.DB_PORT || '5432'),
-    database: dbName,
-    user:     process.env.DB_USER     || 'postgres',
-    password: process.env.DB_PASSWORD || '',
-  });
+  const appClient = new Client(clientConfig(dbName));
 
   await appClient.connect();
   console.log(`✓ Connected to ${dbName}`);
