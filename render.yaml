@@ -11,11 +11,12 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    # Applies schema.sql (safe to re-run — CREATE TABLE IF NOT EXISTS) before
-    # every boot, then starts the API. Seeding is deliberately NOT run here —
-    # do that once by hand via the Render shell (`npm run seed`) so restarts
-    # don't matter, but it's also not repeated on every deploy.
-    startCommand: npm run migrate && npm start
+    # Applies schema.sql then seeds demo data before every boot. Both are
+    # idempotent (schema.sql uses CREATE TABLE IF NOT EXISTS; seed.js uses
+    # ON CONFLICT DO NOTHING / existence checks), so re-running them on every
+    # restart is safe — this avoids needing shell access to seed once by hand,
+    # which free-tier Render instances don't have anyway.
+    startCommand: npm run migrate && npm run seed && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
