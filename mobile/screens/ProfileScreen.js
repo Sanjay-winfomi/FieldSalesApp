@@ -70,7 +70,7 @@ export default function ProfileScreen() {
         <FadeSlideIn delay={100}>
           <Pressable
             style={styles.menuRow}
-            onPress={() => Alert.alert('FieldTrack', `Version ${appJson.expo.version}\n\nAttendance and dealer visit tracking for field sales teams.`)}
+            onPress={() => Alert.alert('Winfomi', `Version ${appJson.expo.version}\n\nAttendance and dealer visit tracking for field sales teams.`)}
             accessibilityRole="button"
           >
             <Info size={18} color={colors.textSecondary} style={styles.menuIcon} />

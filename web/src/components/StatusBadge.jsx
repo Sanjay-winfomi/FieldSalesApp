@@ -5,8 +5,8 @@ const TONES = {
   success: { bg: colors.successLight, border: '#BBF7D0', text: colors.successDark },
   warning: { bg: colors.warningLight, border: '#FDE68A', text: colors.warningDark },
   danger: { bg: colors.dangerLight, border: '#FECACA', text: colors.dangerDark },
-  neutral: { bg: colors.hover, border: colors.border, text: colors.textSecondary },
-  primary: { bg: colors.primaryLight, border: '#DBEAFE', text: colors.primary },
+  neutral: { bg: colors.neutralBg, border: colors.neutralBorder, text: colors.textSecondary },
+  primary: { bg: colors.primaryLight, border: '#CFEAD9', text: colors.primary },
 };
 
 /** A small pill used for statuses, roles, regions — consistent everywhere. */

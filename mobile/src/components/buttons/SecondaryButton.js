@@ -3,7 +3,7 @@ import { Text, Animated, Pressable, ActivityIndicator, StyleSheet } from 'react-
 import { colors, radius, typography, spacing, durations, pressScale } from '../../theme';
 
 /**
- * Outlined counterpart to PrimaryButton — same footprint, blue border,
+ * Outlined counterpart to PrimaryButton — same footprint, green border,
  * transparent/white fill. Used for secondary actions on a screen.
  */
 export default function SecondaryButton({

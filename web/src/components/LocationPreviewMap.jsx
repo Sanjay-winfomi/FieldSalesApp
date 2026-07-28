@@ -88,7 +88,7 @@ export default function LocationPreviewMap({ latitude, longitude, radiusMeters, 
         <Circle
           center={center}
           radius={radiusMeters}
-          options={{ strokeColor: '#0082D1', fillColor: '#0082D1', fillOpacity: 0.12, strokeWeight: 1 }}
+          options={{ strokeColor: '#1B7F5A', fillColor: '#1B7F5A', fillOpacity: 0.12, strokeWeight: 1 }}
         />
       </GoogleMap>
     </div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Animated, Easing } from 'react-native';
+import { StyleSheet, Text, View, Animated, Easing, Image } from 'react-native';
 import { colors, spacing } from '../src/theme';
+
+const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 
 export default function SplashScreen() {
   const fade = useRef(new Animated.Value(0)).current;
@@ -42,19 +44,8 @@ export default function SplashScreen() {
   return (
     <View style={styles.container} accessibilityRole="none">
       <Animated.View style={{ opacity: fade, transform: [{ scale }], alignItems: 'center' }}>
-        {/* 2x2 Grid Logo Mark */}
-        <View style={styles.logoMark}>
-          <View style={styles.logoRow}>
-            <View style={[styles.logoBlock, { backgroundColor: colors.success }]} />
-            <View style={[styles.logoBlock, { backgroundColor: colors.warning }]} />
-          </View>
-          <View style={styles.logoRow}>
-            <View style={[styles.logoBlock, { backgroundColor: colors.primary }]} />
-            <View style={[styles.logoBlock, { backgroundColor: colors.text }]} />
-          </View>
-        </View>
+        <Image source={winfomiLogo} style={styles.logoImg} resizeMode="contain" />
 
-        <Text style={styles.title}>FieldTrack</Text>
         <View style={styles.taglineDivider} />
         <Text style={styles.tagline}>Attendance and dealer visit tracking</Text>
       </Animated.View>
@@ -76,31 +67,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.xxl,
   },
-  logoMark: {
-    width: 84,
-    height: 84,
-    borderRadius: 20,
-    overflow: 'hidden',
+  logoImg: {
+    width: 220,
+    height: 63,
     marginBottom: spacing.xxl,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  logoBlock: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: 0.5,
-    marginBottom: spacing.md,
   },
   taglineDivider: {
     width: 32,

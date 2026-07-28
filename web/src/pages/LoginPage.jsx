@@ -3,6 +3,7 @@ import { User, Lock } from 'lucide-react';
 import { apiClient } from '../api';
 import { Button, TextField } from '../components';
 import { colors, typography, spacing, shadows } from '../theme';
+import winfomiLogo from '../assets/winfomi-logo.png';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -33,17 +34,7 @@ export default function LoginPage({ onLoginSuccess }) {
     <div style={styles.page}>
       <div style={styles.card} className="ft-fade-in">
         <div style={styles.logoWrap}>
-          <div style={styles.logoMark}>
-            <div style={styles.logoRow}>
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.success }} />
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.warning }} />
-            </div>
-            <div style={styles.logoRow}>
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.primary }} />
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.text }} />
-            </div>
-          </div>
-          <h1 style={styles.title}>FieldTrack</h1>
+          <img src={winfomiLogo} alt="Winfomi" style={styles.logoImg} />
         </div>
         <p style={styles.subtitle}>Manager dashboard — sign in to continue</p>
 
@@ -74,12 +65,6 @@ export default function LoginPage({ onLoginSuccess }) {
             Sign in
           </Button>
         </form>
-
-        {import.meta.env.DEV && (
-          <p style={styles.hint}>
-            Default credentials (dev only): <code>manager / manager123</code>
-          </p>
-        )}
       </div>
     </div>
   );
@@ -95,11 +80,7 @@ const styles = {
     padding: '40px 32px', boxSizing: 'border-box', border: `1px solid ${colors.border}`,
   },
   logoWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: spacing.xl },
-  logoMark: { width: 48, height: 48, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', marginBottom: spacing.lg },
-  logoRow: { display: 'flex', flex: 1 },
-  logoBlock: { flex: 1 },
-  title: { ...typography.sectionTitle, color: colors.text, margin: 0 },
+  logoImg: { height: 40, width: 'auto' },
   subtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', margin: `${spacing.sm}px 0 ${spacing.xxl}px` },
   errorText: { ...typography.caption, color: colors.danger, margin: `0 0 ${spacing.lg}px`, textAlign: 'left' },
-  hint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.xxl, marginBottom: 0 },
 };

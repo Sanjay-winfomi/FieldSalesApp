@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
+import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
@@ -7,6 +7,8 @@ import * as SecureStore from 'expo-secure-store';
 import { api } from '../src/services/api';
 import { PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing, typography } from '../src/theme';
+
+const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 
 export default function LoginScreen({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -54,18 +56,7 @@ export default function LoginScreen({ onLoginSuccess }) {
         keyboardShouldPersistTaps="handled"
       >
         <FadeSlideIn>
-          <View style={styles.logoMark}>
-            <View style={styles.logoRow}>
-              <View style={[styles.logoBlock, { backgroundColor: colors.success }]} />
-              <View style={[styles.logoBlock, { backgroundColor: colors.warning }]} />
-            </View>
-            <View style={styles.logoRow}>
-              <View style={[styles.logoBlock, { backgroundColor: colors.primary }]} />
-              <View style={[styles.logoBlock, { backgroundColor: colors.text }]} />
-            </View>
-          </View>
-
-          <Text style={styles.brand}>FieldTrack</Text>
+          <Image source={winfomiLogo} style={styles.logoImg} resizeMode="contain" />
 
           <View style={styles.card}>
             <Text style={styles.heading}>Log in</Text>
@@ -132,25 +123,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.screenHorizontal,
   },
-  logoMark: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    overflow: 'hidden',
+  logoImg: {
+    width: 140,
+    height: 40,
     alignSelf: 'center',
-    marginBottom: spacing.md,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  logoBlock: {
-    flex: 1,
-  },
-  brand: {
-    ...typography.sectionTitle,
-    color: colors.text,
-    textAlign: 'center',
     marginBottom: spacing.xxl,
   },
   card: {

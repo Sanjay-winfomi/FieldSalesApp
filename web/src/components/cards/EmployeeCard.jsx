@@ -70,7 +70,7 @@ const styles = {
   identity: { display: 'flex', alignItems: 'center', gap: spacing.md, minWidth: 0 },
   avatarWrap: { position: 'relative', flexShrink: 0 },
   avatar: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, color: '#FFFFFF',
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.avatarBg, color: colors.avatarText,
     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700,
   },
   liveDot: {

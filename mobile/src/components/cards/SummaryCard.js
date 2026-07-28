@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { colors, typography, radius, spacing } from '../../theme';
 
 const TONES = {
-  primary: { bg: colors.primaryLight, border: '#DBEAFE', text: colors.primary },
+  primary: { bg: colors.primaryLight, border: '#CFEAD9', text: colors.primary },
   success: { bg: colors.successLight, border: '#BBF7D0', text: colors.successDark },
   warning: { bg: colors.warningLight, border: '#FDE68A', text: colors.warningDark },
 };

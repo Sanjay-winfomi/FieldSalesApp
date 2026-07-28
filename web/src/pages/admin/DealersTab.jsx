@@ -301,7 +301,7 @@ export default function DealersTab() {
               <p style={styles.mapPreviewCaption}>
                 Drag the pin or click anywhere on the map to fine-tune the exact spot — the address search only gets you to the
                 neighbourhood. Switch to satellite view to recognize the building by sight, or zoom in with +/- or your scroll
-                wheel. Check-in radius: {form.radius_meters || radiusMeters}m (shown in blue) — reps checking in/out from
+                wheel. Check-in radius: {form.radius_meters || radiusMeters}m (shown in green) — reps checking in/out from
                 outside this circle must enter a justification.
               </p>
 

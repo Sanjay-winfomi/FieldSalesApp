@@ -1,8 +1,10 @@
 // Centralized color palette — do not hardcode hex values in screens/components.
 export const colors = {
-  primary: '#2563EB',
-  primaryDark: '#1D4ED8',
-  primaryLight: '#EFF6FF',
+  primary: '#1B7F5A',
+  primaryDark: '#146449',
+  primaryLight: '#EEF8F2',
+
+  secondary: '#5C6B63',
 
   success: '#22C55E',
   successLight: '#F0FDF4',
@@ -16,19 +18,25 @@ export const colors = {
   dangerLight: '#FEF2F2',
   dangerDark: '#B91C1C',
 
-  info: '#2563EB',
-  infoLight: '#EFF6FF',
+  info: '#1B7F5A',
+  infoLight: '#EEF8F2',
 
-  background: '#F8FAFC',
+  background: '#F5FBF6',
   card: '#FFFFFF',
 
-  text: '#111827',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
+  text: '#1F2937',
+  textSecondary: '#5C6B63',
+  textMuted: '#6B7280',
   textInverse: '#FFFFFF',
 
-  border: '#E5E7EB',
-  borderStrong: '#D1D5DB',
+  border: '#DDE9E1',
+  borderStrong: '#C7D9CD',
+
+  neutralBg: '#F3F4F6',
+  neutralBorder: '#E5E7EB',
+
+  avatarBg: '#E9F7EF',
+  avatarText: '#146449',
 
   overlay: 'rgba(17, 24, 39, 0.45)',
   disabled: '#CBD5E1',

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard } from 'lucide-react';
 import { colors, typography, spacing, shadows } from '../../theme';
+import winfomiLogo from '../../assets/winfomi-logo.png';
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -35,17 +36,7 @@ export default function AppHeader({ activeView, onNavigate, manager, lastUpdated
     <header style={styles.header} className="ft-topbar">
       <div style={styles.inner}>
         <div style={styles.logoSection}>
-          <div style={styles.logoMark}>
-            <div style={styles.logoRow}>
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.success }} />
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.warning }} />
-            </div>
-            <div style={styles.logoRow}>
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.primary }} />
-              <div style={{ ...styles.logoBlock, backgroundColor: colors.text }} />
-            </div>
-          </div>
-          <span style={styles.appName} className="ft-h1">FieldTrack</span>
+          <img src={winfomiLogo} alt="Winfomi" style={styles.logoImg} />
 
           <button
             className="ft-hamburger-btn ft-icon-btn"
@@ -145,10 +136,7 @@ const styles = {
     position: 'relative',
   },
   logoSection: { display: 'flex', alignItems: 'center', gap: spacing.md },
-  logoMark: { width: 30, height: 30, borderRadius: 7, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
-  logoRow: { display: 'flex', flex: 1 },
-  logoBlock: { flex: 1 },
-  appName: { ...typography.cardTitle, fontSize: 18, color: colors.text, fontWeight: 700 },
+  logoImg: { height: 28, width: 'auto', display: 'block' },
   hamburgerBtn: { width: 36, height: 36, marginLeft: spacing.sm },
   navRow: { gap: 4 },
   navBtn: {

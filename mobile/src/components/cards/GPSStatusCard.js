@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
   },
   iconCircleReady: {
     backgroundColor: colors.primaryLight,
-    borderColor: '#DBEAFE',
+    borderColor: '#CFEAD9',
   },
   iconCirclePending: {
     backgroundColor: colors.background,

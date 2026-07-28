@@ -4,7 +4,7 @@ import { colors, radius, typography, spacing, durations, pressScale } from '../.
 
 /**
  * The single primary call-to-action button used across the app — full width,
- * 54pt tall, filled primary blue, with press/disabled/loading states baked in
+ * 54pt tall, filled primary green, with press/disabled/loading states baked in
  * so no screen re-implements its own button styling.
  */
 export default function PrimaryButton({
