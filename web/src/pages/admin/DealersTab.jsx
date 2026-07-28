@@ -469,15 +469,18 @@ const styles = {
   suggestionsDropdown: {
     position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 20,
     backgroundColor: colors.background, border: `1px solid ${colors.border}`, borderRadius: 12, padding: 8,
-    boxShadow: shadows.dropdown, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6,
+    boxShadow: shadows.dropdown, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8,
   },
   // Each suggestion its own bordered/rounded card — same look as candidateItem
   // above, so a suggestion picked while typing and one picked from the manual
-  // "Look up coordinates" results read as the same kind of thing.
+  // "Look up coordinates" results read as the same kind of thing. Generous
+  // padding + boxSizing/appearance resets so a 2-3 line wrapped address has
+  // real room instead of visually crowding (or spilling past) the border —
+  // native <button> chrome doesn't always size cleanly around wrapped text.
   suggestionItem: {
-    display: 'block', textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+    display: 'block', textAlign: 'left', padding: '14px 16px', borderRadius: 10,
     border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text,
-    fontSize: 13, lineHeight: 1.5, cursor: 'pointer', width: '100%',
+    fontSize: 13, lineHeight: 1.6, cursor: 'pointer', width: '100%', boxSizing: 'border-box', appearance: 'none',
   },
   suggestionLoading: { padding: '10px 12px', fontSize: 13, color: colors.textMuted },
   pinAddressText: { fontSize: 13, fontWeight: 600, color: colors.text, margin: '8px 0 0' },
