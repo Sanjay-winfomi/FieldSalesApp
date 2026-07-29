@@ -6,6 +6,10 @@
  *                               unless the checkout GPS matches the check-in GPS within tolerance)
  * GET  /api/visits/exceptions       — manager-only: list out-of-radius events
  * PATCH /api/visits/exceptions/:id  — manager-only: mark an exception reviewed
+ * POST /api/visits/:id/location-check — periodic in-visit GPS ping (every ~5
+ *   min while a visit is open), used to show a live Inside/Outside Radius
+ *   status and to accumulate a cumulative out-of-radius count for the
+ *   "time to log out" alert.
  */
 const express             = require('express');
 const logger = require('../utils/logger');
@@ -359,6 +363,92 @@ router.post('/:id/interrupt', async (req, res) => {
     return res.json({ visit: updated.rows[0] });
   } catch (err) {
     logger.error('POST /api/visits/:id/interrupt error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/visits/:id/location-check — periodic in-visit GPS ping.
+// Distinct from /interrupt: this fires on every periodic check regardless of
+// inside/outside, so the dashboard can show a live "last checked Xm ago"
+// status — not just the one-time consecutive-checks-exceeded flag.
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/:id/location-check', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid visit id' });
+  }
+  const employeeId = req.employee.id;
+
+  const lat = parseCoord(req.body.lat, -90, 90);
+  const lng = parseCoord(req.body.lng, -180, 180);
+  if (lat === null || lng === null) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
+  }
+
+  try {
+    const visitResult = await pool.query(
+      `SELECT cv.id, cv.dealer_id, cv.check_out_time, cv.outside_radius_count, cv.log_out_alert_sent,
+              d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters
+       FROM client_visits cv
+       JOIN attendance a ON a.id = cv.attendance_id
+       JOIN dealers d ON d.id = cv.dealer_id
+       WHERE cv.id = $1 AND a.employee_id = $2`,
+      [id, employeeId]
+    );
+
+    if (visitResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Visit record not found' });
+    }
+
+    const visit = visitResult.rows[0];
+    if (visit.check_out_time) {
+      // Queued/offline ping arriving after checkout — nothing meaningful to
+      // update on a closed visit, but not an error either.
+      return res.json({ visit: { id: visit.id, check_out_time: visit.check_out_time } });
+    }
+
+    // A dealer with no registered coordinates can't be geofenced — treat as inside.
+    let distanceM = null;
+    let insideRadius = true;
+    if (visit.dealer_lat != null && visit.dealer_lng != null) {
+      const radiusMeters = visit.radius_meters ?? SYSTEM_DEFAULT_RADIUS_M;
+      distanceM = haversineKm(parseFloat(visit.dealer_lat), parseFloat(visit.dealer_lng), lat, lng) * 1000;
+      insideRadius = distanceM <= radiusMeters;
+    }
+
+    const nextOutsideCount = insideRadius ? visit.outside_radius_count : visit.outside_radius_count + 1;
+    // Any 2 breaches total during the visit (not necessarily consecutive) —
+    // once tripped, stays tripped for the rest of this visit (idempotent).
+    const shouldSendLogoutAlert = !visit.log_out_alert_sent && nextOutsideCount >= 2;
+
+    const updated = await pool.query(
+      `UPDATE client_visits
+       SET last_location_status    = $1,
+           last_location_check_at  = NOW(),
+           outside_radius_count    = $2,
+           log_out_alert_sent      = log_out_alert_sent OR $3,
+           interrupted             = interrupted OR $3,
+           interrupted_at          = CASE WHEN interrupted THEN interrupted_at WHEN $3 THEN NOW() ELSE interrupted_at END,
+           interrupted_distance_m  = CASE WHEN interrupted THEN interrupted_distance_m WHEN $3 THEN $4 ELSE interrupted_distance_m END
+       WHERE id = $5
+       RETURNING id, last_location_status, last_location_check_at, outside_radius_count, log_out_alert_sent, interrupted`,
+      [insideRadius ? 'inside' : 'outside', nextOutsideCount, shouldSendLogoutAlert, distanceM, id]
+    );
+
+    if (shouldSendLogoutAlert) {
+      await pool.query(
+        `INSERT INTO exception_log
+           (employee_id, dealer_id, visit_id, event_type, latitude, longitude, distance_meters)
+         VALUES ($1, $2, $3, 'interrupted', $4, $5, $6)`,
+        [employeeId, visit.dealer_id, id, lat, lng, distanceM]
+      );
+      logVisitInterrupted(req.employee.username, visit.dealer_name, distanceM);
+    }
+
+    return res.json({ visit: updated.rows[0], distance_meters: distanceM });
+  } catch (err) {
+    logger.error('POST /api/visits/:id/location-check error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

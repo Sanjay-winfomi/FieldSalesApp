@@ -147,6 +147,88 @@ describe('POST /api/x/:id/interrupt', () => {
   });
 });
 
+describe('POST /api/x/:id/location-check', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('400 on invalid lat/lng', async () => {
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 999, lng: 77 });
+    expect(res.status).toBe(400);
+  });
+
+  test('404 when the visit does not belong to this employee', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 11, lng: 77 });
+    expect(res.status).toBe(404);
+  });
+
+  test('records "inside" without incrementing the breach count', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 0, log_out_alert_sent: false,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'inside', outside_radius_count: 0, log_out_alert_sent: false, interrupted: false }] });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 11, lng: 77 });
+    expect(res.status).toBe(200);
+    expect(res.body.visit.last_location_status).toBe('inside');
+    expect(pool.query).toHaveBeenCalledTimes(2); // no exception_log insert
+  });
+
+  test('one breach: increments count but does not yet trigger the logout alert', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 0, log_out_alert_sent: false,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 1, log_out_alert_sent: false, interrupted: false }] });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 }); // ~150km away
+    expect(res.status).toBe(200);
+    expect(res.body.visit.outside_radius_count).toBe(1);
+    expect(res.body.visit.log_out_alert_sent).toBe(false);
+    expect(pool.query).toHaveBeenCalledTimes(2); // still no exception_log insert
+  });
+
+  test('second breach (non-consecutive) trips the logout alert and logs an exception', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 1, log_out_alert_sent: false,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 2, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [] }); // exception_log insert
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
+    expect(res.status).toBe(200);
+    expect(res.body.visit.log_out_alert_sent).toBe(true);
+    expect(pool.query).toHaveBeenCalledTimes(3);
+  });
+
+  test('already-alerted visit stays idempotent — no duplicate exception_log insert', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 3, log_out_alert_sent: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 4, log_out_alert_sent: true, interrupted: true }] });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
+    expect(res.status).toBe(200);
+    expect(pool.query).toHaveBeenCalledTimes(2); // no new exception_log insert
+  });
+});
+
 describe('GET /api/x/exceptions — manager only', () => {
   afterEach(() => jest.clearAllMocks());
 

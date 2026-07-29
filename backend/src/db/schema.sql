@@ -122,6 +122,17 @@ ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted BOOLEAN NOT NULL 
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted_at TIMESTAMPTZ;
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted_distance_m DOUBLE PRECISION;
 
+-- Live radius status (dashboard "Inside Radius"/"Outside Radius" indicator) +
+-- a cumulative (non-resetting) count of periodic checks found outside the
+-- radius during this visit — distinct from the consecutive-only check that
+-- drives `interrupted` above. Reaching 2 total breaches (even with the rep
+-- back inside in between) trips `log_out_alert_sent`, which both the rep's
+-- device and the manager's dashboard alert off of, once per visit.
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_status VARCHAR(10);
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_check_at TIMESTAMPTZ;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS outside_radius_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS log_out_alert_sent BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ============================================================
 -- 5. exception_log
 -- ============================================================

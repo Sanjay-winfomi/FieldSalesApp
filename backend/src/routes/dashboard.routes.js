@@ -30,6 +30,9 @@ router.get('/today', async (req, res) => {
         lv.check_out_time AS visit_check_out,
         lv.check_in_lat   AS last_lat,
         lv.check_in_lng   AS last_lng,
+        -- "Time to log out" alert: the rep's current open visit has hit 2+
+        -- cumulative out-of-radius checks and hasn't been checked out of yet.
+        (lv.check_out_time IS NULL AND lv.log_out_alert_sent) AS needs_logout_alert,
         -- Visit count today
         (SELECT COUNT(*) FROM client_visits cv2 WHERE cv2.attendance_id = a.id) AS visits_count
       FROM employees e
@@ -38,7 +41,7 @@ router.get('/today', async (req, res) => {
         AND ${isCurrentBusinessDay('a.check_in_time')}
       LEFT JOIN LATERAL (
         SELECT cv.check_in_time, cv.check_out_time, cv.check_in_lat, cv.check_in_lng,
-               d.name AS dealer_name
+               cv.log_out_alert_sent, d.name AS dealer_name
         FROM client_visits cv
         JOIN dealers d ON d.id = cv.dealer_id
         WHERE cv.attendance_id = a.id
@@ -88,6 +91,7 @@ router.get('/today', async (req, res) => {
         last_lat:           row.last_lat ? parseFloat(row.last_lat) : null,
         last_lng:           row.last_lng ? parseFloat(row.last_lng) : null,
         day_sync_status:    row.day_sync_status || 'pending',
+        needs_logout_alert: row.needs_logout_alert === true,
       };
     });
 
@@ -142,6 +146,8 @@ router.get('/rep/:id/today', async (req, res) => {
               cv.check_in_time, cv.check_in_lat, cv.check_in_lng,
               cv.check_out_time, cv.check_out_lat, cv.check_out_lng,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
+              cv.last_location_status, cv.last_location_check_at,
+              cv.outside_radius_count, cv.interrupted,
               cv.sync_status
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
