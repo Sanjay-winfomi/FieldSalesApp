@@ -19,7 +19,7 @@ const RECENTER_THRESHOLD_DEGREES = 0.01; // roughly ~1km
 export default function LocationPreviewMap({ latitude, longitude, radiusMeters, onLocationChange }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'fieldtrack-google-maps',
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
   });
 
   const center = { lat: latitude, lng: longitude };
@@ -46,7 +46,7 @@ export default function LocationPreviewMap({ latitude, longitude, radiusMeters, 
   if (loadError) {
     return (
       <div style={{ ...MAP_CONTAINER_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #FECACA', color: '#B91C1C', fontSize: 13, textAlign: 'center', padding: 16 }}>
-        Map failed to load — check VITE_GOOGLE_MAPS_API_KEY.
+        Map failed to load — check NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.
       </div>
     );
   }

@@ -1,17 +1,23 @@
+'use client';
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient, setAuthToken, setSessionExpiredHandler } from './api';
 import AppHeader from './components/headers/AppHeader';
-import LoginPage from './pages/LoginPage';
-import RepDetailsPage from './pages/RepDetailsPage';
-import DashboardPage from './pages/DashboardPage';
-import ReportsPage from './pages/ReportsPage';
-import AdminPage from './pages/AdminPage';
+import LoginPage from './views/LoginPage';
+import RepDetailsPage from './views/RepDetailsPage';
+import DashboardPage from './views/DashboardPage';
+import ReportsPage from './views/ReportsPage';
+import AdminPage from './views/AdminPage';
 import { colors } from './theme';
 import './App.css';
 
 export default function App() {
-  const [token, setToken] = useState(() => sessionStorage.getItem('ft_token') || '');
+  // Next.js server-renders this Client Component's first pass (there's no
+  // sessionStorage there), so these initializers must no-op on the server —
+  // the real value gets picked up on the client re-render, same as before.
+  const [token, setToken] = useState(() => (typeof window === 'undefined' ? '' : sessionStorage.getItem('ft_token') || ''));
   const [manager, setManager] = useState(() => {
+    if (typeof window === 'undefined') return null;
     try { return JSON.parse(sessionStorage.getItem('ft_manager') || 'null'); } catch { return null; }
   });
 

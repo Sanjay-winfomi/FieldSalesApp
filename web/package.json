@@ -2,18 +2,18 @@
   "name": "web",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "oxlint",
-    "preview": "vite preview",
     "test": "vitest run"
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.8",
     "axios": "^1.18.1",
     "lucide-react": "^1.24.0",
+    "next": "^15.1.6",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -25,7 +25,6 @@
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
     "oxlint": "^1.71.0",
-    "vite": "^8.1.1",
     "vitest": "^4.1.10"
   }
 }

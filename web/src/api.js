@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-// Vite inlines VITE_-prefixed vars from a .env file at build time — see
-// web/.env.example. Without this, a production build kept calling
+// Next.js inlines NEXT_PUBLIC_-prefixed vars from a .env file at build time —
+// see web/.env.example. Without this, a production build kept calling
 // localhost and every request would fail for real users.
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 export const apiClient = axios.create({ baseURL: API_BASE });
 

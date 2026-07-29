@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard } from 'lucide-react';
 import { colors, typography, spacing, shadows } from '../../theme';
-import winfomiLogo from '../../assets/winfomi-logo.png';
+
+// Served from web/public/winfomi-logo.png — see LoginPage.jsx for why this
+// is a plain path string rather than a module import under Next.js.
+const winfomiLogo = '/winfomi-logo.png';
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },

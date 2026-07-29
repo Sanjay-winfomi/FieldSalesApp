@@ -3,7 +3,11 @@ import { User, Lock } from 'lucide-react';
 import { apiClient } from '../api';
 import { Button, TextField } from '../components';
 import { colors, typography, spacing, shadows } from '../theme';
-import winfomiLogo from '../assets/winfomi-logo.png';
+
+// Served from web/public/winfomi-logo.png — Next.js wraps module-imported
+// images in a StaticImageData object (for next/image), so a plain <img src>
+// tag needs the public/ URL instead of the old Vite-style asset import.
+const winfomiLogo = '/winfomi-logo.png';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
