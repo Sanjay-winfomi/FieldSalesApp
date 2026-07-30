@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, History,
+  Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, History, NotebookPen,
 } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn } from '../src/components';
@@ -249,6 +249,17 @@ export default function HomeScreen({ navigation }) {
               <History size={18} color={colors.primary} />
             </View>
             <Text style={styles.quickActionText}>View visit history</Text>
+            <ChevronRight size={18} color={colors.textMuted} />
+          </Pressable>
+          <Pressable
+            style={styles.quickAction}
+            onPress={() => navigation.navigate('Notes')}
+            accessibilityRole="button"
+          >
+            <View style={styles.quickActionIcon}>
+              <NotebookPen size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.quickActionText}>Notes</Text>
             <ChevronRight size={18} color={colors.textMuted} />
           </Pressable>
         </FadeSlideIn>

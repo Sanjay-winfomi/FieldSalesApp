@@ -21,6 +21,8 @@ import DayCheckInScreen from './screens/DayCheckInScreen';
 import DealerCheckInScreen from './screens/DealerCheckInScreen';
 import DealerCheckOutScreen from './screens/DealerCheckOutScreen';
 import DayCheckOutScreen from './screens/DayCheckOutScreen';
+import NotesScreen from './screens/NotesScreen';
+import NoteEditorScreen from './screens/NoteEditorScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -394,6 +396,9 @@ export default function App() {
                   />
                 )}
               </Stack.Screen>
+
+              <Stack.Screen name="Notes" component={NotesScreen} />
+              <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
             </Stack.Navigator>
           </AppStateContext.Provider>
         </NavigationContainer>

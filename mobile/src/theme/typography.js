@@ -14,6 +14,14 @@ export const fontFamilyMedium = Platform.select({
   default: 'System',
 });
 
+// Times New Roman for notepad-style entry — Android has no bundled "Times New
+// Roman" font, but its default serif face renders visually equivalent.
+export const serifFontFamily = Platform.select({
+  ios: 'Times New Roman',
+  android: 'serif',
+  default: 'Times New Roman',
+});
+
 export const typography = {
   pageTitle: { fontFamily, fontSize: 30, fontWeight: '700' },
   sectionTitle: { fontFamily, fontSize: 22, fontWeight: '700' },

@@ -173,3 +173,21 @@ ALTER TABLE exception_log ADD CONSTRAINT exception_log_event_type_check
 
 CREATE INDEX IF NOT EXISTS idx_exception_log_employee    ON exception_log (employee_id);
 CREATE INDEX IF NOT EXISTS idx_exception_log_created_at  ON exception_log (created_at);
+
+-- ============================================================
+-- 6. notes
+-- ============================================================
+-- Free-form notepad entries a rep (or manager) keeps for themselves —
+-- e.g. reminders about a dealer, follow-ups. A 100-character minimum is
+-- enforced at the DB level (not just in the app) so the requirement holds
+-- regardless of which client writes to this table.
+CREATE TABLE IF NOT EXISTS notes (
+  id            SERIAL PRIMARY KEY,
+  employee_id   INTEGER       NOT NULL REFERENCES employees (id) ON DELETE CASCADE,
+  content       TEXT          NOT NULL CHECK (char_length(TRIM(content)) >= 100),
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_employee_id ON notes (employee_id);
+CREATE INDEX IF NOT EXISTS idx_notes_created_at  ON notes (created_at);
