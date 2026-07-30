@@ -60,7 +60,7 @@ export default function DealerCard({ dealer, selected, visited, distanceKm, onPr
 
           {selected && (
             <View style={styles.selectedFooter}>
-              <Text style={styles.selectedFooterText}>Tap again to check in</Text>
+              <Text style={styles.selectedFooterText}>Tap again to log in</Text>
             </View>
           )}
         </Card>

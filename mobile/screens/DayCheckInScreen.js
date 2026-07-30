@@ -44,7 +44,7 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
     }
 
     setLoading(true);
-    setLocationStatus('Syncing check-in...');
+    setLocationStatus('Syncing login...');
 
     try {
       let attendanceData = null;
@@ -56,7 +56,7 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
           // Network error - enqueue
           const localId = 'offline-' + Date.now();
           await enqueueAction('post', '/attendance/check-in', coords, { localId, resolves: 'attendance' });
-          Alert.alert('Offline Mode', 'Check-in saved locally and will sync when online.');
+          Alert.alert('Offline Mode', 'Login saved locally and will sync when online.');
 
           // Provide mock attendance block so app can progress
           attendanceData = {
@@ -67,7 +67,7 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
             total_distance_km: 0
           };
         } else if (error.response.status === 409) {
-          Alert.alert('Already checked in', 'You have already checked in for today.');
+          Alert.alert('Already logged in', 'You have already logged in for today.');
         } else {
           throw error;
         }
@@ -78,8 +78,8 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
       }
 
     } catch (error) {
-      console.error('Check-in error:', error);
-      Alert.alert('Error', 'Failed to check in. Please try again.');
+      console.error('Login error:', error);
+      Alert.alert('Error', 'Failed to log in. Please try again.');
     } finally {
       setLoading(false);
       setLocationStatus('');
@@ -88,7 +88,7 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Day check-in" onBack={() => navigation.goBack()} />
+      <AppHeader title="Login" onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={styles.container}>
         <FadeSlideIn>
           <GPSStatusCard
@@ -99,7 +99,7 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
           />
 
           <PrimaryButton
-            title="Check in for the day"
+            title="Login for the day"
             onPress={handleCheckIn}
             disabled={!coords}
             loading={loading}

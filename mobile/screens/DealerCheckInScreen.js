@@ -45,7 +45,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
       return;
     }
     if (!attendance) {
-      Alert.alert('Error', 'No active attendance session found. Please check in for the day first.');
+      Alert.alert('Error', 'No active attendance session found. Please log in for the day first.');
       return;
     }
 
@@ -71,7 +71,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
           // Network error — enqueue and proceed
           const localId = 'offline-' + Date.now();
           await enqueueAction('post', '/visits/check-in', payload, { localId, resolves: 'visit' });
-          Alert.alert('Offline Mode', 'Dealer check-in saved locally and will sync when online.');
+          Alert.alert('Offline Mode', 'Dealer login saved locally and will sync when online.');
           visitData = {
             id: localId,
             check_in_time: new Date().toISOString(),
@@ -85,7 +85,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
           setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
           return;
         } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
-          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to check in. Move to an open area for a stronger signal.');
+          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to log in. Move to an open area for a stronger signal.');
           return;
         } else {
           throw error;
@@ -96,8 +96,8 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
         onCheckIn(visitData);
       }
     } catch (error) {
-      console.error('Dealer check-in error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to check in. Please try again.');
+      console.error('Dealer login error:', error);
+      Alert.alert('Error', error.response?.data?.error || 'Failed to log in. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -114,7 +114,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Dealer check-in" subtitle={dealerName} onBack={() => navigation.goBack()} />
+      <AppHeader title="Dealer Login" subtitle={dealerName} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={styles.container}>
         <FadeSlideIn>
           <GPSStatusCard
@@ -135,7 +135,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
           )}
 
           <PrimaryButton
-            title={needsReason ? 'Submit reason & check in' : 'Check in at dealer'}
+            title={needsReason ? 'Submit reason & login' : 'Dealer Login'}
             onPress={handleCheckIn}
             disabled={!coords || !accuracyOk || (needsReason && !reasonOk)}
             loading={loading}

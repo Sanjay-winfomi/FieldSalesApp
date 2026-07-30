@@ -68,7 +68,7 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
         if (!error.response) {
           // Network error — enqueue and proceed
           await enqueueAction('post', '/visits/check-out', payload);
-          Alert.alert('Offline Mode', 'Dealer check-out saved locally and will sync when online.');
+          Alert.alert('Offline Mode', 'Dealer logout saved locally and will sync when online.');
           updatedVisit = {
             ...activeVisit,
             id: activeVisit.id,
@@ -78,7 +78,7 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
           setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
           return;
         } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
-          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to check out. Move to an open area for a stronger signal.');
+          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to log out. Move to an open area for a stronger signal.');
           return;
         } else {
           throw error;
@@ -89,8 +89,8 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
         onCheckOut(updatedVisit);
       }
     } catch (error) {
-      console.error('Dealer check-out error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to check out. Please try again.');
+      console.error('Dealer logout error:', error);
+      Alert.alert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -120,7 +120,7 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Dealer check-out" subtitle={dealerName} onBack={() => navigation.goBack()} />
+      <AppHeader title="Dealer Logout" subtitle={dealerName} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={styles.container}>
         <FadeSlideIn>
           <Card style={styles.summaryCard}>
@@ -151,7 +151,7 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
           )}
 
           <PrimaryButton
-            title={needsReason ? 'Submit reason & check out' : 'Check out of dealer'}
+            title={needsReason ? 'Submit reason & logout' : 'Dealer Logout'}
             onPress={handleCheckOut}
             disabled={!coords || !accuracyOk || (needsReason && !reasonOk)}
             loading={loading}

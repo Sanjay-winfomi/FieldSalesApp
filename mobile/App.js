@@ -127,12 +127,12 @@ export default function App() {
     startVisitMonitoring({
       visit: activeVisit,
       onWarning: () => {
-        Alert.alert('Leaving dealer premises', 'You appear to have left the dealer location. Please return, or check out if the visit has ended.');
+        Alert.alert('Leaving dealer premises', 'You appear to have left the dealer location. Please return, or log out if the visit has ended.');
       },
       onLogoutAlert: () => {
         Alert.alert(
-          'Time to check out',
-          'You have been outside the dealer premises multiple times during this visit. Please return and check out — your manager has also been notified.'
+          'Time to log out',
+          'You have been outside the dealer premises multiple times during this visit. Please return and log out — your manager has also been notified.'
         );
         fetchTodayState();
       },
@@ -217,8 +217,8 @@ export default function App() {
     // Second tap — the user wants to check in at this dealer
     if (dayStatus === 'not_checked_in') {
       Alert.alert(
-        'Day check-in required',
-        'You need to check in for the day before visiting a dealer. Go to the Home tab and tap "Check in".',
+        'Login required',
+        'You need to log in for the day before visiting a dealer. Go to the Home tab and tap "Login".',
         [
           { text: 'Go to Home', onPress: () => navigation.navigate('Home') },
           { text: 'Cancel', style: 'cancel' },
@@ -228,7 +228,7 @@ export default function App() {
     }
 
     if (dayStatus === 'day_ended') {
-      Alert.alert('Day ended', 'Your work day has already ended. You cannot check in at a dealer.');
+      Alert.alert('Day ended', 'Your work day has already ended. You cannot log in to a dealer.');
       return;
     }
 

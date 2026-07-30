@@ -64,8 +64,8 @@ export default function DashboardPage({
 
       <div style={styles.metricsGrid}>
         <MetricCard icon={<Users />} value={reps.length} label="Total employees" tone="primary" />
-        <MetricCard icon={<UserCheck />} value={stats.checked_in} label="Checked in" tone="success" />
-        <MetricCard icon={<Clock />} value={stats.not_checked_in} label="Pending check-in" tone="warning" />
+        <MetricCard icon={<UserCheck />} value={stats.checked_in} label="Logged in" tone="success" />
+        <MetricCard icon={<Clock />} value={stats.not_checked_in} label="Pending login" tone="warning" />
         <MetricCard icon={<CheckCircle2 />} value={stats.day_ended} label="Day ended" tone="neutral" />
         <MetricCard icon={<Store />} value={dealerCount ?? '—'} label="Total dealers" tone="primary" />
         <MetricCard icon={<Route />} value={`${totalDistanceToday.toFixed(1)} km`} label="Distance today" tone="warning" />
@@ -83,7 +83,7 @@ export default function DashboardPage({
         <div style={styles.errorBanner}>
           <AlertTriangle size={16} style={{ marginRight: 8, flexShrink: 0 }} />
           {repsNeedingLogout.map((r) => r.name).join(', ')}
-          {repsNeedingLogout.length === 1 ? ' has' : ' have'} been outside the dealer radius repeatedly and should check out.
+          {repsNeedingLogout.length === 1 ? ' has' : ' have'} been outside the dealer radius repeatedly and should log out.
         </div>
       )}
 

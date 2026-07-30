@@ -5,9 +5,9 @@ import StatusBadge from '../StatusBadge';
 import { colors, typography, spacing } from '../../theme';
 
 const STATUS_META = {
-  checked_in: { label: 'Checked in', tone: 'success', dot: colors.success },
+  checked_in: { label: 'Logged in', tone: 'success', dot: colors.success },
   day_ended: { label: 'Day ended', tone: 'warning', dot: colors.warning },
-  not_checked_in: { label: 'Not checked in', tone: 'neutral', dot: colors.textMuted },
+  not_checked_in: { label: 'Not logged in', tone: 'neutral', dot: colors.textMuted },
 };
 
 function initials(name) {
@@ -47,7 +47,7 @@ export default function EmployeeCard({ rep, onViewDetails, timestampLabel }) {
       {rep.needs_logout_alert && (
         <div style={styles.alertBanner}>
           <AlertTriangle size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-          Outside dealer radius repeatedly — needs to check out
+          Outside dealer radius repeatedly — needs to log out
         </div>
       )}
 

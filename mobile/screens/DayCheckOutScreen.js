@@ -68,7 +68,7 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
       } catch (error) {
         if (!error.response) {
           await enqueueAction('post', '/attendance/check-out', payload);
-          Alert.alert('Offline Mode', 'Day check-out saved locally and will sync when online.');
+          Alert.alert('Offline Mode', 'Logout saved locally and will sync when online.');
           updatedAttendance = {
             ...attendance,
             check_out_time: new Date().toISOString(),
@@ -82,8 +82,8 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
         onCheckOut(updatedAttendance);
       }
     } catch (error) {
-      console.error('Day check-out error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to check out. Please try again.');
+      console.error('Logout error:', error);
+      Alert.alert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -95,14 +95,14 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Day check-out" onBack={() => navigation.goBack()} />
+      <AppHeader title="Logout" onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={styles.container}>
         <FadeSlideIn>
           <Card style={styles.summaryCard}>
             <View style={styles.summaryRow}>
               <View style={styles.summaryLeft}>
                 <Clock size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
-                <Text style={styles.summaryLabel}>Check-in</Text>
+                <Text style={styles.summaryLabel}>Login</Text>
               </View>
               <Text style={styles.summaryValue}>{formatTime(attendance?.check_in_time)}</Text>
             </View>
@@ -119,7 +119,7 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
           <LocationCard address={address} coords={coords} statusMessage={locationStatus} />
 
           <PrimaryButton
-            title="Check out for the day"
+            title="Logout for the day"
             onPress={handleCheckOut}
             disabled={!coords}
             loading={loading}

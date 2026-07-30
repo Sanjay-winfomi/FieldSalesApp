@@ -116,7 +116,7 @@ export default function HistoryScreen() {
           <EmptyState
             icon={<HistoryIcon size={40} color={colors.textMuted} />}
             title="No visits yet"
-            subtitle="Dealer visits you check in to will show up here."
+            subtitle="Dealer visits you log in to will show up here."
           />
         )}
 
@@ -157,7 +157,7 @@ export default function HistoryScreen() {
                       <Text style={styles.durationText}>
                         {completed
                           ? `Visit duration: ${visit.visit_duration_minutes || 0} min`
-                          : 'Currently checked in'}
+                          : 'Currently logged in'}
                       </Text>
 
                       {visit.distance_from_previous_km > 0 && (

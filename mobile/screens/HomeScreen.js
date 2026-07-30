@@ -85,7 +85,7 @@ export default function HomeScreen({ navigation }) {
               <AlertTriangle size={16} color={colors.dangerDark} style={styles.bannerIcon} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.warningBannerText}>
-                  Location permission is off — check-in/check-out won't work until it's re-enabled.
+                  Location permission is off — login/logout won't work until it's re-enabled.
                 </Text>
                 {!locationPermissionCanAskAgain && (
                   <Pressable onPress={onOpenLocationSettings} accessibilityRole="button">
@@ -112,13 +112,13 @@ export default function HomeScreen({ navigation }) {
           {dayStatus === 'not_checked_in' && (
             <StatusCard
               label="Day status"
-              value="Not checked in"
+              value="Not logged in"
               tone="neutral"
               icon={<Clock size={22} color={colors.textSecondary} />}
               onPress={() => navigation.navigate('DayCheckIn')}
               action={
                 <View style={styles.smallActionBtn}>
-                  <Text style={styles.smallActionBtnText}>Check in</Text>
+                  <Text style={styles.smallActionBtnText}>Login</Text>
                 </View>
               }
             />
@@ -127,7 +127,7 @@ export default function HomeScreen({ navigation }) {
           {dayStatus === 'checked_in' && (
             <StatusCard
               label="Day status"
-              value={`Checked in ${checkInTime}`}
+              value={`Logged in ${checkInTime}`}
               tone="success"
               icon={<Check size={22} color={colors.successDark} />}
             />
@@ -164,7 +164,7 @@ export default function HomeScreen({ navigation }) {
                   }}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.checkOutBtnText}>Check out</Text>
+                  <Text style={styles.checkOutBtnText}>Dealer Logout</Text>
                 </Pressable>
               }
             />
@@ -208,7 +208,7 @@ export default function HomeScreen({ navigation }) {
         {dayStatus === 'checked_in' && (
           <FadeSlideIn delay={160} style={{ marginTop: spacing.cardGap }}>
             <PrimaryButton
-              title="Proceed to day check-out"
+              title="Proceed to logout"
               onPress={() => {
                 if (activeVisit) {
                   // Guard preserved from the original flow: can't end the day
@@ -221,7 +221,7 @@ export default function HomeScreen({ navigation }) {
             />
             {activeVisit && (
               <Text style={styles.blockedHint}>
-                Check out from "{activeVisit.dealer_name || 'the dealer'}" first.
+                Log out from "{activeVisit.dealer_name || 'the dealer'}" first.
               </Text>
             )}
           </FadeSlideIn>
@@ -237,7 +237,7 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.quickActionIcon}>
               <Store size={18} color={colors.primary} />
             </View>
-            <Text style={styles.quickActionText}>Check in at a dealer</Text>
+            <Text style={styles.quickActionText}>Dealer Login</Text>
             <ChevronRight size={18} color={colors.textMuted} />
           </Pressable>
           <Pressable

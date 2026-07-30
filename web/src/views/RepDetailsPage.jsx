@@ -70,14 +70,14 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                 <div>
                   <div style={styles.metaRow}>
                     <div style={styles.metaCol}>
-                      <span style={styles.metaLabel}>Check-in time</span>
+                      <span style={styles.metaLabel}>Login time</span>
                       <span style={styles.metaValue}>{formatTimeOnly(data.attendance.check_in_time)}</span>
                       <span style={styles.coordVal}>
                         GPS: {data.attendance.check_in_lat != null ? data.attendance.check_in_lat.toFixed(5) : 'N/A'}, {data.attendance.check_in_lng != null ? data.attendance.check_in_lng.toFixed(5) : 'N/A'}
                       </span>
                     </div>
                     <div style={styles.metaCol}>
-                      <span style={styles.metaLabel}>Check-out time</span>
+                      <span style={styles.metaLabel}>Logout time</span>
                       <span style={styles.metaValue}>{formatTimeOnly(data.attendance.check_out_time)}</span>
                       {data.attendance.check_out_time && (
                         <span style={styles.coordVal}>
@@ -103,7 +103,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                   </div>
                 </div>
               ) : (
-                <EmptyState title="No attendance recorded" subtitle="This rep hasn't checked in today." />
+                <EmptyState title="No attendance recorded" subtitle="This rep hasn't logged in today." />
               )}
             </Card>
           </div>
@@ -170,7 +170,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                               {visit.log_out_alert_sent && !visit.check_out_time && (
                                 <div style={styles.complianceAlert}>
                                   <AlertTriangle size={12} style={{ marginRight: 5, flexShrink: 0 }} />
-                                  Repeatedly outside radius — rep notified to check out
+                                  Repeatedly outside radius — rep notified to log out
                                 </div>
                               )}
                             </div>
