@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  GoogleMap, HeatmapLayer, Marker, InfoWindow, GoogleMarkerClusterer, useJsApiLoader,
+  GoogleMap, Marker, InfoWindow, GoogleMarkerClusterer, useJsApiLoader,
 } from '@react-google-maps/api';
+import { GoogleMapsOverlay } from '@deck.gl/google-maps';
+import { HeatmapLayer as DeckHeatmapLayer } from '@deck.gl/aggregation-layers';
 import { MapPin, Loader2, AlertTriangle } from 'lucide-react';
 import { apiClient } from '../../api';
 import FilterSelect from '../filters/FilterSelect';
@@ -12,10 +14,23 @@ import { colors, typography, spacing, radius } from '../../theme';
 // Stable reference required by useJsApiLoader — an inline array literal would
 // be a new object every render and trip the hook's "don't change libraries"
 // invariant. A distinct loader `id` (rather than reusing LocationPreviewMap's)
-// keeps this feature's `visualization` library request independent of any
-// other Google Maps consumer in the app.
-const MAP_LIBRARIES = ['visualization'];
+// isolates this feature's Maps script request from any other Google Maps
+// consumer in the app. No extra `libraries` are requested here: Google
+// removed the Heatmap Layer from the Maps JavaScript API (v3.65+), so the
+// heatmap itself is rendered by deck.gl's GoogleMapsOverlay below instead.
+const MAP_LIBRARIES = [];
 const LOADER_ID = 'fieldtrack-google-maps-heatmap';
+
+// Blue (low density) → red (high density), per the feature spec — deck.gl's
+// own default HeatmapLayer palette runs yellow→red instead.
+const HEATMAP_COLOR_RANGE = [
+  [0, 0, 255, 0],
+  [0, 0, 255, 180],
+  [0, 200, 255, 200],
+  [0, 255, 100, 210],
+  [255, 255, 0, 220],
+  [255, 0, 0, 230],
+];
 
 const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' };
 const DEFAULT_CENTER = { lat: 11.0168, lng: 76.9558 }; // Coimbatore — sensible fallback before any data loads
@@ -67,6 +82,7 @@ export default function RepHeatMap() {
   const [activeInfoRepId, setActiveInfoRepId] = useState(null);
 
   const mapRef = useRef(null);
+  const overlayRef = useRef(null);
   const hasFitBoundsOnceRef = useRef(false);
 
   useEffect(() => {
@@ -84,10 +100,26 @@ export default function RepHeatMap() {
     return () => { cancelled = true; };
   }, []);
 
-  const heatmapData = useMemo(() => {
-    if (!isLoaded || reps.length === 0) return [];
-    return reps.map((rep) => new window.google.maps.LatLng(rep.latitude, rep.longitude));
-  }, [isLoaded, reps]);
+  // deck.gl's GoogleMapsOverlay renders the heatmap directly onto the native
+  // google.maps.Map instance — it isn't a React child of <GoogleMap>, so it's
+  // created once (on map load) and kept in sync via setProps() below.
+  useEffect(() => {
+    if (!overlayRef.current) return;
+    overlayRef.current.setProps({
+      layers: [
+        new DeckHeatmapLayer({
+          id: 'rep-heatmap',
+          data: reps,
+          getPosition: (rep) => [rep.longitude, rep.latitude],
+          getWeight: 1,
+          radiusPixels: 45,
+          intensity: 1,
+          threshold: 0.05,
+          colorRange: HEATMAP_COLOR_RANGE,
+        }),
+      ],
+    });
+  }, [reps]);
 
   const fitToAllReps = useCallback((map) => {
     if (reps.length === 0) return;
@@ -103,11 +135,35 @@ export default function RepHeatMap() {
 
   const handleMapLoad = useCallback((map) => {
     mapRef.current = map;
+
+    overlayRef.current = new GoogleMapsOverlay({
+      layers: [
+        new DeckHeatmapLayer({
+          id: 'rep-heatmap',
+          data: reps,
+          getPosition: (rep) => [rep.longitude, rep.latitude],
+          getWeight: 1,
+          radiusPixels: 45,
+          intensity: 1,
+          threshold: 0.05,
+          colorRange: HEATMAP_COLOR_RANGE,
+        }),
+      ],
+    });
+    overlayRef.current.setMap(map);
+
     if (!hasFitBoundsOnceRef.current && reps.length > 0) {
       fitToAllReps(map);
       hasFitBoundsOnceRef.current = true;
     }
   }, [reps, fitToAllReps]);
+
+  // Releases the deck.gl overlay's WebGL context if this component is ever
+  // unmounted (it normally isn't — DashboardPage keeps it mounted for the
+  // rest of the session — but this guards against a future change to that).
+  useEffect(() => () => {
+    overlayRef.current?.finalize();
+  }, []);
 
   // Fit bounds once the reps arrive after the map already finished loading
   // (fetch and script-load race each other, so whichever finishes second
@@ -212,8 +268,6 @@ export default function RepHeatMap() {
             onLoad={handleMapLoad}
             options={{ streetViewControl: false, mapTypeControl: false, fullscreenControl: false, clickableIcons: false }}
           >
-            <HeatmapLayer data={heatmapData} options={{ radius: 40, opacity: 0.6 }} />
-
             <GoogleMarkerClusterer options={{}}>
               {(clusterer) => (
                 <>

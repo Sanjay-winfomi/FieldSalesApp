@@ -10,6 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deck.gl/aggregation-layers": "^9.3.7",
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/google-maps": "^9.3.7",
     "@react-google-maps/api": "^2.20.8",
     "axios": "^1.18.1",
     "lucide-react": "^1.24.0",

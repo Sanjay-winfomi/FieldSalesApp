@@ -1,11 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2, Flame } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  MetricCard, EmployeeCard, EmptyState, SkeletonCard, Button,
+  MetricCard, EmployeeCard, EmptyState, SkeletonCard, Button, LoadingCard,
 } from '../components';
-import RepHeatMap from '../components/heatmap/RepHeatMap';
 import { colors, typography, spacing } from '../theme';
+
+// Code-split out of the main bundle: RepHeatMap pulls in @react-google-maps/api
+// and deck.gl, which are heavy (~170kB+ gzipped combined) and only ever used
+// if a manager actually clicks "View Heat Map". `ssr: false` because it reads
+// `window.google`/WebGL, which don't exist during server rendering.
+const RepHeatMap = dynamic(() => import('../components/heatmap/RepHeatMap'), {
+  ssr: false,
+  loading: () => <LoadingCard message="Loading heat map module..." />,
+});
 
 function formatTimestamp(iso) {
   if (!iso) return '—';
