@@ -31,7 +31,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Winfomi uses your location to verify dealer check-ins/check-outs and record attendance accurately. It is only read at the moment of check-in, check-out, and periodic in-visit verification — never tracked continuously in the background."
+          "locationWhenInUsePermission": "Winfomi uses your location to verify dealer logins/logouts and record attendance accurately. It is only read at the moment of login, logout, and periodic in-visit verification — never tracked continuously in the background."
         }
       ],
       [

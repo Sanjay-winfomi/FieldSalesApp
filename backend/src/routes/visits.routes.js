@@ -6,7 +6,7 @@
  *                               unless the checkout GPS matches the check-in GPS within tolerance)
  * GET  /api/visits/exceptions       — manager-only: list out-of-radius events
  * PATCH /api/visits/exceptions/:id  — manager-only: mark an exception reviewed
- * POST /api/visits/:id/location-check — periodic in-visit GPS ping (every ~5
+ * POST /api/visits/:id/location-check — periodic in-visit GPS ping (every ~10
  *   min while a visit is open), used to show a live Inside/Outside Radius
  *   status and to accumulate a cumulative out-of-radius count for the
  *   "time to log out" alert.
