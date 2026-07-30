@@ -426,14 +426,15 @@ router.post('/:id/location-check', async (req, res) => {
       `UPDATE client_visits
        SET last_location_status    = $1,
            last_location_check_at  = NOW(),
-           outside_radius_count    = $2,
-           log_out_alert_sent      = log_out_alert_sent OR $3,
-           interrupted             = interrupted OR $3,
-           interrupted_at          = CASE WHEN interrupted THEN interrupted_at WHEN $3 THEN NOW() ELSE interrupted_at END,
-           interrupted_distance_m  = CASE WHEN interrupted THEN interrupted_distance_m WHEN $3 THEN $4 ELSE interrupted_distance_m END
+           last_location_distance_m = $2,
+           outside_radius_count    = $3,
+           log_out_alert_sent      = log_out_alert_sent OR $4,
+           interrupted             = interrupted OR $4,
+           interrupted_at          = CASE WHEN interrupted THEN interrupted_at WHEN $4 THEN NOW() ELSE interrupted_at END,
+           interrupted_distance_m  = CASE WHEN interrupted THEN interrupted_distance_m WHEN $4 THEN $2 ELSE interrupted_distance_m END
        WHERE id = $5
-       RETURNING id, last_location_status, last_location_check_at, outside_radius_count, log_out_alert_sent, interrupted`,
-      [insideRadius ? 'inside' : 'outside', nextOutsideCount, shouldSendLogoutAlert, distanceM, id]
+       RETURNING id, last_location_status, last_location_check_at, last_location_distance_m, outside_radius_count, log_out_alert_sent, interrupted`,
+      [insideRadius ? 'inside' : 'outside', distanceM, nextOutsideCount, shouldSendLogoutAlert, id]
     );
 
     if (shouldSendLogoutAlert) {

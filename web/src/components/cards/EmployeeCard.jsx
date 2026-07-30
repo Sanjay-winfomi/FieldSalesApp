@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, Route, ChevronRight } from 'lucide-react';
+import { Store, Route, ChevronRight, AlertTriangle } from 'lucide-react';
 import Card from './Card';
 import StatusBadge from '../StatusBadge';
 import { colors, typography, spacing } from '../../theme';
@@ -44,6 +44,13 @@ export default function EmployeeCard({ rep, onViewDetails, timestampLabel }) {
 
       <div style={styles.activityRow}>{rep.last_activity}</div>
 
+      {rep.needs_logout_alert && (
+        <div style={styles.alertBanner}>
+          <AlertTriangle size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+          Outside dealer radius repeatedly — needs to check out
+        </div>
+      )}
+
       <div style={styles.statsRow}>
         <div style={styles.stat}>
           <Store size={13} color={colors.textMuted} />
@@ -80,6 +87,10 @@ const styles = {
   name: { ...typography.cardTitle, fontSize: 15, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   metaLine: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
   activityRow: { ...typography.body, color: colors.textSecondary, marginTop: spacing.md, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  alertBanner: {
+    display: 'flex', alignItems: 'center', backgroundColor: colors.dangerLight, color: colors.dangerDark,
+    border: '1px solid #FECACA', borderRadius: 8, padding: '6px 10px', marginTop: spacing.sm, fontSize: 11.5, fontWeight: 600,
+  },
   statsRow: { display: 'flex', gap: spacing.lg, marginTop: spacing.sm, flexWrap: 'wrap' },
   stat: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textMuted },
   footer: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md, paddingTop: spacing.md, borderTop: `1px solid ${colors.border}` },

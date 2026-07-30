@@ -11,14 +11,13 @@ import { api } from '../api';
 import { enqueueAction } from '../syncManager';
 import { startVisitMonitoring, stopVisitMonitoring, __testing } from '../visitMonitor';
 
-const DEALER = { latitude: 11.0, longitude: 77.0, radius_meters: 200 };
 const VISIT = { id: 55 };
 
 describe('visitMonitor', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     Location.getForegroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
-    api.post.mockResolvedValue({ data: {} });
+    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.0001, longitude: 77.0001 } });
   });
 
   afterEach(() => {
@@ -27,91 +26,84 @@ describe('visitMonitor', () => {
     jest.clearAllMocks();
   });
 
-  test('does nothing while the rep stays inside the radius', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.0001, longitude: 77.0001 } });
-    const onWarning = jest.fn();
-    const onInterrupted = jest.fn();
+  test('pings the backend every CHECK_INTERVAL_MS while a visit is open', async () => {
+    api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
 
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER, onWarning, onInterrupted });
+    startVisitMonitoring({ visit: VISIT });
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+
+    expect(api.post).toHaveBeenCalledWith('/visits/55/location-check', { lat: 11.0001, lng: 77.0001 });
+  });
+
+  test('does not fire onWarning when the ping reports inside', async () => {
+    api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
+    const onWarning = jest.fn();
+    const onLogoutAlert = jest.fn();
+
+    startVisitMonitoring({ visit: VISIT, onWarning, onLogoutAlert });
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
     expect(onWarning).not.toHaveBeenCalled();
-    expect(onInterrupted).not.toHaveBeenCalled();
+    expect(onLogoutAlert).not.toHaveBeenCalled();
   });
 
-  test('fires onWarning the first time the rep is found outside the radius', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } }); // far outside 200m
+  test('fires onWarning whenever a ping reports outside', async () => {
+    api.post.mockResolvedValue({
+      data: { visit: { last_location_status: 'outside', log_out_alert_sent: false }, distance_meters: 287 },
+    });
     const onWarning = jest.fn();
 
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER, onWarning });
+    startVisitMonitoring({ visit: VISIT, onWarning });
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
-    expect(onWarning).toHaveBeenCalledTimes(1);
-    expect(api.post).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledTimes(2);
+    expect(onWarning).toHaveBeenCalledWith(287);
   });
 
-  test('flags the visit interrupted after staying outside past the grace period', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } });
-    const onInterrupted = jest.fn();
+  test('fires onLogoutAlert once the backend reports the cumulative breach alert', async () => {
+    api.post.mockResolvedValue({
+      data: { visit: { last_location_status: 'outside', log_out_alert_sent: true }, distance_meters: 300 },
+    });
+    const onLogoutAlert = jest.fn();
 
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER, onInterrupted });
+    startVisitMonitoring({ visit: VISIT, onLogoutAlert });
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
-    for (let i = 0; i < __testing.CONSECUTIVE_OUTSIDE_TO_INTERRUPT; i++) {
-      await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-    }
-
-    expect(onInterrupted).toHaveBeenCalledTimes(1);
-    expect(api.post).toHaveBeenCalledWith('/visits/55/interrupt', expect.objectContaining({ lat: 11.05, lng: 77.05 }));
+    expect(onLogoutAlert).toHaveBeenCalledTimes(1);
+    expect(onLogoutAlert).toHaveBeenCalledWith(300);
   });
 
-  test('only reports interrupted once even if still outside afterward', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } });
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER });
+  test('only fires onLogoutAlert once even if later pings keep reporting it', async () => {
+    api.post.mockResolvedValue({
+      data: { visit: { last_location_status: 'outside', log_out_alert_sent: true }, distance_meters: 300 },
+    });
+    const onLogoutAlert = jest.fn();
 
-    for (let i = 0; i < __testing.CONSECUTIVE_OUTSIDE_TO_INTERRUPT + 2; i++) {
-      await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-    }
+    startVisitMonitoring({ visit: VISIT, onLogoutAlert });
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
-    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(onLogoutAlert).toHaveBeenCalledTimes(1);
   });
 
-  test('resets the outside counter once back inside the radius', async () => {
-    Location.getCurrentPositionAsync
-      .mockResolvedValueOnce({ coords: { latitude: 11.05, longitude: 77.05 } }) // outside
-      .mockResolvedValueOnce({ coords: { latitude: 11.0001, longitude: 77.0001 } }) // back inside
-      .mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } }); // outside again
-    const onInterrupted = jest.fn();
-
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER, onInterrupted });
-
-    for (let i = 0; i < __testing.CONSECUTIVE_OUTSIDE_TO_INTERRUPT; i++) {
-      await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-    }
-
-    // The "back inside" reading should have reset the streak, so it never reached the threshold.
-    expect(onInterrupted).not.toHaveBeenCalled();
-  });
-
-  test('queues the interrupt report when offline', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } });
+  test('queues the location-check report when offline', async () => {
     api.post.mockRejectedValue({ message: 'Network Error' }); // no .response => treated as offline
 
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER });
+    startVisitMonitoring({ visit: VISIT });
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
-    for (let i = 0; i < __testing.CONSECUTIVE_OUTSIDE_TO_INTERRUPT; i++) {
-      await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-    }
-
-    expect(enqueueAction).toHaveBeenCalledWith('post', '/visits/55/interrupt', expect.any(Object));
+    expect(enqueueAction).toHaveBeenCalledWith('post', '/visits/55/location-check', expect.any(Object));
   });
 
   test('stopVisitMonitoring clears the interval', async () => {
-    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11.05, longitude: 77.05 } });
-    startVisitMonitoring({ visit: VISIT, dealer: DEALER });
+    api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
+    startVisitMonitoring({ visit: VISIT });
     stopVisitMonitoring();
 
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS * 5);
 
-    expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
   });
 });

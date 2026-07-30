@@ -107,31 +107,31 @@ export default function App() {
     return () => clearInterval(interval);
   }, [employee]);
 
-  // Random Location Verification: while there's an open dealer visit, poll
-  // the rep's location every few minutes and flag the visit "interrupted" if
-  // they've stayed outside the dealer's radius past a grace period. Restarts
-  // whenever the active visit changes (new check-in, or checked out — which
-  // clears it) so it always tracks the current visit, never a stale one.
+  // Random Location Verification: while there's an open dealer visit, ping
+  // the backend with the rep's location every 10 minutes. The backend tracks
+  // the cumulative (not necessarily consecutive) out-of-radius count and
+  // trips a "time to log out" alert once it reaches 2 — surfaced here and on
+  // the manager dashboard. Restarts whenever the active visit changes (new
+  // check-in, or checked out — which clears it) so it always tracks the
+  // current visit, never a stale one.
   useEffect(() => {
     const activeVisit = visits.find((v) => !v.check_out_time);
 
-    if (!activeVisit || !activeVisit.dealer_lat || !activeVisit.dealer_lng) {
+    if (!activeVisit) {
       stopVisitMonitoring();
       return;
     }
 
     startVisitMonitoring({
       visit: activeVisit,
-      dealer: {
-        latitude: parseFloat(activeVisit.dealer_lat),
-        longitude: parseFloat(activeVisit.dealer_lng),
-        radius_meters: activeVisit.dealer_radius_meters,
-      },
       onWarning: () => {
         Alert.alert('Leaving dealer premises', 'You appear to have left the dealer location. Please return, or check out if the visit has ended.');
       },
-      onInterrupted: () => {
-        Alert.alert('Visit marked as interrupted', 'You were away from the dealer premises for too long — this visit has been flagged for manager review.');
+      onLogoutAlert: () => {
+        Alert.alert(
+          'Time to check out',
+          'You have been outside the dealer premises multiple times during this visit. Please return and check out — your manager has also been notified.'
+        );
         fetchTodayState();
       },
     });

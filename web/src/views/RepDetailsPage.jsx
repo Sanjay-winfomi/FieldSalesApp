@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Clock, Route, Timer, MapPin } from 'lucide-react';
+import { ArrowLeft, Clock, Route, Timer, MapPin, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiClient } from '../api';
 import { Card, SectionHeader, LoadingCard, EmptyState, IconButton } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -7,6 +7,21 @@ import { colors, typography, spacing } from '../theme';
 function formatTimeOnly(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatCoord(value) {
+  return value != null ? parseFloat(value).toFixed(5) : 'N/A';
+}
+
+// Live status if the periodic in-visit check has run, else the check-in
+// moment's own inside/outside flag (visit may still be open with no ping yet).
+function radiusCompliance(visit) {
+  const inside = visit.last_location_status
+    ? visit.last_location_status === 'inside'
+    : visit.check_in_inside_radius;
+  const distanceM = visit.last_location_distance_m ?? visit.check_in_distance_m;
+  const reason = visit.check_out_justification_note || visit.justification_note;
+  return { inside, distanceM, reason };
 }
 
 export default function RepDetailsPage({ token, repId, onBack }) {
@@ -121,6 +136,46 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                             <span>· {parseFloat(visit.distance_from_previous_km).toFixed(2)} km from prev point</span>
                           )}
                         </div>
+
+                        {visit.dealer_lat != null && (() => {
+                          const { inside, distanceM, reason } = radiusCompliance(visit);
+                          return (
+                            <div style={inside ? styles.complianceCardOk : styles.complianceCardBad}>
+                              <div style={styles.complianceHeader}>
+                                {inside ? (
+                                  <CheckCircle2 size={14} color={colors.successDark} style={{ marginRight: 6, flexShrink: 0 }} />
+                                ) : (
+                                  <AlertTriangle size={14} color={colors.dangerDark} style={{ marginRight: 6, flexShrink: 0 }} />
+                                )}
+                                <span style={{ color: inside ? colors.successDark : colors.dangerDark }}>
+                                  {inside ? 'Inside dealer radius' : 'Outside dealer radius'}
+                                </span>
+                              </div>
+                              <div style={styles.complianceRow}>
+                                <span>Distance: {distanceM != null ? `${Math.round(distanceM)} m` : 'N/A'} / {visit.radius_meters} m allowed</span>
+                              </div>
+                              <div style={styles.complianceCoordsRow}>
+                                <span>Dealer GPS: {formatCoord(visit.dealer_lat)}, {formatCoord(visit.dealer_lng)}</span>
+                                <span>Rep GPS: {formatCoord(visit.check_in_lat)}, {formatCoord(visit.check_in_lng)}</span>
+                              </div>
+                              {!inside && reason && (
+                                <div style={styles.complianceReason}>Reason: "{reason}"</div>
+                              )}
+                              {visit.outside_radius_count > 0 && (
+                                <div style={styles.complianceMeta}>
+                                  {visit.outside_radius_count} out-of-radius check{visit.outside_radius_count !== 1 ? 's' : ''} this visit
+                                  {visit.last_location_check_at && ` · last checked ${formatTimeOnly(visit.last_location_check_at)}`}
+                                </div>
+                              )}
+                              {visit.log_out_alert_sent && !visit.check_out_time && (
+                                <div style={styles.complianceAlert}>
+                                  <AlertTriangle size={12} style={{ marginRight: 5, flexShrink: 0 }} />
+                                  Repeatedly outside radius — rep notified to check out
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -155,4 +210,18 @@ const styles = {
   timelineTime: { fontSize: 12, color: colors.textSecondary },
   dealerAddress: { fontSize: 13, color: colors.textSecondary, margin: '4px 0 8px' },
   visitStats: { display: 'flex', gap: 8, fontSize: 12, color: colors.textMuted },
+  complianceCardOk: {
+    marginTop: spacing.sm, padding: '10px 12px', borderRadius: 10, fontSize: 12,
+    backgroundColor: colors.successLight, border: '1px solid #BBF7D0',
+  },
+  complianceCardBad: {
+    marginTop: spacing.sm, padding: '10px 12px', borderRadius: 10, fontSize: 12,
+    backgroundColor: colors.dangerLight, border: '1px solid #FECACA',
+  },
+  complianceHeader: { display: 'flex', alignItems: 'center', fontWeight: 700, marginBottom: 6 },
+  complianceRow: { color: colors.text, marginBottom: 4 },
+  complianceCoordsRow: { display: 'flex', flexDirection: 'column', gap: 2, fontFamily: 'monospace', fontSize: 11, color: colors.textSecondary, marginBottom: 4 },
+  complianceReason: { fontSize: 12, color: colors.textSecondary, fontStyle: 'italic', marginBottom: 4 },
+  complianceMeta: { fontSize: 11, color: colors.textMuted },
+  complianceAlert: { display: 'flex', alignItems: 'center', fontSize: 11.5, fontWeight: 700, color: colors.dangerDark, marginTop: 6 },
 };

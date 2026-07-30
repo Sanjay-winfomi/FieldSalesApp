@@ -133,6 +133,12 @@ ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_check_at TIMEST
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS outside_radius_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS log_out_alert_sent BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Distance (meters) from the dealer at the most recent periodic location
+-- check — distinct from check_in_distance_m, which only reflects the
+-- one-time check-in moment. Lets the dashboard show a live "distance from
+-- dealer" figure for an open visit instead of a stale check-in-time value.
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_distance_m DOUBLE PRECISION;
+
 -- ============================================================
 -- 5. exception_log
 -- ============================================================

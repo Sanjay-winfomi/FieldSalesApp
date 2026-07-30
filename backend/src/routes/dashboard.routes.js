@@ -143,11 +143,14 @@ router.get('/rep/:id/today', async (req, res) => {
     // 3. Fetch visits for today
     const visitsResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
+              d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters,
               cv.check_in_time, cv.check_in_lat, cv.check_in_lng,
               cv.check_out_time, cv.check_out_lat, cv.check_out_lng,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
-              cv.last_location_status, cv.last_location_check_at,
-              cv.outside_radius_count, cv.interrupted,
+              cv.check_in_distance_m, cv.check_in_inside_radius,
+              cv.justification_note, cv.check_out_justification_note,
+              cv.last_location_status, cv.last_location_check_at, cv.last_location_distance_m,
+              cv.outside_radius_count, cv.log_out_alert_sent, cv.interrupted, cv.interrupted_at,
               cv.sync_status
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
