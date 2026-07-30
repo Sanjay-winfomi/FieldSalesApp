@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2 } from 'lucide-react';
+import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2, Flame } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  MetricCard, EmployeeCard, EmptyState, SkeletonCard,
+  MetricCard, EmployeeCard, EmptyState, SkeletonCard, Button,
 } from '../components';
+import RepHeatMap from '../components/heatmap/RepHeatMap';
 import { colors, typography, spacing } from '../theme';
 
 function formatTimestamp(iso) {
@@ -51,6 +52,20 @@ export default function DashboardPage({
     [reps]
   );
 
+  // Google Maps must never load until the manager explicitly asks for it —
+  // `heatMapMounted` flips false→true once, on the first click, and never
+  // back, so the map component (and its Google Maps script load) is created
+  // exactly once no matter how many times the button is pressed afterward.
+  // `heatMapVisible` just toggles a CSS show/hide on that already-mounted
+  // panel, so re-opening it never recreates the map instance.
+  const [heatMapMounted, setHeatMapMounted] = useState(false);
+  const [heatMapVisible, setHeatMapVisible] = useState(false);
+
+  const handleToggleHeatMap = () => {
+    if (!heatMapMounted) setHeatMapMounted(true);
+    setHeatMapVisible((visible) => !visible);
+  };
+
   return (
     <div style={styles.page} className="ft-page">
       <div style={styles.headerRow}>
@@ -60,6 +75,9 @@ export default function DashboardPage({
             {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
+        <Button variant="secondary" icon={<Flame size={15} />} onClick={handleToggleHeatMap}>
+          {heatMapVisible ? 'Hide Heat Map' : 'View Heat Map'}
+        </Button>
       </div>
 
       <div style={styles.metricsGrid}>
@@ -112,13 +130,22 @@ export default function DashboardPage({
           )}
         </div>
       </div>
+
+      {heatMapMounted && (
+        <div style={{ display: heatMapVisible ? 'block' : 'none' }}>
+          <RepHeatMap />
+        </div>
+      )}
     </div>
   );
 }
 
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 1920, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
-  headerRow: { marginBottom: spacing.xl },
+  headerRow: {
+    marginBottom: spacing.xl, display: 'flex', alignItems: 'flex-start',
+    justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.md,
+  },
   title: { ...typography.dashboardTitle, color: colors.text },
   subtitle: { ...typography.body, color: colors.textSecondary, marginTop: 4 },
   metricsGrid: {

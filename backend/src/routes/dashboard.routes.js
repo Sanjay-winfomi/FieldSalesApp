@@ -1,7 +1,9 @@
 /**
  * dashboard.routes.js — Stage 10
  *
- * GET /api/dashboard/today — manager-only: all reps' current status for today
+ * GET /api/dashboard/today           — manager-only: all reps' current status for today
+ * GET /api/dashboard/live-locations  — manager-only: reps' latest known GPS position, for the
+ *                                       Representative Heat Map feature
  */
 const express = require('express');
 const logger = require('../utils/logger');
@@ -98,6 +100,73 @@ router.get('/today', async (req, res) => {
     return res.json({ reps, generated_at: new Date().toISOString() });
   } catch (err) {
     logger.error('Dashboard error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/dashboard/live-locations
+// Powers the "Representative Heat Map" — one row per rep who has a known GPS
+// position today (from their latest dealer visit, falling back to their day
+// check-in point if no visit has happened yet). Reps with no attendance
+// record today are omitted entirely rather than returned with null coords,
+// since they have nothing to plot.
+router.get('/live-locations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        e.id            AS employee_id,
+        e.name,
+        a.check_in_time AS day_check_in,
+        a.check_out_time AS day_check_out,
+        a.check_in_lat  AS day_lat,
+        a.check_in_lng  AS day_lng,
+        lv.dealer_name,
+        lv.check_in_time  AS visit_check_in,
+        lv.check_out_time AS visit_check_out,
+        lv.check_in_lat   AS visit_lat,
+        lv.check_in_lng   AS visit_lng
+      FROM employees e
+      JOIN attendance a
+        ON a.employee_id = e.id
+        AND ${isCurrentBusinessDay('a.check_in_time')}
+      LEFT JOIN LATERAL (
+        SELECT cv.check_in_time, cv.check_out_time, cv.check_in_lat, cv.check_in_lng, d.name AS dealer_name
+        FROM client_visits cv
+        JOIN dealers d ON d.id = cv.dealer_id
+        WHERE cv.attendance_id = a.id
+        ORDER BY cv.check_in_time DESC
+        LIMIT 1
+      ) lv ON true
+      WHERE e.role = 'rep'
+      ORDER BY e.name
+    `);
+
+    const reps = result.rows
+      .map((row) => {
+        const latitude  = row.visit_lat != null ? parseFloat(row.visit_lat) : (row.day_lat != null ? parseFloat(row.day_lat) : null);
+        const longitude = row.visit_lng != null ? parseFloat(row.visit_lng) : (row.day_lng != null ? parseFloat(row.day_lng) : null);
+        if (latitude == null || longitude == null) return null; // nothing to plot
+
+        const status = row.day_check_out ? 'Logged Out' : 'Logged In';
+        const lastUpdatedIso = row.visit_check_out || row.visit_check_in || row.day_check_out || row.day_check_in;
+        const formatTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : null);
+
+        return {
+          id:           row.employee_id,
+          name:         row.name,
+          latitude,
+          longitude,
+          dealer:       row.dealer_name || null,
+          status,
+          loginTime:    formatTime(row.day_check_in),
+          lastUpdated:  formatTime(lastUpdatedIso),
+        };
+      })
+      .filter(Boolean);
+
+    return res.json({ reps, generated_at: new Date().toISOString() });
+  } catch (err) {
+    logger.error('GET /api/dashboard/live-locations error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

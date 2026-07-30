@@ -61,3 +61,61 @@ describe('GET /api/x/rep/:id/today', () => {
     expect(res.body.attendance).toBeNull();
   });
 });
+
+describe('GET /api/x/live-locations', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('omits a rep with no known GPS position', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ employee_id: 1, name: 'Arun', day_check_in: '2026-07-30T04:00:00Z', day_check_out: null, day_lat: null, day_lng: null }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/live-locations');
+    expect(res.status).toBe(200);
+    expect(res.body.reps).toHaveLength(0);
+  });
+
+  test('falls back to the day check-in point when there is no visit yet', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        employee_id: 1, name: 'Arun',
+        day_check_in: '2026-07-30T04:00:00Z', day_check_out: null,
+        day_lat: 11.0168, day_lng: 76.9558,
+      }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/live-locations');
+    expect(res.status).toBe(200);
+    expect(res.body.reps[0]).toMatchObject({ latitude: 11.0168, longitude: 76.9558, status: 'Logged In', dealer: null });
+  });
+
+  test("uses the latest visit's location and dealer name when open", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        employee_id: 2, name: 'Divya',
+        day_check_in: '2026-07-30T04:00:00Z', day_check_out: null,
+        day_lat: 11.0, day_lng: 77.0,
+        dealer_name: 'ABC Medical', visit_check_in: '2026-07-30T06:00:00Z', visit_check_out: null,
+        visit_lat: 11.02, visit_lng: 77.01,
+      }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/live-locations');
+    expect(res.status).toBe(200);
+    expect(res.body.reps[0]).toMatchObject({ latitude: 11.02, longitude: 77.01, dealer: 'ABC Medical', status: 'Logged In' });
+  });
+
+  test('marks a rep who has ended their day as Logged Out', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        employee_id: 3, name: 'Karthik',
+        day_check_in: '2026-07-30T04:00:00Z', day_check_out: '2026-07-30T12:00:00Z',
+        day_lat: 11.0, day_lng: 77.0,
+      }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/live-locations');
+    expect(res.status).toBe(200);
+    expect(res.body.reps[0].status).toBe('Logged Out');
+  });
+});

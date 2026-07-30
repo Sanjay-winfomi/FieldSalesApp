@@ -336,6 +336,15 @@ select:focus-visible,
   .ft-full-width-mobile { width: 100%; }
 }
 
+/* Representative Heat Map — responsive height so the map shrinks gracefully
+   on tablet/laptop widths instead of overflowing or staying uselessly tall. */
+@media (max-width: 1024px) {
+  .ft-heatmap-shell { height: 400px !important; }
+}
+@media (max-width: 640px) {
+  .ft-heatmap-shell { height: 320px !important; }
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
