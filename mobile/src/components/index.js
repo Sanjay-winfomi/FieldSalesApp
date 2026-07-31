@@ -20,3 +20,4 @@ export { SkeletonBlock, SkeletonCard } from './loaders/Skeleton';
 
 export { default as EmptyState } from './EmptyState';
 export { default as FadeSlideIn } from './FadeSlideIn';
+export { default as DealerPickerModal } from './DealerPickerModal';

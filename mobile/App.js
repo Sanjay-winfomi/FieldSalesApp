@@ -11,6 +11,7 @@ import { api, setAuthInvalidatedHandler } from './src/services/api';
 import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, setConflictHandler } from './src/services/syncManager';
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
 import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
+import { configureNotificationHandler } from './src/services/reminderNotifications';
 import { AppStateContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
@@ -24,6 +25,8 @@ import DealerCheckOutScreen from './screens/DealerCheckOutScreen';
 import DayCheckOutScreen from './screens/DayCheckOutScreen';
 import NotesScreen from './screens/NotesScreen';
 import NoteEditorScreen from './screens/NoteEditorScreen';
+import RemindersScreen from './screens/RemindersScreen';
+import ReminderEditorScreen from './screens/ReminderEditorScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -81,6 +84,13 @@ export default function App() {
 
   const visitsCount = visits.length;
   const distanceTravelled = attendance ? `${parseFloat(attendance.total_distance_km || 0).toFixed(1)} km` : '0.0 km';
+
+  // Requests notification permission and sets up the Android notification
+  // channel once at startup, so reminders scheduled later already have
+  // permission in place rather than prompting mid-flow.
+  useEffect(() => {
+    configureNotificationHandler();
+  }, []);
 
   // Auto-sync any queued offline actions whenever a session is active, and
   // resume flushing automatically as soon as connectivity comes back.
@@ -420,6 +430,8 @@ export default function App() {
 
               <Stack.Screen name="Notes" component={NotesScreen} />
               <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
+              <Stack.Screen name="Reminders" component={RemindersScreen} />
+              <Stack.Screen name="ReminderEditor" component={ReminderEditorScreen} />
             </Stack.Navigator>
           </AppStateContext.Provider>
         </NavigationContainer>

@@ -1,6 +1,13 @@
 require('dotenv').config({ override: true });
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const logger = require('../utils/logger');
+
+// pg parses SQL DATE columns (OID 1082) into a JS Date at local midnight,
+// which then serializes to UTC and shifts across a day boundary for any
+// timezone ahead of UTC (e.g. reminder_date '2026-08-03' becomes
+// '2026-08-02T18:30:00.000Z' in IST) — return the raw 'YYYY-MM-DD' string
+// instead so date-only columns round-trip exactly.
+types.setTypeParser(1082, (value) => value);
 
 // Most managed Postgres providers (Render, Heroku, RDS with enforced SSL)
 // require SSL and reject plain connections outright — DB_SSL lets a

@@ -191,3 +191,24 @@ CREATE TABLE IF NOT EXISTS notes (
 
 CREATE INDEX IF NOT EXISTS idx_notes_employee_id ON notes (employee_id);
 CREATE INDEX IF NOT EXISTS idx_notes_created_at  ON notes (created_at);
+
+-- ============================================================
+-- 7. reminders
+-- ============================================================
+-- A rep's reminder to follow up with a dealer on a given date. The mobile
+-- app schedules two local device notifications (day-before and day-of) at
+-- creation time; notif_id_day_before/notif_id_day_of store the identifiers
+-- so the app can cancel them if the reminder is deleted.
+CREATE TABLE IF NOT EXISTS reminders (
+  id                    SERIAL PRIMARY KEY,
+  employee_id           INTEGER     NOT NULL REFERENCES employees (id) ON DELETE CASCADE,
+  dealer_id             INTEGER     NOT NULL REFERENCES dealers (id),
+  reminder_date         DATE        NOT NULL,
+  note                  TEXT        NOT NULL CHECK (char_length(TRIM(note)) >= 20),
+  notif_id_day_before   TEXT,
+  notif_id_day_of       TEXT,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_employee_id   ON reminders (employee_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_reminder_date ON reminders (reminder_date);

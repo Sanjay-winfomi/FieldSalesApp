@@ -23,6 +23,7 @@ const employeesRouter  = require('./routes/employees.routes');
 const reportsRouter    = require('./routes/reports.routes');
 const geocodeRouter    = require('./routes/geocode.routes');
 const notesRouter      = require('./routes/notes.routes');
+const remindersRouter  = require('./routes/reminders.routes');
 
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
@@ -143,6 +144,7 @@ app.use('/api/visits',     requireAuth, visitsRouter);
 app.use('/api/dealers',    requireAuth, dealersRouter);
 app.use('/api/geocode',    requireAuth, geocodeRouter);
 app.use('/api/notes',      requireAuth, notesRouter);
+app.use('/api/reminders',  requireAuth, remindersRouter);
 
 // Exposes the actual configured check-in tolerance radius so the UI never
 // has to hardcode a value that could drift from what .env really says.
