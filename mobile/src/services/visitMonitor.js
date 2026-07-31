@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { api } from './api';
 import { enqueueAction } from './syncManager';
@@ -15,14 +16,18 @@ import { enqueueAction } from './syncManager';
  * "time to log out" alert, surfaced to both this device and the manager
  * dashboard).
  *
- * Foreground-only means this pauses whenever the app is backgrounded and
- * resumes on the next check after it's foregrounded again — an intentional
- * tradeoff for battery life and to avoid the background-location permission
- * prompt, not a bug.
+ * Foreground-only means the interval alone can leave the dashboard showing a
+ * stale check-in-time status for hours if the rep just pockets the phone
+ * after logging in — the interval only fires while foregrounded and won't
+ * catch up on missed ticks. To keep that window as small as possible, a
+ * check also fires immediately on start and every time the app returns to
+ * the foreground during an open visit, so the very next time the rep glances
+ * at their phone, the status refreshes instead of waiting on the timer.
  */
 const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 let timer = null;
+let appStateSubscription = null;
 let logoutAlertAlready = false;
 
 /**
@@ -57,13 +62,21 @@ export function startVisitMonitoring({ visit, onWarning, onLogoutAlert }) {
     }
   };
 
+  check();
   timer = setInterval(check, CHECK_INTERVAL_MS);
+  appStateSubscription = AppState.addEventListener('change', (nextState) => {
+    if (nextState === 'active') check();
+  });
 }
 
 export function stopVisitMonitoring() {
   if (timer) {
     clearInterval(timer);
     timer = null;
+  }
+  if (appStateSubscription) {
+    appStateSubscription.remove();
+    appStateSubscription = null;
   }
   logoutAlertAlready = false;
 }

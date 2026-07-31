@@ -1,3 +1,12 @@
+let mockAppStateListeners = [];
+jest.mock('react-native', () => ({
+  AppState: {
+    addEventListener: jest.fn((event, handler) => {
+      mockAppStateListeners.push(handler);
+      return { remove: jest.fn(() => { mockAppStateListeners = mockAppStateListeners.filter((h) => h !== handler); }) };
+    }),
+  },
+}));
 jest.mock('expo-location', () => ({
   getForegroundPermissionsAsync: jest.fn(),
   getCurrentPositionAsync: jest.fn(),
@@ -6,12 +15,17 @@ jest.mock('expo-location', () => ({
 jest.mock('../api', () => ({ api: { post: jest.fn() } }));
 jest.mock('../syncManager', () => ({ enqueueAction: jest.fn() }));
 
+import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { api } from '../api';
 import { enqueueAction } from '../syncManager';
 import { startVisitMonitoring, stopVisitMonitoring, __testing } from '../visitMonitor';
 
 const VISIT = { id: 55 };
+
+function goToForeground() {
+  mockAppStateListeners.forEach((handler) => handler('active'));
+}
 
 describe('visitMonitor', () => {
   beforeEach(() => {
@@ -24,15 +38,31 @@ describe('visitMonitor', () => {
     stopVisitMonitoring();
     jest.useRealTimers();
     jest.clearAllMocks();
+    mockAppStateListeners = [];
   });
 
-  test('pings the backend every CHECK_INTERVAL_MS while a visit is open', async () => {
+  test('checks immediately on start, then every CHECK_INTERVAL_MS after', async () => {
     api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
 
     startVisitMonitoring({ visit: VISIT });
-    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-
+    await jest.advanceTimersByTimeAsync(0);
+    expect(api.post).toHaveBeenCalledTimes(1);
     expect(api.post).toHaveBeenCalledWith('/visits/55/location-check', { lat: 11.0001, lng: 77.0001 });
+
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    expect(api.post).toHaveBeenCalledTimes(2);
+  });
+
+  test('checks again as soon as the app returns to the foreground', async () => {
+    api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
+
+    startVisitMonitoring({ visit: VISIT });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(api.post).toHaveBeenCalledTimes(1);
+
+    goToForeground();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(api.post).toHaveBeenCalledTimes(2);
   });
 
   test('does not fire onWarning when the ping reports inside', async () => {
@@ -57,7 +87,7 @@ describe('visitMonitor', () => {
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
 
-    expect(onWarning).toHaveBeenCalledTimes(2);
+    expect(onWarning).toHaveBeenCalledTimes(3); // immediate check on start + 2 interval ticks
     expect(onWarning).toHaveBeenCalledWith(287);
   });
 
@@ -97,12 +127,16 @@ describe('visitMonitor', () => {
     expect(enqueueAction).toHaveBeenCalledWith('post', '/visits/55/location-check', expect.any(Object));
   });
 
-  test('stopVisitMonitoring clears the interval', async () => {
+  test('stopVisitMonitoring clears the interval and the foreground listener', async () => {
     api.post.mockResolvedValue({ data: { visit: { last_location_status: 'inside', log_out_alert_sent: false } } });
     startVisitMonitoring({ visit: VISIT });
+    await jest.advanceTimersByTimeAsync(0); // let the immediate on-start check settle
     stopVisitMonitoring();
+    api.post.mockClear();
 
     await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS * 5);
+    goToForeground();
+    await jest.advanceTimersByTimeAsync(0);
 
     expect(api.post).not.toHaveBeenCalled();
   });
