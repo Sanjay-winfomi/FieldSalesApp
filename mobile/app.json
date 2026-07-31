@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.winfomi.fieldtrack"
+      "bundleIdentifier": "com.winfomi.fieldtrack",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"]
+      }
     },
     "android": {
       "package": "com.winfomi.fieldtrack",
@@ -20,7 +23,8 @@
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "web": {
@@ -31,7 +35,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Winfomi uses your location to verify dealer logins/logouts and record attendance accurately. It is only read at the moment of login, logout, and periodic in-visit verification — never tracked continuously in the background."
+          "locationWhenInUsePermission": "Winfomi uses your location to verify dealer logins/logouts and record attendance accurately. It is only read at the moment of login, logout, and periodic in-visit verification.",
+          "locationAlwaysAndWhenInUsePermission": "Winfomi checks whether you're still within the dealer's premises during an open visit, including while the app is in the background — this only runs between logging in and logging out of a dealer.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
         }
       ],
       [

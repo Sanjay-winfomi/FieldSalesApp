@@ -3,13 +3,14 @@ import { StyleSheet, View, Alert, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { getLocationPermissionStatus, openLocationSettings } from './src/services/location';
+import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission } from './src/services/location';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { api, setAuthInvalidatedHandler } from './src/services/api';
 import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, setConflictHandler } from './src/services/syncManager';
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
+import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
 import { AppStateContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
@@ -110,17 +111,22 @@ export default function App() {
   }, [employee]);
 
   // Random Location Verification: while there's an open dealer visit, ping
-  // the backend with the rep's location every 10 minutes. The backend tracks
-  // the cumulative (not necessarily consecutive) out-of-radius count and
-  // trips a "time to log out" alert once it reaches 2 — surfaced here and on
-  // the manager dashboard. Restarts whenever the active visit changes (new
-  // check-in, or checked out — which clears it) so it always tracks the
-  // current visit, never a stale one.
+  // the backend with the rep's location every 10 minutes while the app is
+  // foregrounded (visitMonitor.js), AND register a background geofence
+  // around the dealer (geofenceTask.js) so the OS itself reports the rep
+  // leaving/re-entering the radius even if the app is fully closed — reps
+  // routinely log in and pocket the phone, so the foreground-only ping alone
+  // left the dashboard showing a stale check-in-time status for the whole
+  // visit. Both paths report to the same backend endpoint, so they
+  // complement rather than conflict. Restarts whenever the active visit
+  // changes (new check-in, or checked out — which clears it) so it always
+  // tracks the current visit, never a stale one.
   useEffect(() => {
     const activeVisit = visits.find((v) => !v.check_out_time);
 
     if (!activeVisit) {
       stopVisitMonitoring();
+      stopDealerGeofence();
       return;
     }
 
@@ -138,7 +144,22 @@ export default function App() {
       },
     });
 
-    return () => stopVisitMonitoring();
+    if (activeVisit.dealer_latitude != null && activeVisit.dealer_longitude != null) {
+      requestBackgroundLocationPermission().then((granted) => {
+        if (granted) {
+          startDealerGeofence(activeVisit, {
+            latitude: activeVisit.dealer_latitude,
+            longitude: activeVisit.dealer_longitude,
+            radius_meters: activeVisit.dealer_radius_meters,
+          });
+        }
+      });
+    }
+
+    return () => {
+      stopVisitMonitoring();
+      stopDealerGeofence();
+    };
   }, [visits]);
 
   // Detect location permission revoked mid-session (e.g. via OS settings while

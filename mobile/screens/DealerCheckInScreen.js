@@ -63,9 +63,16 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
       let visitData = null;
       try {
         const response = await api.post('/visits/check-in', payload);
-        // Merge dealer_id explicitly — guarantees the field is present for
-        // the active-visit lookup in App.js regardless of RETURNING clause state.
-        visitData = { ...response.data.visit, dealer_id: dealer.id };
+        // Merge dealer_id/coordinates explicitly — guarantees these fields are
+        // present for the active-visit lookup and background geofence setup
+        // in App.js regardless of RETURNING clause state.
+        visitData = {
+          ...response.data.visit,
+          dealer_id: dealer.id,
+          dealer_latitude: dealer.latitude,
+          dealer_longitude: dealer.longitude,
+          dealer_radius_meters: dealer.radius_meters,
+        };
       } catch (error) {
         if (!error.response) {
           // Network error — enqueue and proceed
@@ -77,6 +84,9 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
             check_in_time: new Date().toISOString(),
             dealer_id: dealer.id,
             dealer_name: dealer.name,
+            dealer_latitude: dealer.latitude,
+            dealer_longitude: dealer.longitude,
+            dealer_radius_meters: dealer.radius_meters,
             check_in_lat: coords.lat,
             check_in_lng: coords.lng,
             within_radius: true,

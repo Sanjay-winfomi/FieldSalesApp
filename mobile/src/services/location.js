@@ -57,6 +57,25 @@ export const getLocationPermissionStatus = async () => {
 export const openLocationSettings = () => Linking.openSettings();
 
 /**
+ * Requests the "Always" location permission needed for geofencing to keep
+ * working while the app is backgrounded/closed during an open dealer visit.
+ * Must only be called after foreground permission is already granted (the OS
+ * requires the two-step ask). A denial here isn't fatal to the visit itself —
+ * the foreground-only periodic check in visitMonitor.js still runs as a
+ * fallback whenever the app is open.
+ * @returns {Promise<boolean>} whether background permission is granted
+ */
+export const requestBackgroundLocationPermission = async () => {
+  try {
+    const { status } = await Location.requestBackgroundPermissionsAsync();
+    return status === 'granted';
+  } catch (error) {
+    console.warn('Background location permission request failed:', error.message);
+    return false;
+  }
+};
+
+/**
  * Request foreground permissions and fetch the current GPS location, taking
  * up to a few readings and keeping the most precise one — a single reading
  * can land 50m+ off right after GPS wakes up, especially indoors/urban, so
