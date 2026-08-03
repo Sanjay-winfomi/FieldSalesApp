@@ -3,6 +3,7 @@ import { ArrowLeft, Clock, Route, Timer, MapPin, CheckCircle2, AlertTriangle } f
 import { apiClient } from '../api';
 import { Card, SectionHeader, LoadingCard, EmptyState, IconButton } from '../components';
 import { colors, typography, spacing } from '../theme';
+import RepFullReport from './RepFullReport';
 
 function formatTimeOnly(iso) {
   if (!iso) return '—';
@@ -28,6 +29,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [view, setView] = useState('today'); // 'today' | 'report'
 
   const fetchDetails = useCallback(async () => {
     setLoading(true);
@@ -52,7 +54,29 @@ export default function RepDetailsPage({ token, repId, onBack }) {
     <div style={styles.page} className="ft-page">
       <div style={styles.headerRow}>
         <IconButton icon={<ArrowLeft size={16} />} onClick={onBack} title="Back to dashboard" size={40} />
-        <SectionHeader title={data ? `${data.employee.name} — Today's timeline` : 'Representative timeline'} />
+        <SectionHeader
+          title={data ? `${data.employee.name} — ${view === 'today' ? "today's timeline" : 'full report'}` : 'Representative timeline'}
+        />
+        {data && (
+          <div style={styles.viewToggle}>
+            <button
+              type="button"
+              className={`ft-btn ${view === 'today' ? 'ft-btn-primary' : 'ft-btn-secondary'}`}
+              style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}
+              onClick={() => setView('today')}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={`ft-btn ${view === 'report' ? 'ft-btn-primary' : 'ft-btn-secondary'}`}
+              style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}
+              onClick={() => setView('report')}
+            >
+              Full report
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && <LoadingCard message="Loading representative details..." />}
@@ -61,7 +85,11 @@ export default function RepDetailsPage({ token, repId, onBack }) {
         <Card><EmptyState title="Couldn't load details" subtitle={error || 'Representative not found.'} onRetry={fetchDetails} /></Card>
       )}
 
-      {!loading && data && (
+      {!loading && data && view === 'report' && (
+        <RepFullReport token={token} repId={repId} employeeName={data.employee.name} />
+      )}
+
+      {!loading && data && view === 'today' && (
         <div className="ft-grid-12">
           <div style={{ gridColumn: 'span 5' }} className="ft-details-col">
             <Card>
@@ -191,7 +219,8 @@ export default function RepDetailsPage({ token, repId, onBack }) {
 
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 1920, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
-  headerRow: { display: 'flex', alignItems: 'center', gap: spacing.md, marginBottom: spacing.xl },
+  headerRow: { display: 'flex', alignItems: 'center', gap: spacing.md, marginBottom: spacing.xl, flexWrap: 'wrap' },
+  viewToggle: { display: 'flex', gap: 8, marginLeft: 'auto' },
   cardTitle: { ...typography.cardTitle, color: colors.text, marginBottom: spacing.lg, paddingBottom: spacing.md, borderBottom: `1px solid ${colors.border}` },
   metaRow: { display: 'flex', gap: spacing.lg, marginBottom: spacing.lg },
   metaCol: { flex: 1, display: 'flex', flexDirection: 'column' },

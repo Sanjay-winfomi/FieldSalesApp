@@ -2,7 +2,9 @@
  * reminders.routes.js — dealer follow-up reminders.
  *
  * POST   /api/reminders                 — create a reminder (20-char note minimum)
- * GET    /api/reminders                 — list the caller's own reminders
+ * GET    /api/reminders                 — list the caller's own reminders; a
+ *                                          manager may pass ?employee_id= to
+ *                                          view a rep's reminders
  * PATCH  /api/reminders/:id/notifications — persist locally-scheduled notification ids
  * DELETE /api/reminders/:id             — delete the caller's own reminder
  */
@@ -66,7 +68,18 @@ router.post('/', async (req, res) => {
 
 // GET /api/reminders
 router.get('/', async (req, res) => {
+  const isManager = req.employee.role === 'manager';
+  const { employee_id } = req.query;
+
   try {
+    let targetEmployeeId = req.employee.id;
+    if (isManager && employee_id) {
+      targetEmployeeId = parseInt(employee_id);
+      if (!Number.isInteger(targetEmployeeId)) {
+        return res.status(400).json({ error: 'Invalid employee_id' });
+      }
+    }
+
     const result = await pool.query(
       `SELECT r.id, r.employee_id, r.dealer_id, r.reminder_date, r.note,
               r.notif_id_day_before, r.notif_id_day_of, r.created_at, d.name AS dealer_name
@@ -74,7 +87,7 @@ router.get('/', async (req, res) => {
        JOIN dealers d ON d.id = r.dealer_id
        WHERE r.employee_id = $1
        ORDER BY r.reminder_date ASC LIMIT 500`,
-      [req.employee.id]
+      [targetEmployeeId]
     );
     return res.json({ reminders: result.rows });
   } catch (err) {

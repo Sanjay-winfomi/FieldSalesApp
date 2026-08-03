@@ -7,6 +7,7 @@ const remindersRouter = require('../../src/routes/reminders.routes');
 
 const REP = { id: 1, role: 'rep', username: 'arun' };
 const OTHER_REP = { id: 2, role: 'rep', username: 'divya' };
+const MANAGER = { id: 99, role: 'manager', username: 'priya' };
 
 const LONG_NOTE = 'Follow up on the pending order and payment';
 const SHORT_NOTE = 'too short';
@@ -71,6 +72,28 @@ describe('GET /api/x/', () => {
     expect(res.status).toBe(200);
     expect(res.body.reminders).toHaveLength(1);
     expect(res.body.reminders[0].dealer_name).toBe('Anand Tiles');
+    expect(pool.query.mock.calls[0][1]).toEqual([REP.id]);
+  });
+
+  test('a manager can pass ?employee_id= to view a rep\'s reminders', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(remindersRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/').query({ employee_id: REP.id });
+    expect(res.status).toBe(200);
+    expect(pool.query.mock.calls[0][1]).toEqual([REP.id]);
+  });
+
+  test('400 when a manager passes an invalid employee_id', async () => {
+    const app = makeApp(remindersRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/').query({ employee_id: 'abc' });
+    expect(res.status).toBe(400);
+  });
+
+  test('a rep passing ?employee_id= is ignored — still sees only their own', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(remindersRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).get('/api/x/').query({ employee_id: OTHER_REP.id });
+    expect(res.status).toBe(200);
     expect(pool.query.mock.calls[0][1]).toEqual([REP.id]);
   });
 });

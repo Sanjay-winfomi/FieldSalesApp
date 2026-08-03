@@ -1,46 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Download, AlertTriangle, Calendar, FileBarChart2, Route, Timer, Trophy } from 'lucide-react';
+import { Download, AlertTriangle, Calendar } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  SectionHeader, FilterSelect, Button, Card, FilterBar, DataTable, MetricCard, EmptyState,
+  SectionHeader, FilterSelect, Button, Card, FilterBar, DataTable, EmptyState,
 } from '../components';
 import { colors, typography, spacing } from '../theme';
-
-async function downloadCsv(path, filename) {
-  const res = await apiClient.get(path, { responseType: 'blob' });
-  const blob = new Blob([res.data], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
-}
-
-function toDateInputValue(d) {
-  return d.toISOString().slice(0, 10);
-}
-
-const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-
-// The table shows raw report data on screen — timestamps need to read as a
-// date/time a manager can scan, not the ISO string the API returns. The CSV
-// export deliberately keeps the raw ISO value instead (unambiguous, sortable,
-// re-importable), so this formatting is display-only.
-function formatCellValue(value) {
-  if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string' && ISO_TIMESTAMP_PATTERN.test(value)) {
-    return new Date(value).toLocaleString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-      timeZone: 'Asia/Kolkata',
-    });
-  }
-  return value;
-}
+import { downloadCsv, toDateInputValue, buildDynamicColumns } from '../utils/reports';
 
 const REPORT_TABS = [
   { key: 'attendance', label: 'Attendance' },
@@ -122,15 +87,7 @@ export default function ReportsPage() {
   }, [fetchReport]);
 
   const columns = useMemo(() => {
-    if (rows.length === 0) return [];
-    const base = Object.keys(rows[0]).map((key) => ({
-      key,
-      label: key.replace(/_/g, ' '),
-      render: (row) => {
-        const value = formatCellValue(row[key]);
-        return <span title={String(value)}>{value}</span>;
-      },
-    }));
+    const base = buildDynamicColumns(rows);
     if (activeTab !== 'exceptions') return base;
     return [
       ...base,
@@ -147,53 +104,12 @@ export default function ReportsPage() {
     ];
   }, [rows, activeTab, markExceptionReviewed]);
 
-  // Summary tiles adapt to whichever real fields are present on the current
-  // report's rows — nothing here is fabricated or hardcoded per report type.
-  const summary = useMemo(() => {
-    if (rows.length === 0) return null;
-    const hasDistance = 'total_distance_km' in rows[0] || 'distance_from_previous_km' in rows[0];
-    const hasDuration = 'total_duration_minutes' in rows[0] || 'visit_duration_minutes' in rows[0];
-    const hasEmployee = 'employee_name' in rows[0];
-
-    const totalDistance = hasDistance
-      ? rows.reduce((sum, r) => sum + parseFloat(r.total_distance_km || r.distance_from_previous_km || 0), 0)
-      : null;
-
-    const durations = hasDuration
-      ? rows.map((r) => r.total_duration_minutes ?? r.visit_duration_minutes).filter((v) => v != null)
-      : [];
-    const avgDuration = durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
-
-    let topPerformer = null;
-    if (hasEmployee) {
-      const counts = {};
-      rows.forEach((r) => { counts[r.employee_name] = (counts[r.employee_name] || 0) + 1; });
-      const [name, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
-      if (name) topPerformer = { name, count };
-    }
-
-    return { totalDistance, avgDuration, topPerformer };
-  }, [rows]);
-
   return (
     <div style={styles.page} className="ft-page">
       <SectionHeader
         title="Reports"
         subtitle="Attendance, dealer visits, and distance/duration across your team"
       />
-
-      <div style={styles.metricsGrid}>
-        <MetricCard icon={<FileBarChart2 />} value={rows.length} label="Records in range" tone="primary" />
-        {summary?.totalDistance != null && (
-          <MetricCard icon={<Route />} value={`${summary.totalDistance.toFixed(1)} km`} label="Total distance" tone="warning" />
-        )}
-        {summary?.avgDuration != null && (
-          <MetricCard icon={<Timer />} value={`${summary.avgDuration} min`} label="Average duration" tone="success" />
-        )}
-        {summary?.topPerformer && (
-          <MetricCard icon={<Trophy />} value={summary.topPerformer.name} label={`Top performer (${summary.topPerformer.count} records)`} tone="primary" />
-        )}
-      </div>
 
       <Card style={styles.alertCard}>
         <div style={styles.alertHeader}>
@@ -312,9 +228,6 @@ export default function ReportsPage() {
 
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 1920, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
-  metricsGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: spacing.lg, marginBottom: spacing.xl,
-  },
   alertCard: { backgroundColor: colors.warningLight, borderColor: '#FDE68A', marginBottom: spacing.xl },
   truncatedBanner: {
     display: 'flex', alignItems: 'center', backgroundColor: colors.warningLight, color: colors.warningDark,
