@@ -77,6 +77,20 @@ export const clearQueue = async () => {
 // Fields that may hold a temp 'offline-...' id needing rewrite before send.
 const ID_FIELDS = ['attendance_id', 'visit_id'];
 
+// A real HTTP response (even an error one) means the request reached the
+// server and isn't a connectivity problem — defer to that first. Only when
+// there's no response at all do we check for the specific codes/messages a
+// dropped connection, DNS failure, timeout, or airplane mode actually surface
+// as; axios's generic 'ERR_NETWORK'/'Network Error' alone missed several of
+// these, silently discarding a queued action instead of retrying it.
+export const isNetworkError = (error) => {
+  if (error.response) return false;
+  if (['ERR_NETWORK', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'ERR_INTERNET_DISCONNECTED'].includes(error.code)) {
+    return true;
+  }
+  return typeof error.message === 'string' && /network|timeout/i.test(error.message);
+};
+
 /**
  * Attempt to flush the queue to the server, in original order, rewriting
  * any temp ids to their real server ids as earlier queued actions resolve.
@@ -142,13 +156,13 @@ export const flushQueue = async () => {
           await persistRemaining();
         } catch (error) {
           // Only a genuine network failure (offline, DNS, timeout) should retry
-          // unbounded — an auth failure (e.g. missing/expired refresh token) also
-          // surfaces with no `.response`, but retrying that forever would just
-          // silently drain the queue's actions without ever informing the user
-          // they need to log in again, so it must fall through to the bounded path.
-          const isNetworkError = error.code === 'ERR_NETWORK' || error.message === 'Network Error';
-
-          if (isNetworkError) {
+          // unbounded — an auth failure (e.g. missing/expired refresh token)
+          // surfaces with a real `.response` (401 from /auth/refresh), so
+          // isNetworkError already excludes it; retrying that forever would
+          // just silently drain the queue without ever telling the user they
+          // need to log in again, so it correctly falls through to the
+          // bounded path below instead.
+          if (isNetworkError(error)) {
             // Still offline / network dropped mid-flush — keep as-is, retry later.
             remaining.push(action);
           } else if (error.response?.status === 409) {

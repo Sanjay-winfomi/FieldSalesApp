@@ -1,8 +1,10 @@
 /**
  * auth.routes.js — Stage 4: Authentication endpoints
  *
- * POST /api/auth/login   — verify credentials, return JWT + refresh token
- * POST /api/auth/refresh — exchange a refresh token for a new access token
+ * POST /api/auth/login            — verify credentials, return JWT + refresh token
+ * POST /api/auth/refresh          — exchange a refresh token for a new access token
+ * POST /api/auth/forgot-password  — self-service reset: username + registered
+ *                                    phone number in place of a current password
  */
 const express = require('express');
 const logger = require('../utils/logger');
@@ -114,6 +116,54 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Refresh token expired — please log in again' });
     }
     return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// Digits only, last 10 — tolerates a manager/rep typing a leading country
+// code (e.g. +91) or dashes/spaces that the stored value may or may not have.
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.slice(-10);
+}
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  const { username, phone, new_password: newPassword } = req.body;
+
+  if (!username || !phone || !newPassword) {
+    return res.status(400).json({ error: 'username, phone, and new_password are required' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'new_password must be at least 6 characters' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT id, phone, is_active FROM employees WHERE LOWER(username) = LOWER($1)',
+      [username]
+    );
+
+    const employee = result.rows[0];
+    if (!employee || !employee.is_active) {
+      // Same reasoning as /login: an internal tool with a small, known set
+      // of accounts, so a specific message helps a rep catch a typo'd
+      // username rather than assuming the reset silently failed.
+      return res.status(401).json({ error: 'Username not found' });
+    }
+
+    const normalizedInput = normalizePhone(phone);
+    const normalizedOnFile = normalizePhone(employee.phone);
+    if (!normalizedOnFile || normalizedInput !== normalizedOnFile) {
+      return res.status(401).json({ error: 'Phone number does not match our records' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE employees SET password_hash = $1 WHERE id = $2', [passwordHash, employee.id]);
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('POST /api/auth/forgot-password error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 

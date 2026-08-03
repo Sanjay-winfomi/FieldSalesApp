@@ -297,77 +297,6 @@ router.post('/check-out', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// POST /api/visits/:id/interrupt — Random Location Verification spec.
-// The rep's own device reports that periodic in-visit GPS checks found them
-// outside the dealer's radius for longer than the client's grace period.
-// System-detected, so no justification reason is collected (unlike
-// check-in/check-out exceptions, which require one) — a manager reviews it
-// after the fact via the same exceptions list.
-// ──────────────────────────────────────────────────────────────────────────────
-router.post('/:id/interrupt', async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (!Number.isInteger(id)) {
-    return res.status(400).json({ error: 'Invalid visit id' });
-  }
-  const employeeId = req.employee.id;
-
-  const lat = parseCoord(req.body.lat, -90, 90);
-  const lng = parseCoord(req.body.lng, -180, 180);
-  if (lat === null || lng === null) {
-    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
-  }
-  const distanceMeters = typeof req.body.distance_meters === 'number' ? req.body.distance_meters : null;
-
-  try {
-    const visitResult = await pool.query(
-      `SELECT cv.id, cv.dealer_id, cv.check_out_time, cv.interrupted, d.name AS dealer_name
-       FROM client_visits cv
-       JOIN attendance a ON a.id = cv.attendance_id
-       JOIN dealers d ON d.id = cv.dealer_id
-       WHERE cv.id = $1 AND a.employee_id = $2`,
-      [id, employeeId]
-    );
-
-    if (visitResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Visit record not found' });
-    }
-
-    const visit = visitResult.rows[0];
-    if (visit.check_out_time) {
-      // The rep already checked out (e.g. this report was queued offline and
-      // is only syncing now) — nothing meaningful to flag on a closed visit.
-      return res.status(409).json({ error: 'Visit already checked out' });
-    }
-    if (visit.interrupted) {
-      // Already flagged earlier in this same visit — idempotent no-op so a
-      // retried/offline-queued report doesn't create duplicate exception rows.
-      return res.json({ visit: { id: visit.id, interrupted: true } });
-    }
-
-    const updated = await pool.query(
-      `UPDATE client_visits
-       SET interrupted = TRUE, interrupted_at = NOW(), interrupted_distance_m = $1
-       WHERE id = $2
-       RETURNING id, interrupted, interrupted_at`,
-      [distanceMeters, id]
-    );
-
-    await pool.query(
-      `INSERT INTO exception_log
-         (employee_id, dealer_id, visit_id, event_type, latitude, longitude, distance_meters)
-       VALUES ($1, $2, $3, 'interrupted', $4, $5, $6)`,
-      [employeeId, visit.dealer_id, id, lat, lng, distanceMeters]
-    );
-
-    logVisitInterrupted(req.employee.username, visit.dealer_name, distanceMeters);
-    return res.json({ visit: updated.rows[0] });
-  } catch (err) {
-    logger.error('POST /api/visits/:id/interrupt error', { error: err.message, stack: err.stack });
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ──────────────────────────────────────────────────────────────────────────────
 // POST /api/visits/:id/location-check — periodic in-visit GPS ping.
 // Distinct from /interrupt: this fires on every periodic check regardless of
 // inside/outside, so the dashboard can show a live "last checked Xm ago"
@@ -468,7 +397,11 @@ router.get('/', async (req, res) => {
 
     if (isManager) {
       if (employee_id) {
-        params.push(parseInt(employee_id));
+        const employeeId = parseInt(employee_id);
+        if (!Number.isInteger(employeeId)) {
+          return res.status(400).json({ error: 'Invalid employee_id' });
+        }
+        params.push(employeeId);
         conditions.push(`a.employee_id = $${params.length}`);
       }
     } else {
@@ -477,7 +410,11 @@ router.get('/', async (req, res) => {
     }
 
     if (dealer_id) {
-      params.push(parseInt(dealer_id));
+      const dealerId = parseInt(dealer_id);
+      if (!Number.isInteger(dealerId)) {
+        return res.status(400).json({ error: 'Invalid dealer_id' });
+      }
+      params.push(dealerId);
       conditions.push(`cv.dealer_id = $${params.length}`);
     }
     if (from) {
@@ -527,11 +464,19 @@ router.get('/exceptions', requireRole('manager'), async (req, res) => {
     const params = [];
 
     if (employee_id) {
-      params.push(parseInt(employee_id));
+      const employeeId = parseInt(employee_id);
+      if (!Number.isInteger(employeeId)) {
+        return res.status(400).json({ error: 'Invalid employee_id' });
+      }
+      params.push(employeeId);
       conditions.push(`el.employee_id = $${params.length}`);
     }
     if (dealer_id) {
-      params.push(parseInt(dealer_id));
+      const dealerId = parseInt(dealer_id);
+      if (!Number.isInteger(dealerId)) {
+        return res.status(400).json({ error: 'Invalid dealer_id' });
+      }
+      params.push(dealerId);
       conditions.push(`el.dealer_id = $${params.length}`);
     }
     if (reviewed !== undefined) {

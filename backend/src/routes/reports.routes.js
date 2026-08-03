@@ -29,19 +29,29 @@ function toCsv(rows) {
   return lines.join('\n');
 }
 
+// Reports that LIMIT their query to this many rows — if a result comes back
+// at exactly this size, it's likely (though not certain) that more rows
+// exist beyond it, so the UI can warn rather than silently showing/exporting
+// a partial result with no indication anything was cut off.
+const ROW_CAP = 2000;
+
 function sendReport(res, rows, format, filename) {
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(toCsv(rows));
   }
-  return res.json({ rows, count: rows.length });
+  return res.json({ rows, count: rows.length, truncated: rows.length >= ROW_CAP });
 }
 
+// Returns an error message string if employee_id was given but isn't a valid
+// integer, otherwise null.
 function buildDateEmployeeFilter(query, params, conditions, dateColumn) {
   const { from, to, employee_id } = query;
   if (employee_id) {
-    params.push(parseInt(employee_id));
+    const employeeId = parseInt(employee_id);
+    if (!Number.isInteger(employeeId)) return 'Invalid employee_id';
+    params.push(employeeId);
     conditions.push(`a.employee_id = $${params.length}`);
   }
   if (from) {
@@ -52,6 +62,18 @@ function buildDateEmployeeFilter(query, params, conditions, dateColumn) {
     params.push(to);
     conditions.push(`${dateColumn} <= $${params.length}::date + INTERVAL '1 day'`);
   }
+  return null;
+}
+
+// Returns an error message string if dealer_id was given but isn't a valid
+// integer, otherwise null.
+function pushDealerIdFilter(dealerIdParam, params, conditions, column) {
+  if (!dealerIdParam) return null;
+  const dealerId = parseInt(dealerIdParam);
+  if (!Number.isInteger(dealerId)) return 'Invalid dealer_id';
+  params.push(dealerId);
+  conditions.push(`${column} = $${params.length}`);
+  return null;
 }
 
 // GET /api/reports/attendance
@@ -59,7 +81,8 @@ router.get('/attendance', async (req, res) => {
   const { format } = req.query;
   const conditions = [];
   const params = [];
-  buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -88,11 +111,9 @@ router.get('/dealer-visits', async (req, res) => {
   const { format, dealer_id } = req.query;
   const conditions = [];
   const params = [];
-  buildDateEmployeeFilter(req.query, params, conditions, 'cv.check_in_time');
-  if (dealer_id) {
-    params.push(parseInt(dealer_id));
-    conditions.push(`cv.dealer_id = $${params.length}`);
-  }
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'cv.check_in_time')
+    || pushDealerIdFilter(dealer_id, params, conditions, 'cv.dealer_id');
+  if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -122,7 +143,8 @@ router.get('/distance-duration', async (req, res) => {
   const { format } = req.query;
   const conditions = [];
   const params = [];
-  buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -171,12 +193,16 @@ router.get('/exceptions', async (req, res) => {
   // filter, but this query has no attendance join — pass only from/to through
   // it and apply employee_id/dealer_id filters against `el` directly below.
   buildDateEmployeeFilter({ from, to }, params, conditions, 'el.created_at');
-  if (dealer_id) {
-    params.push(parseInt(dealer_id));
-    conditions.push(`el.dealer_id = $${params.length}`);
-  }
+  const dealerFilterError = pushDealerIdFilter(dealer_id, params, conditions, 'el.dealer_id');
+  if (dealerFilterError) return res.status(400).json({ error: dealerFilterError });
+
+  let employeeId;
   if (employee_id) {
-    params.push(parseInt(employee_id));
+    employeeId = parseInt(employee_id);
+    if (!Number.isInteger(employeeId)) {
+      return res.status(400).json({ error: 'Invalid employee_id' });
+    }
+    params.push(employeeId);
     conditions.push(`el.employee_id = $${params.length}`);
   }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

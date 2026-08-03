@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GoogleMap, Marker, Circle, useJsApiLoader } from '@react-google-maps/api';
+import { colors } from '../theme';
 
 const MAP_CONTAINER_STYLE = { width: '100%', height: '260px', borderRadius: '10px' };
 
@@ -45,14 +46,14 @@ export default function LocationPreviewMap({ latitude, longitude, radiusMeters, 
 
   if (loadError) {
     return (
-      <div style={{ ...MAP_CONTAINER_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #FECACA', color: '#B91C1C', fontSize: 13, textAlign: 'center', padding: 16 }}>
+      <div style={{ ...MAP_CONTAINER_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #FECACA', color: colors.dangerDark, fontSize: 13, textAlign: 'center', padding: 16 }}>
         Map failed to load — check NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.
       </div>
     );
   }
   if (!isLoaded) {
     return (
-      <div style={{ ...MAP_CONTAINER_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #D0D0D0', color: '#666', fontSize: 13 }}>
+      <div style={{ ...MAP_CONTAINER_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 13 }}>
         Loading map...
       </div>
     );
@@ -65,8 +66,8 @@ export default function LocationPreviewMap({ latitude, longitude, radiusMeters, 
         onClick={() => setSatellite((s) => !s)}
         style={{
           position: 'absolute', top: 8, right: 8, zIndex: 1,
-          padding: '6px 10px', borderRadius: '6px', border: '0.5px solid #D0D0D0',
-          backgroundColor: '#FFFFFF', color: '#434343', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+          padding: '6px 10px', borderRadius: '6px', border: `0.5px solid ${colors.border}`,
+          backgroundColor: colors.card, color: colors.text, fontSize: '12px', fontWeight: 500, cursor: 'pointer',
         }}
       >
         {satellite ? 'Map view' : 'Satellite view'}
@@ -88,7 +89,7 @@ export default function LocationPreviewMap({ latitude, longitude, radiusMeters, 
         <Circle
           center={center}
           radius={radiusMeters}
-          options={{ strokeColor: '#1B7F5A', fillColor: '#1B7F5A', fillOpacity: 0.12, strokeWeight: 1 }}
+          options={{ strokeColor: colors.primary, fillColor: colors.primary, fillOpacity: 0.12, strokeWeight: 1 }}
         />
       </GoogleMap>
     </div>

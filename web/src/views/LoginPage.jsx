@@ -9,7 +9,7 @@ import { colors, typography, spacing, shadows } from '../theme';
 // tag needs the public/ URL instead of the old Vite-style asset import.
 const winfomiLogo = '/winfomi-logo.png';
 
-export default function LoginPage({ onLoginSuccess }) {
+export default function LoginPage({ onLoginSuccess, onForgotPassword }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -68,6 +68,10 @@ export default function LoginPage({ onLoginSuccess }) {
           <Button type="submit" loading={loading} style={{ width: '100%', height: 46 }}>
             Sign in
           </Button>
+
+          <button type="button" onClick={onForgotPassword} style={styles.forgotPasswordLink}>
+            Forgot password?
+          </button>
         </form>
       </div>
     </div>
@@ -87,4 +91,9 @@ const styles = {
   logoImg: { height: 40, width: 'auto' },
   subtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', margin: `${spacing.sm}px 0 ${spacing.xxl}px` },
   errorText: { ...typography.caption, color: colors.danger, margin: `0 0 ${spacing.lg}px`, textAlign: 'left' },
+  forgotPasswordLink: {
+    display: 'block', width: '100%', textAlign: 'center', marginTop: spacing.lg,
+    background: 'none', border: 'none', color: colors.primary, fontWeight: 600,
+    fontSize: 13, cursor: 'pointer', padding: 0,
+  },
 };

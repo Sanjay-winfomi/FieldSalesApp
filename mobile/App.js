@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Alert, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +19,7 @@ import { colors } from './src/theme';
 // Screen Imports
 import SplashScreen from './screens/SplashScreen';
 import LoginScreen from './screens/LoginScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import DayCheckInScreen from './screens/DayCheckInScreen';
 import DealerCheckInScreen from './screens/DealerCheckInScreen';
 import DealerCheckOutScreen from './screens/DealerCheckOutScreen';
@@ -27,6 +28,7 @@ import NotesScreen from './screens/NotesScreen';
 import NoteEditorScreen from './screens/NoteEditorScreen';
 import RemindersScreen from './screens/RemindersScreen';
 import ReminderEditorScreen from './screens/ReminderEditorScreen';
+import AboutScreen from './screens/AboutScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -74,6 +76,11 @@ export default function App() {
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
   const [locationPermissionCanAskAgain, setLocationPermissionCanAskAgain] = useState(true);
   const navigationRef = useNavigationContainerRef();
+  // fetchTodayState is triggered from several independent, possibly-overlapping
+  // sources (pull-to-refresh, sync-conflict reconciliation, post-checkout
+  // refresh, login) — sequences requests so a slower, older response can't
+  // overwrite state a newer response already set.
+  const todayStateSeqRef = useRef(0);
 
   // Computed state
   const dayStatus = !attendance
@@ -210,15 +217,18 @@ export default function App() {
   }, []);
 
   const fetchTodayState = async () => {
+    const seq = ++todayStateSeqRef.current;
     setRefreshing(true);
     try {
       const response = await api.get('/attendance/today');
+      if (seq !== todayStateSeqRef.current) return; // a newer call has since started
       setAttendance(response.data.attendance);
       setVisits(response.data.visits || []);
     } catch (error) {
+      if (seq !== todayStateSeqRef.current) return;
       console.error('Failed to fetch today state:', error);
     } finally {
-      setRefreshing(false);
+      if (seq === todayStateSeqRef.current) setRefreshing(false);
     }
   };
 
@@ -357,6 +367,7 @@ export default function App() {
               <Stack.Screen name="Login">
                 {({ navigation }) => (
                   <LoginScreen
+                    navigation={navigation}
                     onLoginSuccess={async () => {
                       await handleLoginSuccess();
                       navigation.replace('MainTabs');
@@ -364,6 +375,8 @@ export default function App() {
                   />
                 )}
               </Stack.Screen>
+
+              <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
 
               <Stack.Screen name="MainTabs" component={MainTabs} />
 
@@ -373,6 +386,16 @@ export default function App() {
                     navigation={navigation}
                     onCheckIn={(data) => {
                       handleDayCheckIn(data);
+                      navigation.navigate('MainTabs');
+                    }}
+                    onAlreadyCheckedIn={async () => {
+                      // The local screen only rendered because dayStatus looked
+                      // like 'not_checked_in' — a 409 here means the server's
+                      // truth has since diverged (e.g. another device, or a
+                      // queued offline check-in already synced). Resync from
+                      // the server rather than leaving the rep stranded on a
+                      // check-in screen with stale local state.
+                      await fetchTodayState();
                       navigation.navigate('MainTabs');
                     }}
                   />
@@ -432,6 +455,7 @@ export default function App() {
               <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
               <Stack.Screen name="Reminders" component={RemindersScreen} />
               <Stack.Screen name="ReminderEditor" component={ReminderEditorScreen} />
+              <Stack.Screen name="About" component={AboutScreen} />
             </Stack.Navigator>
           </AppStateContext.Provider>
         </NavigationContainer>

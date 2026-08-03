@@ -10,6 +10,15 @@ const bcrypt = require('bcryptjs');
 const SALT_ROUNDS = 10;
 
 async function seed() {
+  // Ships well-known dev/test credentials (e.g. manager/manager123) — running
+  // this against a production database would create real, guessable-password
+  // accounts. Set SEED_ALLOW_PRODUCTION=true to override, e.g. for a
+  // deliberate demo environment.
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
+    console.error('✗ Refusing to run seed.js with NODE_ENV=production (set SEED_ALLOW_PRODUCTION=true to override)');
+    process.exit(1);
+  }
+
   // See migrate.js — pg's Client has no default connection timeout, so a
   // momentarily slow/unreachable DB would otherwise hang this step forever
   // instead of failing fast, blocking npm start (and the deploy's health

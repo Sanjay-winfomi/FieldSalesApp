@@ -28,7 +28,7 @@ function formatDateHeading(iso) {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
-export default function HistoryScreen() {
+export default function HistoryScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,9 +49,12 @@ export default function HistoryScreen() {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    fetchHistory().finally(() => setLoading(false));
-  }, [fetchHistory]);
+    const unsubscribe = navigation.addListener('focus', () => {
+      setLoading(true);
+      fetchHistory().finally(() => setLoading(false));
+    });
+    return unsubscribe;
+  }, [navigation, fetchHistory]);
 
   const onRefresh = async () => {
     setRefreshing(true);

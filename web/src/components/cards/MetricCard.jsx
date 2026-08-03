@@ -17,12 +17,12 @@ const TONES = {
  * `trend` is a plain number (e.g. +4 or -2); omit it when there's no real
  * period-over-period comparison to show rather than fabricating one.
  */
-export default function MetricCard({ icon, value, label, subtitle, tone = 'primary', trend }) {
+export default function MetricCard({ icon, value, label, subtitle, tone = 'primary', trend, onClick }) {
   const t = TONES[tone] || TONES.primary;
   const trendUp = typeof trend === 'number' && trend >= 0;
 
   return (
-    <Card hoverable style={styles.card}>
+    <Card hoverable onClick={onClick} style={{ ...styles.card, ...(onClick ? { cursor: 'pointer' } : {}) }}>
       <div style={styles.row}>
         <div style={{ ...styles.iconWrap, backgroundColor: t.bg }}>
           {icon && React.cloneElement(icon, { size: 20, color: t.iconColor })}

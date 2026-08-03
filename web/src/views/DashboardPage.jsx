@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2 } from 'lucide-react';
 import { apiClient } from '../api';
 import {
@@ -23,13 +23,21 @@ export default function DashboardPage({
   reps, loading, error, onSelectRep,
 }) {
   const [dealerCount, setDealerCount] = useState(null);
+  const [dealerCountError, setDealerCountError] = useState(false);
 
   // Dealer count isn't part of /dashboard/today — fetched once from the
   // existing /dealers endpoint purely to show a real "Total dealers" metric
   // instead of fabricating one.
-  useEffect(() => {
-    apiClient.get('/dealers').then((res) => setDealerCount(res.data.dealers?.length ?? null)).catch(() => {});
+  const fetchDealerCount = useCallback(() => {
+    setDealerCountError(false);
+    apiClient.get('/dealers')
+      .then((res) => setDealerCount(res.data.dealers?.length ?? null))
+      .catch(() => setDealerCountError(true));
   }, []);
+
+  useEffect(() => {
+    fetchDealerCount();
+  }, [fetchDealerCount]);
 
   const stats = useMemo(() => ({
     checked_in: reps.filter((r) => r.status === 'checked_in').length,
@@ -67,7 +75,14 @@ export default function DashboardPage({
         <MetricCard icon={<UserCheck />} value={stats.checked_in} label="Logged in" tone="success" />
         <MetricCard icon={<Clock />} value={stats.not_checked_in} label="Pending login" tone="warning" />
         <MetricCard icon={<CheckCircle2 />} value={stats.day_ended} label="Day ended" tone="neutral" />
-        <MetricCard icon={<Store />} value={dealerCount ?? '—'} label="Total dealers" tone="primary" />
+        <MetricCard
+          icon={<Store />}
+          value={dealerCountError ? '—' : (dealerCount ?? '—')}
+          label="Total dealers"
+          subtitle={dealerCountError ? 'Failed to load — click to retry' : undefined}
+          tone={dealerCountError ? 'danger' : 'primary'}
+          onClick={dealerCountError ? fetchDealerCount : undefined}
+        />
         <MetricCard icon={<Route />} value={`${totalDistanceToday.toFixed(1)} km`} label="Distance today" tone="warning" />
         <MetricCard icon={<Percent />} value={`${attendancePct}%`} label="Attendance today" tone="success" />
       </div>

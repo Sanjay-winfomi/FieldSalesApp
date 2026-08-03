@@ -13,6 +13,24 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
+const pool   = require('./db/pool');
+
+// Safety net for errors outside the request/response lifecycle (a rejected
+// promise nobody awaited, a throw inside a bare setInterval callback) — these
+// don't reach Express's error-handling middleware at all. Without this they
+// silently vanish (unhandledRejection) or crash the process with a raw stack
+// trace and no record of it in the logs (uncaughtException).
+process.on('unhandledRejection', (reason) => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  logger.error('Unhandled promise rejection', { error: error.message, stack: error.stack });
+});
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception — exiting', { error: error.message, stack: error.stack });
+  // The process is in an unknown state after this — exit so the host's
+  // process manager (Render, pm2, systemd, ...) restarts it clean, rather
+  // than keep serving requests against potentially corrupted in-memory state.
+  process.exit(1);
+});
 
 const authRouter       = require('./routes/auth.routes');
 const attendanceRouter = require('./routes/attendance.routes');
@@ -129,10 +147,41 @@ const loginLimiter = rateLimit({
 
 app.use('/api/', apiLimiter);
 app.use('/api/auth/login', loginLimiter);
+// A leaked refresh token is valid for 7 days — without this it could be
+// replayed/brute-forced at the generic 200/15min rate instead of the same
+// strict limit login attempts get.
+app.use('/api/auth/refresh', loginLimiter);
+// Same strict limit — otherwise it's an unthrottled oracle for brute-forcing
+// an employee's phone number to hijack their account.
+app.use('/api/auth/forgot-password', loginLimiter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
+// Cheap liveness check — deliberately does no I/O, so an uptime monitor
+// polling this frequently never adds load or false-positives on a slow DB.
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Deeper readiness check — actually round-trips the database, so an uptime
+// monitor can distinguish "process is up" from "the app can actually serve
+// requests" (e.g. DB connection pool exhausted, Postgres unreachable).
+app.get('/health/deep', async (req, res) => {
+  const checks = { database: 'ok' };
+  let healthy = true;
+
+  try {
+    await pool.query('SELECT 1');
+  } catch (err) {
+    healthy = false;
+    checks.database = 'error';
+    logger.error('Deep health check: database unreachable', { error: err.message });
+  }
+
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    time: new Date().toISOString(),
+    checks,
+  });
 });
 
 // ── Public routes ─────────────────────────────────────────────────────────────

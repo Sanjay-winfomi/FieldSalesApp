@@ -22,6 +22,16 @@ export default function EmployeesTab({ currentEmployeeId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  // Every mutation below (create/edit/reset/deactivate/delete/activate)
+  // previously closed its modal silently on success with no positive
+  // feedback — a manager had no way to tell a reset password actually took
+  // effect short of it failing. Auto-dismisses so it doesn't linger.
+  const [successMessage, setSuccessMessage] = useState('');
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(''), 4000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', phone: '', username: '', password: '', role: 'rep', region: '' });
@@ -87,6 +97,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
       await apiClient.post('/employees', createForm);
       setCreateForm({ name: '', phone: '', username: '', password: '', role: 'rep', region: '' });
       setCreateOpen(false);
+      setSuccessMessage(`${createForm.name} was added.`);
       fetchEmployees();
     } catch (err) {
       setCreateError(err.response?.data?.error || 'Failed to create employee.');
@@ -107,6 +118,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
     setEditSubmitting(true);
     try {
       await apiClient.put(`/employees/${editTarget.id}`, editForm);
+      setSuccessMessage(`${editForm.name}'s details were updated.`);
       setEditTarget(null);
       fetchEmployees();
     } catch (err) {
@@ -126,6 +138,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
     setResetSubmitting(true);
     try {
       await apiClient.post(`/employees/${resetTarget.id}/reset-password`, { password: resetPassword });
+      setSuccessMessage(`${resetTarget.name}'s password was reset.`);
       setResetTarget(null);
       setResetPassword('');
     } catch (err) {
@@ -139,6 +152,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
     setDeactivateSubmitting(true);
     try {
       await apiClient.put(`/employees/${deactivateTarget.id}`, { is_active: false });
+      setSuccessMessage(`${deactivateTarget.name} was deactivated.`);
       setDeactivateTarget(null);
       fetchEmployees();
     } catch (err) {
@@ -153,6 +167,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
     setDeleteSubmitting(true);
     try {
       await apiClient.delete(`/employees/${deleteTarget.id}`);
+      setSuccessMessage(`${deleteTarget.name} was deleted.`);
       setDeleteTarget(null);
       fetchEmployees();
     } catch (err) {
@@ -166,6 +181,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
   const activateDirectly = async (emp) => {
     try {
       await apiClient.put(`/employees/${emp.id}`, { is_active: true });
+      setSuccessMessage(`${emp.name} was activated.`);
       fetchEmployees();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to activate employee.');
@@ -249,6 +265,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
       </div>
 
       {error && <div style={styles.errorBanner} role="alert">{error}</div>}
+      {successMessage && <div style={styles.successBanner} role="status">{successMessage}</div>}
 
       <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="Search by name, username, or region" style={{ marginBottom: spacing.lg, maxWidth: 360 }} />
 
@@ -348,6 +365,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
 const styles = {
   metricsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: spacing.lg, marginBottom: spacing.xl },
   errorBanner: { backgroundColor: colors.dangerLight, color: colors.dangerDark, border: '1px solid #FECACA', borderRadius: 10, padding: '12px 16px', marginBottom: spacing.lg, fontSize: 14 },
+  successBanner: { backgroundColor: colors.successLight, color: colors.successDark, border: '1px solid #A7F3D0', borderRadius: 10, padding: '12px 16px', marginBottom: spacing.lg, fontSize: 14 },
   avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.avatarBg, color: colors.avatarText, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 },
   actionBtn: { width: 32, height: 32 },
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: spacing.md, marginBottom: spacing.lg },

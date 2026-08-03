@@ -1,9 +1,26 @@
 import axios from 'axios';
 
-// Next.js inlines NEXT_PUBLIC_-prefixed vars from a .env file at build time —
-// see web/.env.example. Without this, a production build kept calling
-// localhost and every request would fail for real users.
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+// Next.js inlines NEXT_PUBLIC_-prefixed vars at build time — see
+// web/.env.example. A production build (`next build` with the default
+// NODE_ENV=production) that silently fell back to localhost would ship
+// completely broken for real users, so it fails the build loudly instead;
+// local dev keeps the convenient fallback.
+function resolveApiBase() {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) return configured;
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('NEXT_PUBLIC_API_URL must be set for production builds.');
+  }
+
+  console.warn(
+    'NEXT_PUBLIC_API_URL is not set — falling back to a local-dev default. ' +
+    'Set it in web/.env (see .env.example) to point at your backend.'
+  );
+  return 'http://localhost:3001/api';
+}
+
+export const API_BASE = resolveApiBase();
 
 export const apiClient = axios.create({ baseURL: API_BASE });
 

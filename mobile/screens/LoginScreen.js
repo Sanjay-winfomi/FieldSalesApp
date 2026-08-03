@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform, Image } from 'react-native';
+import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
@@ -16,7 +16,7 @@ const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 // looks identical to a hang.
 const COLD_START_HINT_DELAY_MS = 4000;
 
-export default function LoginScreen({ onLoginSuccess }) {
+export default function LoginScreen({ onLoginSuccess, navigation }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -114,6 +114,14 @@ export default function LoginScreen({ onLoginSuccess }) {
               style={styles.submitButton}
             />
 
+            <Pressable
+              onPress={() => navigation.navigate('ForgotPassword')}
+              accessibilityRole="button"
+              style={styles.forgotPasswordLink}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+            </Pressable>
+
             {showColdStartHint && (
               <Text style={styles.coldStartHint}>
                 Starting server... This may take up to a minute on the first request.
@@ -175,6 +183,15 @@ const styles = StyleSheet.create({
   submitButton: {
     marginTop: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  forgotPasswordLink: {
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  forgotPasswordText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
   },
   coldStartHint: {
     ...typography.caption,

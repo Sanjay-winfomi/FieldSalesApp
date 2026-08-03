@@ -70,15 +70,32 @@ export default function DealerDirectoryScreen({ navigation }) {
     setRefreshing(false);
   };
 
-  // Debounce search — skips the redundant immediate fetch on mount (searchQuery
-  // starts as '', so this effect already covers the initial load 500ms later).
+  // Debounce search — skips firing on the very first render (searchQuery
+  // starts as ''), since the focus-refetch effect below already covers the
+  // initial load as soon as the tab gains focus.
+  const didMountRef = useRef(false);
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     const delayDebounceFn = setTimeout(() => {
       fetchDealers(searchQuery);
     }, 500);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
+
+  // Refetch whenever the Dealers tab regains focus (e.g. after a manager adds
+  // a dealer, or the rep returns from a check-in) — otherwise the list only
+  // ever reflected whatever was fetched the last time the tab mounted.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchDealers(searchQuery);
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation]);
 
   const handleCardPress = (dealer) => {
     const isSelected = dealer.id === selectedId;

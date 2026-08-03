@@ -102,51 +102,6 @@ describe('POST /api/x/check-out', () => {
   });
 });
 
-describe('POST /api/x/:id/interrupt', () => {
-  afterEach(() => jest.clearAllMocks());
-
-  test('400 on invalid lat/lng', async () => {
-    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/55/interrupt').send({ lat: 999, lng: 77 });
-    expect(res.status).toBe(400);
-  });
-
-  test('404 when the visit does not belong to this employee', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] });
-    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/55/interrupt').send({ lat: 11, lng: 77 });
-    expect(res.status).toBe(404);
-  });
-
-  test('409 when the visit is already checked out', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, check_out_time: '2026-07-27T06:00:00Z', interrupted: false, dealer_name: 'Dealer A' }] });
-    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/55/interrupt').send({ lat: 11, lng: 77 });
-    expect(res.status).toBe(409);
-  });
-
-  test('idempotent no-op when already flagged interrupted', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, check_out_time: null, interrupted: true, dealer_name: 'Dealer A' }] });
-    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/55/interrupt').send({ lat: 11, lng: 77 });
-    expect(res.status).toBe(200);
-    expect(res.body.visit.interrupted).toBe(true);
-    expect(pool.query).toHaveBeenCalledTimes(1); // no UPDATE/INSERT issued
-  });
-
-  test('200 flags the visit interrupted and logs an exception', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, check_out_time: null, interrupted: false, dealer_name: 'Dealer A' }] })
-      .mockResolvedValueOnce({ rows: [{ id: 55, interrupted: true, interrupted_at: 'now' }] })
-      .mockResolvedValueOnce({ rows: [] }); // exception_log insert
-    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/55/interrupt').send({ lat: 12, lng: 78, distance_meters: 500 });
-    expect(res.status).toBe(200);
-    expect(res.body.visit.interrupted).toBe(true);
-    expect(pool.query).toHaveBeenCalledTimes(3);
-  });
-});
-
 describe('POST /api/x/:id/location-check', () => {
   afterEach(() => jest.clearAllMocks());
 

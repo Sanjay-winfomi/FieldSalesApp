@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Text, View, TextInput, Alert, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
+import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { AppHeader, PrimaryButton, LoadingCard } from '../src/components';
 import { colors, typography, spacing, serifFontFamily } from '../src/theme';
 
@@ -78,6 +79,12 @@ export default function NoteEditorScreen({ navigation, route }) {
             await api.delete(`/notes/${noteId}`);
             navigation.goBack();
           } catch (err) {
+            if (isNetworkError(err)) {
+              await enqueueAction('delete', `/notes/${noteId}`);
+              Alert.alert('Offline Mode', 'Delete saved locally and will sync when online.');
+              navigation.goBack();
+              return;
+            }
             console.error('Failed to delete note:', err);
             Alert.alert('Error', 'Could not delete this note.');
             setDeleting(false);

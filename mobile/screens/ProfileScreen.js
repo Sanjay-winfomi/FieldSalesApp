@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { StyleSheet, Text, View, ScrollView, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { LogOut, Info, Clock } from 'lucide-react-native';
+import { LogOut, Info, Clock, ChevronRight } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { ProfileCard, ProfileRow, SecondaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
@@ -70,12 +70,13 @@ export default function ProfileScreen() {
         <FadeSlideIn delay={100}>
           <Pressable
             style={styles.menuRow}
-            onPress={() => Alert.alert('Winfomi', `Version ${appJson.expo.version}\n\nAttendance and dealer visit tracking for field sales teams.`)}
+            onPress={() => (navigation.getParent() || navigation).navigate('About')}
             accessibilityRole="button"
           >
             <Info size={18} color={colors.textSecondary} style={styles.menuIcon} />
             <Text style={styles.menuText}>About app</Text>
             <Text style={styles.versionText}>v{appJson.expo.version}</Text>
+            <ChevronRight size={18} color={colors.textMuted} />
           </Pressable>
         </FadeSlideIn>
 
@@ -120,5 +121,5 @@ const styles = StyleSheet.create({
   },
   menuIcon: { marginRight: spacing.md },
   menuText: { flex: 1, ...typography.body, color: colors.text, fontWeight: '600' },
-  versionText: { ...typography.caption, color: colors.textMuted },
+  versionText: { ...typography.caption, color: colors.textMuted, marginRight: spacing.xs },
 });

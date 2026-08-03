@@ -6,7 +6,7 @@ import { enqueueAction } from '../src/services/syncManager';
 import { AppHeader, GPSStatusCard, PrimaryButton, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
-export default function DayCheckInScreen({ onCheckIn, navigation }) {
+export default function DayCheckInScreen({ onCheckIn, onAlreadyCheckedIn, navigation }) {
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [coords, setCoords] = useState(null);
@@ -68,6 +68,8 @@ export default function DayCheckInScreen({ onCheckIn, navigation }) {
           };
         } else if (error.response.status === 409) {
           Alert.alert('Already logged in', 'You have already logged in for today.');
+          if (onAlreadyCheckedIn) await onAlreadyCheckedIn();
+          return;
         } else {
           throw error;
         }

@@ -26,6 +26,21 @@ async function isEmployeeActive(employeeId) {
   return isActive;
 }
 
+// Entries are only ever overwritten on the next request from the same
+// employee, never removed — sweep out expired ones periodically so the map
+// doesn't keep an entry forever for an employee who never logs in again
+// (e.g. one who left the company). unref() so this timer never keeps the
+// process alive on its own (relevant for tests and clean shutdowns).
+const sweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [employeeId, entry] of activeStatusCache) {
+    if (now - entry.time >= ACTIVE_STATUS_CACHE_TTL_MS) {
+      activeStatusCache.delete(employeeId);
+    }
+  }
+}, ACTIVE_STATUS_CACHE_TTL_MS);
+sweepInterval.unref();
+
 async function requireAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

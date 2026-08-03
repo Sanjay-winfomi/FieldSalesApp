@@ -210,7 +210,11 @@ router.get('/', async (req, res) => {
     if (isManager) {
       // Managers see everyone by default, or one rep if employee_id is given.
       if (employee_id) {
-        params.push(parseInt(employee_id));
+        const employeeId = parseInt(employee_id);
+        if (!Number.isInteger(employeeId)) {
+          return res.status(400).json({ error: 'Invalid employee_id' });
+        }
+        params.push(employeeId);
         conditions.push(`a.employee_id = $${params.length}`);
       }
     } else {

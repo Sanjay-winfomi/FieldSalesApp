@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient, setAuthToken, setSessionExpiredHandler } from './api';
 import AppHeader from './components/headers/AppHeader';
 import LoginPage from './views/LoginPage';
+import ForgotPasswordPage from './views/ForgotPasswordPage';
 import RepDetailsPage from './views/RepDetailsPage';
 import DashboardPage from './views/DashboardPage';
 import ReportsPage from './views/ReportsPage';
@@ -27,6 +28,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [selectedRepId, setSelectedRepId] = useState(null);
   const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'reports' | 'admin'
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   // Keep the shared apiClient's auth header in sync so ReportsPage/AdminPage
   // (which rely solely on the interceptor, not manual headers) work correctly.
@@ -88,7 +90,10 @@ export default function App() {
   }, []);
 
   if (!token) {
-    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+    if (showForgotPassword) {
+      return <ForgotPasswordPage onBackToLogin={() => setShowForgotPassword(false)} />;
+    }
+    return <LoginPage onLoginSuccess={handleLoginSuccess} onForgotPassword={() => setShowForgotPassword(true)} />;
   }
 
   if (selectedRepId) {

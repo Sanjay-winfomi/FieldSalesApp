@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Download, AlertTriangle, Calendar, FileBarChart2, Route, Timer, Trophy } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  SectionHeader, FilterSelect, Button, Card, DataTable, MetricCard, EmptyState,
+  SectionHeader, FilterSelect, Button, Card, FilterBar, DataTable, MetricCard, EmptyState,
 } from '../components';
 import { colors, typography, spacing } from '../theme';
 
@@ -60,6 +60,7 @@ export default function ReportsPage() {
   });
   const [to, setTo] = useState(() => toDateInputValue(new Date()));
   const [rows, setRows] = useState([]);
+  const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -78,9 +79,11 @@ export default function ReportsPage() {
       if (employeeId) params.employee_id = employeeId;
       const res = await apiClient.get(`/reports/${activeTab}`, { params });
       setRows(res.data.rows);
+      setTruncated(!!res.data.truncated);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load report.');
       setRows([]);
+      setTruncated(false);
     } finally {
       setLoading(false);
     }
@@ -225,7 +228,7 @@ export default function ReportsPage() {
         )}
       </Card>
 
-      <Card noPadding style={{ padding: spacing.lg, marginBottom: spacing.xl }}>
+      <Card noPadding style={{ padding: spacing.lg, marginBottom: spacing.md }}>
         <div style={styles.tabRow} className="ft-report-tabs">
           {REPORT_TABS.map((t) => (
             <button
@@ -239,42 +242,62 @@ export default function ReportsPage() {
             </button>
           ))}
         </div>
-
-        <div style={styles.filterRow} className="ft-filter-row">
-          <div style={styles.dateField}>
-            <Calendar size={14} style={{ marginRight: 6, color: colors.textMuted }} />
-            <input type="date" style={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-          </div>
-          <span style={styles.filterDash}>to</span>
-          <div style={styles.dateField}>
-            <input type="date" style={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-          </div>
-
-          <FilterSelect
-            value={employeeId}
-            onChange={setEmployeeId}
-            ariaLabel="Filter by representative"
-            options={[{ value: '', label: 'All representatives' }, ...employees.map((e) => ({ value: e.id, label: e.name }))]}
-          />
-
-          <Button
-            variant="success"
-            icon={<Download size={14} />}
-            onClick={handleExport}
-            disabled={rows.length === 0}
-            fullWidthMobile
-            style={{ marginLeft: 'auto' }}
-          >
-            Export CSV
-          </Button>
-        </div>
       </Card>
+
+      <FilterBar
+        onReset={() => {
+          const d = new Date();
+          d.setDate(d.getDate() - 30);
+          setFrom(toDateInputValue(d));
+          setTo(toDateInputValue(new Date()));
+          setEmployeeId('');
+        }}
+      >
+        <div style={styles.dateField}>
+          <Calendar size={14} style={{ marginRight: 6, color: colors.textMuted }} />
+          <input type="date" style={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+        </div>
+        <span style={styles.filterDash}>to</span>
+        <div style={styles.dateField}>
+          <input type="date" style={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+        </div>
+
+        <FilterSelect
+          value={employeeId}
+          onChange={setEmployeeId}
+          ariaLabel="Filter by representative"
+          options={[{ value: '', label: 'All representatives' }, ...employees.map((e) => ({ value: e.id, label: e.name }))]}
+        />
+
+        <Button
+          variant="success"
+          icon={<Download size={14} />}
+          onClick={handleExport}
+          disabled={rows.length === 0}
+          fullWidthMobile
+          style={{ marginLeft: 'auto' }}
+        >
+          Export CSV
+        </Button>
+      </FilterBar>
+
+      {truncated && !error && (
+        <div style={styles.truncatedBanner}>
+          <AlertTriangle size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+          Showing the first {rows.length.toLocaleString('en-IN')} records — narrow the date range to see and export the rest.
+        </div>
+      )}
 
       <Card noPadding style={{ overflow: 'hidden' }}>
         {error ? (
           <EmptyState title="Couldn't load report" subtitle={error} onRetry={fetchReport} />
         ) : (
           <DataTable
+            // Forces a remount (resetting internal sort/page state) whenever the
+            // active report, date range, or rep filter changes — otherwise a
+            // manager left on page 4 of a longer report would land on the same
+            // page number after switching to a shorter one/different filters.
+            key={`${activeTab}-${from}-${to}-${employeeId}`}
             columns={columns}
             rows={rows}
             loading={loading}
@@ -293,6 +316,10 @@ const styles = {
     display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: spacing.lg, marginBottom: spacing.xl,
   },
   alertCard: { backgroundColor: colors.warningLight, borderColor: '#FDE68A', marginBottom: spacing.xl },
+  truncatedBanner: {
+    display: 'flex', alignItems: 'center', backgroundColor: colors.warningLight, color: colors.warningDark,
+    border: '1px solid #FDE68A', borderRadius: 12, padding: '10px 16px', marginBottom: spacing.md, fontSize: 13,
+  },
   alertHeader: { display: 'flex', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' },
   alertTitle: { ...typography.bodyMedium, color: colors.warningDark, flex: 1 },
   emptyInline: { ...typography.body, color: colors.warningDark, margin: 0 },

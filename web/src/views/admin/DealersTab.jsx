@@ -12,6 +12,14 @@ export default function DealersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  // Create/edit/delete previously closed their modal silently on success —
+  // same gap as EmployeesTab. Auto-dismisses so it doesn't linger.
+  const [successMessage, setSuccessMessage] = useState('');
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(''), 4000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState('');
@@ -195,8 +203,10 @@ export default function DealersTab() {
     try {
       if (editingId) {
         await apiClient.put(`/dealers/${editingId}`, payload);
+        setSuccessMessage(`${payload.name} was updated.`);
       } else {
         await apiClient.post('/dealers', payload);
+        setSuccessMessage(`${payload.name} was added.`);
       }
       resetForm();
       fetchDealers();
@@ -254,6 +264,7 @@ export default function DealersTab() {
     setDeleteSubmitting(true);
     try {
       await apiClient.delete(`/dealers/${deleteTarget.id}`);
+      setSuccessMessage(`${deleteTarget.name} was deleted.`);
       setDeleteTarget(null);
       fetchDealers();
     } catch (err) {
@@ -322,6 +333,7 @@ export default function DealersTab() {
       </div>
 
       {error && <div style={styles.errorBanner} role="alert">{error}</div>}
+      {successMessage && <div style={styles.successBanner} role="status">{successMessage}</div>}
 
       <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="Search by name or address" style={{ marginBottom: spacing.lg, maxWidth: 360 }} />
 
@@ -462,6 +474,7 @@ export default function DealersTab() {
 const styles = {
   metricsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: spacing.lg, marginBottom: spacing.xl },
   errorBanner: { backgroundColor: colors.dangerLight, color: colors.dangerDark, border: '1px solid #FECACA', borderRadius: 10, padding: '12px 16px', marginBottom: spacing.lg, fontSize: 14 },
+  successBanner: { backgroundColor: colors.successLight, color: colors.successDark, border: '1px solid #A7F3D0', borderRadius: 10, padding: '12px 16px', marginBottom: spacing.lg, fontSize: 14 },
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: spacing.md, marginBottom: spacing.lg },
   geocodeStatus: { fontSize: 12, color: colors.textSecondary, margin: '0 0 12px' },
   candidateList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: spacing.md },
