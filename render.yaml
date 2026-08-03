@@ -21,6 +21,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # seed.js refuses to run with NODE_ENV=production unless this is set —
+      # a safety net added for ad-hoc/local runs against a real database, but
+      # this service's own startCommand intentionally reseeds idempotent demo
+      # data on every boot (see the comment above), so it must opt back in.
+      - key: SEED_ALLOW_PRODUCTION
+        value: true
       - key: DB_HOST
         fromDatabase:
           name: fieldtrack-db
