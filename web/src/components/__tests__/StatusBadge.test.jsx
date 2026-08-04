@@ -4,8 +4,8 @@ import StatusBadge from '../StatusBadge';
 
 describe('StatusBadge', () => {
   test('renders the label text', () => {
-    render(<StatusBadge label="Checked in" tone="success" />);
-    expect(screen.getByText('Checked in')).toBeInTheDocument();
+    render(<StatusBadge label="Logged in" tone="success" />);
+    expect(screen.getByText('Logged in')).toBeInTheDocument();
   });
 
   test('falls back to the neutral tone for an unknown tone', () => {

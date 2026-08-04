@@ -11,8 +11,8 @@ describe('businessDay', () => {
   });
 
   test('isCurrentBusinessDay compares both sides using the same shifted expression', () => {
-    const cond = isCurrentBusinessDay('check_in_time');
-    expect(cond).toContain('check_in_time');
+    const cond = isCurrentBusinessDay('login_time');
+    expect(cond).toContain('login_time');
     expect(cond).toContain('NOW()');
     expect(cond.split('=').length).toBe(2);
   });

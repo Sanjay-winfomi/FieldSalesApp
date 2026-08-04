@@ -3,9 +3,9 @@
  *
  * Returns the great-circle distance in kilometres between two lat/lng points.
  * Used in 3 places:
- *   1. POST /api/visits/check-in   → distance_from_previous_km
- *   2. POST /api/visits/check-out  → out_of_radius check vs dealer lat/lng
- *   3. POST /api/attendance/check-out → total_distance_km accumulation
+ *   1. POST /api/visits/login   → distance_from_previous_km
+ *   2. POST /api/visits/logout  → out_of_radius check vs dealer lat/lng
+ *   3. POST /api/attendance/logout → total_distance_km accumulation
  */
 
 const EARTH_RADIUS_KM = 6371;

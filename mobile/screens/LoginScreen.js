@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable } from 'react-native';
+import { StyleSheet, Text, View, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../src/services/api';
+import { showAlert } from '../src/services/themedAlert';
 import { PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing, typography } from '../src/theme';
 
@@ -27,7 +28,7 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
 
   const handleLogin = async () => {
     if (!username || !password) {
-      Alert.alert('Error', 'Please enter both username and password.');
+      showAlert('Error', 'Please enter both username and password.');
       return;
     }
 
@@ -46,7 +47,7 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
       if (onLoginSuccess) onLoginSuccess();
     } catch (error) {
       console.error('Login error:', error);
-      Alert.alert(
+      showAlert(
         'Login Failed',
         error.response?.data?.error || 'Could not connect to the server. Please try again later.'
       );

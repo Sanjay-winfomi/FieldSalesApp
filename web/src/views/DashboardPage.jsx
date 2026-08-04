@@ -40,8 +40,8 @@ export default function DashboardPage({
   }, [fetchDealerCount]);
 
   const stats = useMemo(() => ({
-    checked_in: reps.filter((r) => r.status === 'checked_in').length,
-    not_checked_in: reps.filter((r) => r.status === 'not_checked_in').length,
+    logged_in: reps.filter((r) => r.status === 'logged_in').length,
+    not_logged_in: reps.filter((r) => r.status === 'not_logged_in').length,
     day_ended: reps.filter((r) => r.status === 'day_ended').length,
   }), [reps]);
 
@@ -51,7 +51,7 @@ export default function DashboardPage({
   );
 
   const attendancePct = reps.length > 0
-    ? Math.round(((stats.checked_in + stats.day_ended) / reps.length) * 100)
+    ? Math.round(((stats.logged_in + stats.day_ended) / reps.length) * 100)
     : 0;
 
   const repsNeedingLogout = useMemo(
@@ -72,8 +72,8 @@ export default function DashboardPage({
 
       <div style={styles.metricsGrid}>
         <MetricCard icon={<Users />} value={reps.length} label="Total employees" tone="primary" />
-        <MetricCard icon={<UserCheck />} value={stats.checked_in} label="Logged in" tone="success" />
-        <MetricCard icon={<Clock />} value={stats.not_checked_in} label="Pending login" tone="warning" />
+        <MetricCard icon={<UserCheck />} value={stats.logged_in} label="Logged in" tone="success" />
+        <MetricCard icon={<Clock />} value={stats.not_logged_in} label="Pending login" tone="warning" />
         <MetricCard icon={<CheckCircle2 />} value={stats.day_ended} label="Day ended" tone="neutral" />
         <MetricCard
           icon={<Store />}

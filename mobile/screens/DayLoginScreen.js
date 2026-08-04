@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Alert, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { getCurrentLocation, getReadableAddress } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, GPSStatusCard, PrimaryButton, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
-export default function DayCheckInScreen({ onCheckIn, onAlreadyCheckedIn, navigation }) {
+export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation }) {
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [coords, setCoords] = useState(null);
@@ -37,9 +38,9 @@ export default function DayCheckInScreen({ onCheckIn, onAlreadyCheckedIn, naviga
     }
   };
 
-  const handleCheckIn = async () => {
+  const handleLogin = async () => {
     if (!coords) {
-      Alert.alert('Location Required', 'Please wait for GPS to acquire your location.');
+      showAlert('Location Required', 'Please wait for GPS to acquire your location.');
       return;
     }
 
@@ -49,39 +50,39 @@ export default function DayCheckInScreen({ onCheckIn, onAlreadyCheckedIn, naviga
     try {
       let attendanceData = null;
       try {
-        const response = await api.post('/attendance/check-in', coords);
+        const response = await api.post('/attendance/login', coords);
         attendanceData = response.data.attendance;
       } catch (error) {
         if (!error.response) {
           // Network error - enqueue
           const localId = 'offline-' + Date.now();
-          await enqueueAction('post', '/attendance/check-in', coords, { localId, resolves: 'attendance' });
-          Alert.alert('Offline Mode', 'Login saved locally and will sync when online.');
+          await enqueueAction('post', '/attendance/login', coords, { localId, resolves: 'attendance' });
+          showAlert('Offline Mode', 'Login saved locally and will sync when online.');
 
           // Provide mock attendance block so app can progress
           attendanceData = {
             id: localId,
-            check_in_time: new Date().toISOString(),
-            check_in_lat: coords.lat,
-            check_in_lng: coords.lng,
+            login_time: new Date().toISOString(),
+            login_lat: coords.lat,
+            login_lng: coords.lng,
             total_distance_km: 0
           };
         } else if (error.response.status === 409) {
-          Alert.alert('Already logged in', 'You have already logged in for today.');
-          if (onAlreadyCheckedIn) await onAlreadyCheckedIn();
+          showAlert('Already logged in', 'You have already logged in for today.');
+          if (onAlreadyLoggedIn) await onAlreadyLoggedIn();
           return;
         } else {
           throw error;
         }
       }
 
-      if (attendanceData && onCheckIn) {
-        onCheckIn(attendanceData);
+      if (attendanceData && onLogin) {
+        onLogin(attendanceData);
       }
 
     } catch (error) {
       console.error('Login error:', error);
-      Alert.alert('Error', 'Failed to log in. Please try again.');
+      showAlert('Error', 'Failed to log in. Please try again.');
     } finally {
       setLoading(false);
       setLocationStatus('');
@@ -102,7 +103,7 @@ export default function DayCheckInScreen({ onCheckIn, onAlreadyCheckedIn, naviga
 
           <PrimaryButton
             title="Login for the day"
-            onPress={handleCheckIn}
+            onPress={handleLogin}
             disabled={!coords}
             loading={loading}
             style={styles.submitButton}

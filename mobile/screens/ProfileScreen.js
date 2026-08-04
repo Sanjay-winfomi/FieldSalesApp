@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View, ScrollView, Pressable, Alert } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { LogOut, Info, Clock, ChevronRight } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
+import { showAlert } from '../src/services/themedAlert';
 import { ProfileCard, ProfileRow, SecondaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 import appJson from '../app.json';
@@ -21,15 +22,15 @@ export default function ProfileScreen() {
   const { employee, attendance, dayStatus, onLogout } = useAppState();
 
   const workingMinutes = useMemo(() => {
-    if (!attendance?.check_in_time) return 0;
+    if (!attendance?.login_time) return 0;
     if (attendance.total_duration_minutes != null) return attendance.total_duration_minutes;
-    return Math.max(0, Math.round((Date.now() - new Date(attendance.check_in_time)) / 60000));
+    return Math.max(0, Math.round((Date.now() - new Date(attendance.login_time)) / 60000));
   }, [attendance]);
 
   const statusLabel = dayStatus === 'checked_in' ? 'Logged in' : dayStatus === 'day_ended' ? 'Day ended' : 'Not logged in';
 
   const handleLogoutPress = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
+    showAlert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log out', style: 'destructive', onPress: () => onLogout(navigation) },
     ]);

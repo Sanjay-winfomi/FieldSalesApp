@@ -19,13 +19,13 @@ const INDIA_STATE_CODES = {
 
 // A reading worse than this (metres) is worth retrying for, up to the budget below.
 const GOOD_ENOUGH_ACCURACY_METERS = 20;
-// A reading worse than this is rejected outright for dealer check-in/out (Dealer
+// A reading worse than this is rejected outright for dealer login/logout (Dealer
 // Geofencing spec) — the rep is prompted to move to an open area instead of
 // proceeding on an unreliable fix, mirrored by a hard backend-side check too.
 export const MAX_ACCEPTABLE_ACCURACY_METERS = 30;
 const MAX_ACQUIRE_ATTEMPTS = 3;
 // Without a per-attempt timeout, a single poor-GPS reading (indoors, dense
-// urban, no sky view) can hang indefinitely, leaving the check-in/out screens
+// urban, no sky view) can hang indefinitely, leaving the login/logout screens
 // stuck on "Acquiring location..." with no way forward but restarting the app.
 const ACQUIRE_TIMEOUT_MS = 15000;
 
@@ -166,8 +166,8 @@ export const getReadableAddress = async (lat, lng) => {
 
     return response.data?.address || fallback;
   } catch (error) {
-    // Non-fatal — a coordinate-string fallback is always shown, and check-in/
-    // out itself isn't blocked by this. console.warn (not .error) so it
+    // Non-fatal — a coordinate-string fallback is always shown, and login/logout
+    // itself isn't blocked by this. console.warn (not .error) so it
     // doesn't trip Metro's full-screen LogBox during normal use (e.g. the
     // geocoding API key isn't configured yet in backend/.env).
     console.warn('Reverse geocoding failed, showing coordinates instead:', error.message);

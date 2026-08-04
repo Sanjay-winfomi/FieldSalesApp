@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, Alert, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
+import { StyleSheet, Text, View, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { User, Phone, Lock, Eye, EyeOff } from 'lucide-react-native';
 import { api } from '../src/services/api';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing, typography } from '../src/theme';
 
@@ -25,15 +26,15 @@ export default function ForgotPasswordScreen({ navigation }) {
 
   const handleSubmit = async () => {
     if (!username || !phone || !newPassword || !confirmPassword) {
-      Alert.alert('Missing information', 'Please fill in every field.');
+      showAlert('Missing information', 'Please fill in every field.');
       return;
     }
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      Alert.alert('Password too short', `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      showAlert('Password too short', `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert("Passwords don't match", 'Re-type the same password in both fields.');
+      showAlert("Passwords don't match", 'Re-type the same password in both fields.');
       return;
     }
 
@@ -44,12 +45,12 @@ export default function ForgotPasswordScreen({ navigation }) {
         phone,
         new_password: newPassword,
       });
-      Alert.alert('Password updated', 'You can now log in with your new password.', [
+      showAlert('Password updated', 'You can now log in with your new password.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (error) {
       console.error('Forgot password error:', error);
-      Alert.alert(
+      showAlert(
         'Could not reset password',
         error.response?.data?.error || 'Could not connect to the server. Please try again later.'
       );

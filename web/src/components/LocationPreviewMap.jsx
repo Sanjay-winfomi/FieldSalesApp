@@ -11,7 +11,7 @@ const MAP_CONTAINER_STYLE = { width: '100%', height: '260px', borderRadius: '10p
 const RECENTER_THRESHOLD_DEGREES = 0.01; // roughly ~1km
 
 /**
- * Shows a dealer's location with its check-in tolerance radius drawn around
+ * Shows a dealer's location with its login tolerance radius drawn around
  * it, so a manager can visually confirm the geofence actually covers the
  * premises before saving. The pin is draggable and the map is click-to-place,
  * so an address search only needs to get you in the right neighbourhood —

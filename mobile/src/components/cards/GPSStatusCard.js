@@ -5,7 +5,7 @@ import Card from './Card';
 import { colors, typography, spacing, radius } from '../../theme';
 
 /**
- * Location-acquisition status shown on check-in/check-out screens — address
+ * Location-acquisition status shown on login/logout screens — address
  * (or "Acquiring..."), accuracy, and a status message.
  */
 export default function GPSStatusCard({ address, coords, statusMessage, accuracyMeters }) {

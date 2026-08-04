@@ -1,9 +1,9 @@
 /**
  * visits.routes.js — Stage 5 + Dealer Geofencing & GPS Validation spec
  *
- * POST /api/visits/check-in  — check in at a dealer (blocked outside radius w/o justification)
- * POST /api/visits/check-out — check out of a dealer (blocked outside radius w/o justification,
- *                               unless the checkout GPS matches the check-in GPS within tolerance)
+ * POST /api/visits/login  — log in at a dealer (blocked outside radius w/o justification)
+ * POST /api/visits/logout — log out of a dealer (blocked outside radius w/o justification,
+ *                             unless the logout GPS matches the login GPS within tolerance)
  * GET  /api/visits/exceptions       — manager-only: list out-of-radius events
  * PATCH /api/visits/exceptions/:id  — manager-only: mark an exception reviewed
  * POST /api/visits/:id/location-check — periodic in-visit GPS ping (every ~10
@@ -15,14 +15,14 @@ const express             = require('express');
 const logger = require('../utils/logger');
 const pool                = require('../db/pool');
 const { haversineKm }     = require('../utils/haversine');
-const { logDealerCheckIn, logDealerCheckOut, logVisitInterrupted } = require('../utils/activityLog');
+const { logDealerLogin, logDealerLogout, logVisitInterrupted } = require('../utils/activityLog');
 const { requireRole }     = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
 const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS || '30');
-const MATCH_TOLERANCE_M         = parseInt(process.env.CHECKIN_MATCH_TOLERANCE_METERS || '20');
-const SYSTEM_DEFAULT_RADIUS_M   = parseInt(process.env.CHECKIN_RADIUS_METERS || '200');
+const MATCH_TOLERANCE_M         = parseInt(process.env.LOGIN_MATCH_TOLERANCE_METERS || '20');
+const SYSTEM_DEFAULT_RADIUS_M   = parseInt(process.env.LOGIN_RADIUS_METERS || '200');
 const MIN_REASON_LENGTH         = 20;
 
 // Coerces lat/lng to finite numbers within valid geographic ranges, or null.
@@ -40,9 +40,9 @@ function parseAccuracy(value) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// POST /api/visits/check-in
+// POST /api/visits/login
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/check-in', async (req, res) => {
+router.post('/login', async (req, res) => {
   const { attendance_id, dealer_id, reason } = req.body;
   const employeeId = req.employee.id;
 
@@ -65,7 +65,7 @@ router.post('/check-in', async (req, res) => {
   try {
     // Verify attendance belongs to this employee
     const attResult = await pool.query(
-      `SELECT id, check_in_lat, check_in_lng FROM attendance
+      `SELECT id, login_lat, login_lng FROM attendance
        WHERE id = $1 AND employee_id = $2`,
       [attendance_id, employeeId]
     );
@@ -103,23 +103,23 @@ router.post('/check-in', async (req, res) => {
       });
     }
 
-    // Find the last known location (most recent check-out, else day check-in)
+    // Find the last known location (most recent logout, else day login)
     const lastVisitResult = await pool.query(
-      `SELECT check_out_lat, check_out_lng
+      `SELECT logout_lat, logout_lng
        FROM client_visits
-       WHERE attendance_id = $1 AND check_out_time IS NOT NULL
-       ORDER BY check_out_time DESC
+       WHERE attendance_id = $1 AND logout_time IS NOT NULL
+       ORDER BY logout_time DESC
        LIMIT 1`,
       [attendance_id]
     );
 
     let prevLat, prevLng;
-    if (lastVisitResult.rows.length > 0 && lastVisitResult.rows[0].check_out_lat != null) {
-      prevLat = parseFloat(lastVisitResult.rows[0].check_out_lat);
-      prevLng = parseFloat(lastVisitResult.rows[0].check_out_lng);
+    if (lastVisitResult.rows.length > 0 && lastVisitResult.rows[0].logout_lat != null) {
+      prevLat = parseFloat(lastVisitResult.rows[0].logout_lat);
+      prevLng = parseFloat(lastVisitResult.rows[0].logout_lng);
     } else {
-      prevLat = parseFloat(att.check_in_lat);
-      prevLng = parseFloat(att.check_in_lng);
+      prevLat = parseFloat(att.login_lat);
+      prevLng = parseFloat(att.login_lng);
     }
 
     const distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
@@ -127,12 +127,12 @@ router.post('/check-in', async (req, res) => {
     // Create visit record
     const visitResult = await pool.query(
       `INSERT INTO client_visits
-         (attendance_id, dealer_id, check_in_time, check_in_lat, check_in_lng,
-          distance_from_previous_km, check_in_accuracy_m, check_in_distance_m,
-          check_in_inside_radius, justification_note, sync_status)
+         (attendance_id, dealer_id, login_time, login_lat, login_lng,
+          distance_from_previous_km, login_accuracy_m, login_distance_m,
+          login_inside_radius, login_justification_note, sync_status)
        VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, 'synced')
-       RETURNING id, dealer_id, check_in_time, check_in_lat, check_in_lng, distance_from_previous_km,
-                 check_in_distance_m, check_in_inside_radius`,
+       RETURNING id, dealer_id, login_time, login_lat, login_lng, distance_from_previous_km,
+                 login_distance_m, login_inside_radius`,
       [attendance_id, dealer_id, lat, lng, distFromPrev, accuracyMeters, distanceM, insideRadius, trimmedReason || null]
     );
     const visit = visitResult.rows[0];
@@ -150,12 +150,12 @@ router.post('/check-in', async (req, res) => {
         `INSERT INTO exception_log
            (employee_id, dealer_id, visit_id, event_type, latitude, longitude,
             distance_meters, gps_accuracy_m, reason)
-         VALUES ($1, $2, $3, 'check-in', $4, $5, $6, $7, $8)`,
+         VALUES ($1, $2, $3, 'login', $4, $5, $6, $7, $8)`,
         [employeeId, dealer_id, visit.id, lat, lng, distanceM, accuracyMeters, trimmedReason]
       );
     }
 
-    logDealerCheckIn(req.employee.username, dealer.name);
+    logDealerLogin(req.employee.username, dealer.name);
     return res.status(201).json({
       visit: {
         ...visit,
@@ -163,15 +163,15 @@ router.post('/check-in', async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error('Visit check-in error', { error: err.message, stack: err.stack });
+    logger.error('Visit login error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// POST /api/visits/check-out
+// POST /api/visits/logout
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/check-out', async (req, res) => {
+router.post('/logout', async (req, res) => {
   const { visit_id, reason } = req.body;
   const employeeId = req.employee.id;
 
@@ -195,8 +195,8 @@ router.post('/check-out', async (req, res) => {
     // Verify visit belongs to this employee via attendance join, and pull
     // the dealer's registered location + radius for the geofence check below.
     const visitResult = await pool.query(
-      `SELECT cv.id, cv.attendance_id, cv.dealer_id, cv.check_in_time, cv.check_out_time,
-              cv.check_in_lat, cv.check_in_lng,
+      `SELECT cv.id, cv.attendance_id, cv.dealer_id, cv.login_time, cv.logout_time,
+              cv.login_lat, cv.login_lng,
               d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng,
               d.radius_meters AS dealer_radius_meters
        FROM client_visits cv
@@ -211,16 +211,16 @@ router.post('/check-out', async (req, res) => {
     }
 
     const visit = visitResult.rows[0];
-    if (visit.check_out_time) {
-      // Reconciliation, not a dead end: a retried/offline-queued check-out
+    if (visit.logout_time) {
+      // Reconciliation, not a dead end: a retried/offline-queued logout
       // racing a first successful one shouldn't just be dropped by the
       // client — hand back the authoritative record so it can update its
       // local state to match instead of silently discarding the action.
       return res.status(409).json({
-        error: 'Visit already checked out',
+        error: 'Visit already logged out',
         visit: {
           id: visit.id,
-          check_out_time: visit.check_out_time,
+          logout_time: visit.logout_time,
         },
       });
     }
@@ -235,17 +235,17 @@ router.post('/check-out', async (req, res) => {
       insideRadius = distanceM <= radiusMeters;
     }
 
-    // Outside the dealer radius — but if the checkout GPS is within tolerance
-    // of the recorded check-in GPS, treat it as normal drift at the same spot
+    // Outside the dealer radius — but if the logout GPS is within tolerance
+    // of the recorded login GPS, treat it as normal drift at the same spot
     // rather than a real discrepancy (spec 5.2).
-    let matchedCheckIn = false;
-    if (!insideRadius && visit.check_in_lat != null && visit.check_in_lng != null) {
-      const driftM = haversineKm(parseFloat(visit.check_in_lat), parseFloat(visit.check_in_lng), lat, lng) * 1000;
-      matchedCheckIn = driftM <= MATCH_TOLERANCE_M;
+    let matchedLogin = false;
+    if (!insideRadius && visit.login_lat != null && visit.login_lng != null) {
+      const driftM = haversineKm(parseFloat(visit.login_lat), parseFloat(visit.login_lng), lat, lng) * 1000;
+      matchedLogin = driftM <= MATCH_TOLERANCE_M;
     }
 
     const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
-    if (!insideRadius && !matchedCheckIn && trimmedReason.length < MIN_REASON_LENGTH) {
+    if (!insideRadius && !matchedLogin && trimmedReason.length < MIN_REASON_LENGTH) {
       return res.status(422).json({
         error: 'reason_required',
         distanceMeters: distanceM,
@@ -253,45 +253,45 @@ router.post('/check-out', async (req, res) => {
       });
     }
 
-    const checkInTime  = new Date(visit.check_in_time);
-    const checkOutTime = new Date();
-    const durationMins = Math.round((checkOutTime - checkInTime) / 60000);
+    const loginTime  = new Date(visit.login_time);
+    const logoutTime = new Date();
+    const durationMins = Math.round((logoutTime - loginTime) / 60000);
     const outOfRadius = !insideRadius;
 
     const updatedVisit = await pool.query(
       `UPDATE client_visits
-       SET check_out_time              = NOW(),
-           check_out_lat               = $1,
-           check_out_lng               = $2,
+       SET logout_time                 = NOW(),
+           logout_lat                  = $1,
+           logout_lng                  = $2,
            visit_duration_minutes      = $3,
            out_of_radius               = $4,
-           check_out_accuracy_m        = $5,
-           check_out_distance_m        = $6,
-           matched_check_in            = $7,
-           check_out_justification_note = $8
+           logout_accuracy_m           = $5,
+           logout_distance_m           = $6,
+           matched_login               = $7,
+           logout_justification_note   = $8
        WHERE id = $9
-       RETURNING id, check_out_time, visit_duration_minutes, out_of_radius, matched_check_in`,
-      [lat, lng, durationMins, outOfRadius, accuracyMeters, distanceM, matchedCheckIn, trimmedReason || null, visit_id]
+       RETURNING id, logout_time, visit_duration_minutes, out_of_radius, matched_login`,
+      [lat, lng, durationMins, outOfRadius, accuracyMeters, distanceM, matchedLogin, trimmedReason || null, visit_id]
     );
 
     if (outOfRadius) {
       await pool.query(
         `INSERT INTO exception_log
            (employee_id, dealer_id, visit_id, event_type, latitude, longitude,
-            distance_meters, gps_accuracy_m, reason, matched_check_in)
-         VALUES ($1, $2, $3, 'check-out', $4, $5, $6, $7, $8, $9)`,
-        [employeeId, visit.dealer_id, visit_id, lat, lng, distanceM, accuracyMeters, trimmedReason || null, matchedCheckIn]
+            distance_meters, gps_accuracy_m, reason, matched_login)
+         VALUES ($1, $2, $3, 'logout', $4, $5, $6, $7, $8, $9)`,
+        [employeeId, visit.dealer_id, visit_id, lat, lng, distanceM, accuracyMeters, trimmedReason || null, matchedLogin]
       );
     }
 
-    logDealerCheckOut(req.employee.username, visit.dealer_name, durationMins, outOfRadius);
+    logDealerLogout(req.employee.username, visit.dealer_name, durationMins, outOfRadius);
     return res.json({
       visit: {
         ...updatedVisit.rows[0],
       },
     });
   } catch (err) {
-    logger.error('Visit check-out error', { error: err.message, stack: err.stack });
+    logger.error('Visit logout error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -317,7 +317,7 @@ router.post('/:id/location-check', async (req, res) => {
 
   try {
     const visitResult = await pool.query(
-      `SELECT cv.id, cv.dealer_id, cv.check_out_time, cv.outside_radius_count, cv.log_out_alert_sent,
+      `SELECT cv.id, cv.dealer_id, cv.logout_time, cv.outside_radius_count, cv.log_out_alert_sent,
               d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id
@@ -331,10 +331,10 @@ router.post('/:id/location-check', async (req, res) => {
     }
 
     const visit = visitResult.rows[0];
-    if (visit.check_out_time) {
-      // Queued/offline ping arriving after checkout — nothing meaningful to
+    if (visit.logout_time) {
+      // Queued/offline ping arriving after logout — nothing meaningful to
       // update on a closed visit, but not an error either.
-      return res.json({ visit: { id: visit.id, check_out_time: visit.check_out_time } });
+      return res.json({ visit: { id: visit.id, logout_time: visit.logout_time } });
     }
 
     // A dealer with no registered coordinates can't be geofenced — treat as inside.
@@ -419,11 +419,11 @@ router.get('/', async (req, res) => {
     }
     if (from) {
       params.push(from);
-      conditions.push(`cv.check_in_time >= $${params.length}`);
+      conditions.push(`cv.login_time >= $${params.length}`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`cv.check_in_time <= $${params.length}::date + INTERVAL '1 day'`);
+      conditions.push(`cv.login_time <= $${params.length}::date + INTERVAL '1 day'`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -431,8 +431,8 @@ router.get('/', async (req, res) => {
     const result = await pool.query(
       `SELECT cv.id, cv.attendance_id, a.employee_id, e.name AS employee_name,
               cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
-              cv.check_in_time, cv.check_in_lat, cv.check_in_lng,
-              cv.check_out_time, cv.check_out_lat, cv.check_out_lng,
+              cv.login_time, cv.login_lat, cv.login_lng,
+              cv.logout_time, cv.logout_lat, cv.logout_lng,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv
@@ -440,7 +440,7 @@ router.get('/', async (req, res) => {
        JOIN dealers d    ON d.id = cv.dealer_id
        JOIN employees e  ON e.id = a.employee_id
        ${whereClause}
-       ORDER BY cv.check_in_time DESC
+       ORDER BY cv.login_time DESC
        LIMIT 1000`,
       params
     );
@@ -453,7 +453,7 @@ router.get('/', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GET /api/visits/exceptions — manager-only: out-of-radius check-in/check-out events
+// GET /api/visits/exceptions — manager-only: out-of-radius login/logout events
 // (registered before /:id so "exceptions" is never captured as a visit id)
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/exceptions', requireRole('manager'), async (req, res) => {
@@ -499,7 +499,7 @@ router.get('/exceptions', requireRole('manager'), async (req, res) => {
               el.dealer_id, d.name AS dealer_name,
               el.visit_id, el.event_type, el.latitude, el.longitude,
               el.distance_meters, el.gps_accuracy_m, el.reason,
-              el.matched_check_in, el.manager_reviewed, el.created_at
+              el.matched_login, el.manager_reviewed, el.created_at
        FROM exception_log el
        JOIN employees e ON e.id = el.employee_id
        JOIN dealers d    ON d.id = el.dealer_id
@@ -555,8 +555,8 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query(
       `SELECT cv.id, cv.attendance_id, a.employee_id, e.name AS employee_name,
               cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
-              cv.check_in_time, cv.check_in_lat, cv.check_in_lng,
-              cv.check_out_time, cv.check_out_lat, cv.check_out_lng,
+              cv.login_time, cv.login_lat, cv.login_lng,
+              cv.logout_time, cv.logout_lat, cv.logout_lng,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv

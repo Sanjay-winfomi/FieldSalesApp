@@ -66,7 +66,7 @@ export default function DealersTab() {
   useEffect(() => { fetchDealers(); }, [fetchDealers]);
 
   useEffect(() => {
-    apiClient.get('/config').then((res) => setRadiusMeters(res.data.checkinRadiusMeters)).catch(() => {});
+    apiClient.get('/config').then((res) => setRadiusMeters(res.data.loginRadiusMeters)).catch(() => {});
   }, []);
 
   const filteredDealers = useMemo(() => {

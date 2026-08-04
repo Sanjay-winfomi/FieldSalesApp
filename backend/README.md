@@ -95,7 +95,7 @@ Open `fieldtrack.http` in VS Code with the **REST Client** extension.
 **Test sequence:**
 1. Run `### Login as rep` → copy the `accessToken` value
 2. Paste it into `@token = PASTE_ACCESS_TOKEN_HERE` at the top
-3. Run the full flow: Day check-in → Dealer check-in → Dealer check-out → Day check-out
+3. Run the full flow: Day login → Dealer login → Dealer logout → Day logout
 
 ---
 
@@ -116,14 +116,14 @@ Open `fieldtrack.http` in VS Code with the **REST Client** extension.
 - [x] `.http` test file covers all auth scenarios
 
 ### Stage 5 — Core API + Haversine
-- [x] `POST /api/attendance/check-in` — records GPS + creates attendance row
-- [x] `POST /api/attendance/check-out` — calculates `total_duration_minutes`
-- [x] `POST /api/visits/check-in` — Haversine `distance_from_previous_km`
-- [x] `POST /api/visits/check-out` — blocks outside dealer radius unless GPS matches check-in (≤20m) or a ≥20-char justification is given; logs an exception
+- [x] `POST /api/attendance/login` — records GPS + creates attendance row
+- [x] `POST /api/attendance/logout` — calculates `total_duration_minutes`
+- [x] `POST /api/visits/login` — Haversine `distance_from_previous_km`
+- [x] `POST /api/visits/logout` — blocks outside dealer radius unless GPS matches login (≤20m) or a ≥20-char justification is given; logs an exception
 - [x] `GET /api/dealers` — with `?search=` param
 - [x] `GET /api/attendance/today` — restores full day state
 - [x] **9/9 Haversine unit tests passing**
-- [x] Radius tolerance configurable system-wide via `CHECKIN_RADIUS_METERS` env var
+- [x] Radius tolerance configurable system-wide via `LOGIN_RADIUS_METERS` env var
 
 ### Stage 10 — Dashboard API
 - [x] `GET /api/dashboard/today` — manager-only, all reps' live status + last coordinates

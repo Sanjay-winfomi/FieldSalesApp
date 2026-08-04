@@ -4,7 +4,7 @@
  * GET /api/geocode/search?q=<address>   — forward geocode (address -> lat/lng),
  *   used by the Admin panel to look up a dealer's coordinates from its address.
  * GET /api/geocode/reverse?lat=&lng=    — reverse geocode (lat/lng -> address),
- *   used by the mobile app to show a readable address at check-in/out.
+ *   used by the mobile app to show a readable address at login/logout.
  * GET /api/geocode/nearby?lat=&lng=&radius= — named places near a point, used
  *   by the Admin panel to let a manager snap the dealer pin onto a landmark.
  * GET /api/geocode/autocomplete?input=&sessiontoken= — live address suggestions
@@ -29,7 +29,7 @@ const GOOGLE_GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
 // and the one that matches a key provisioned with "Places UI Kit" scopes.
 const PLACES_API_BASE = 'https://places.googleapis.com/v1';
 
-// Simple in-memory cache — dealer addresses and check-in coordinates repeat
+// Simple in-memory cache — dealer addresses and login coordinates repeat
 // constantly (same dealers, same day), so this avoids re-querying Google for
 // something we already resolved a minute ago (and keeps API spend down).
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -163,7 +163,7 @@ router.get('/reverse', async (req, res) => {
     return res.status(400).json({ error: 'lat and lng are required' });
   }
 
-  // Round to ~11m precision for the cache key — check-ins cluster tightly
+  // Round to ~11m precision for the cache key — logins cluster tightly
   // around the same dealer/office location, so this collapses near-duplicate
   // lookups without meaningfully hurting address accuracy.
   const cacheKey = `reverse:${lat.toFixed(4)},${lng.toFixed(4)}`;

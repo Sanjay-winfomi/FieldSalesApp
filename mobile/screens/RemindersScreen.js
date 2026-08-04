@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable, Alert } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Plus, BellRing, ChevronRight } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { cancelReminderNotifications } from '../src/services/reminderNotifications';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LoadingCard, EmptyState, FadeSlideIn, Card } from '../src/components';
 import { colors, typography, spacing, serifFontFamily } from '../src/theme';
 
@@ -54,7 +55,7 @@ export default function RemindersScreen({ navigation }) {
   };
 
   const handleDelete = (reminder) => {
-    Alert.alert('Delete reminder', 'Are you sure you want to delete this reminder?', [
+    showAlert('Delete reminder', 'Are you sure you want to delete this reminder?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -71,11 +72,11 @@ export default function RemindersScreen({ navigation }) {
             if (isNetworkError(err)) {
               await enqueueAction('delete', `/reminders/${reminder.id}`);
               setReminders((prev) => prev.filter((r) => r.id !== reminder.id));
-              Alert.alert('Offline Mode', 'Delete saved locally and will sync when online.');
+              showAlert('Offline Mode', 'Delete saved locally and will sync when online.');
               return;
             }
             console.error('Failed to delete reminder:', err);
-            Alert.alert('Error', 'Could not delete this reminder.');
+            showAlert('Error', 'Could not delete this reminder.');
           }
         },
       },

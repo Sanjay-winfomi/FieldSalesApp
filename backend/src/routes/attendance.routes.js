@@ -1,14 +1,14 @@
 /**
  * attendance.routes.js — Stage 5
  *
- * POST /api/attendance/check-in   — start the day
- * POST /api/attendance/check-out  — end the day
- * GET  /api/attendance/today      — restore state on app reopen
+ * POST /api/attendance/login   — start the day
+ * POST /api/attendance/logout  — end the day
+ * GET  /api/attendance/today   — restore state on app reopen
  */
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
-const { logDayCheckIn, logDayCheckOut } = require('../utils/activityLog');
+const { logDayLogin, logDayLogout } = require('../utils/activityLog');
 const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
@@ -16,7 +16,7 @@ const router = express.Router();
 // Coerces lat/lng to finite numbers within valid geographic ranges, or returns
 // null. Guards against string/NaN/out-of-range payloads reaching the DB or
 // activityLog's `.toFixed()` calls (which throw on non-numbers and would turn
-// an already-committed check-in into a false 500 for the client).
+// an already-committed login into a false 500 for the client).
 function parseCoord(value, min, max) {
   const n = typeof value === 'number' ? value : parseFloat(value);
   if (!Number.isFinite(n) || n < min || n > max) return null;
@@ -24,9 +24,9 @@ function parseCoord(value, min, max) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// POST /api/attendance/check-in
+// POST /api/attendance/login
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/check-in', async (req, res) => {
+router.post('/login', async (req, res) => {
   const employeeId = req.employee.id;
 
   if (req.body.lat === undefined || req.body.lng === undefined) {
@@ -39,15 +39,15 @@ router.post('/check-in', async (req, res) => {
   }
 
   try {
-    // Atomic guard against a second check-in on the same business day: the
+    // Atomic guard against a second login on the same business day: the
     // unique index on (employee_id, business_date) makes two concurrent
-    // check-in requests (double-tap, retry-on-timeout) resolve to exactly one
+    // login requests (double-tap, retry-on-timeout) resolve to exactly one
     // row, instead of a separate SELECT-then-INSERT which leaves a race window.
     const result = await pool.query(
-      `INSERT INTO attendance (employee_id, business_date, check_in_time, check_in_lat, check_in_lng, sync_status)
+      `INSERT INTO attendance (employee_id, business_date, login_time, login_lat, login_lng, sync_status)
        VALUES ($1, ${businessDateExpr('NOW()')}, NOW(), $2, $3, 'synced')
        ON CONFLICT (employee_id, business_date) WHERE business_date IS NOT NULL DO NOTHING
-       RETURNING id, check_in_time, check_in_lat, check_in_lng`,
+       RETURNING id, login_time, login_lat, login_lng`,
       [employeeId, lat, lng]
     );
 
@@ -59,23 +59,23 @@ router.post('/check-in', async (req, res) => {
         [employeeId]
       );
       return res.status(409).json({
-        error: 'Already checked in today',
+        error: 'Already logged in today',
         attendance_id: existing.rows[0]?.id,
       });
     }
 
-    logDayCheckIn(req.employee.username, lat, lng);
+    logDayLogin(req.employee.username, lat, lng);
     return res.status(201).json({ attendance: result.rows[0] });
   } catch (err) {
-    logger.error('Attendance check-in error', { error: err.message, stack: err.stack });
+    logger.error('Attendance login error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// POST /api/attendance/check-out
+// POST /api/attendance/logout
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/check-out', async (req, res) => {
+router.post('/logout', async (req, res) => {
   const { attendance_id } = req.body;
   const employeeId = req.employee.id;
 
@@ -90,7 +90,7 @@ router.post('/check-out', async (req, res) => {
 
   try {
     const existing = await pool.query(
-      `SELECT id, check_in_time, check_out_time, total_distance_km
+      `SELECT id, login_time, logout_time, total_distance_km
        FROM attendance
        WHERE id = $1 AND employee_id = $2`,
       [attendance_id, employeeId]
@@ -101,31 +101,31 @@ router.post('/check-out', async (req, res) => {
     }
 
     const att = existing.rows[0];
-    if (!att.check_in_time) {
-      return res.status(400).json({ error: 'No check-in time recorded' });
+    if (!att.login_time) {
+      return res.status(400).json({ error: 'No login time recorded' });
     }
-    if (att.check_out_time) {
-      // Reconciliation, not a dead end: a retried/offline-queued check-out
+    if (att.logout_time) {
+      // Reconciliation, not a dead end: a retried/offline-queued logout
       // racing an already-succeeded one shouldn't be silently dropped by the
       // client — return the authoritative record so it can adopt server truth.
       return res.status(409).json({
-        error: 'Already checked out today',
-        attendance: { id: att.id, check_out_time: att.check_out_time },
+        error: 'Already logged out today',
+        attendance: { id: att.id, logout_time: att.logout_time },
       });
     }
 
-    const checkInTime  = new Date(att.check_in_time);
-    const checkOutTime = new Date();
-    const durationMins = Math.round((checkOutTime - checkInTime) / 60000);
+    const loginTime  = new Date(att.login_time);
+    const logoutTime = new Date();
+    const durationMins = Math.round((logoutTime - loginTime) / 60000);
 
     const result = await pool.query(
       `UPDATE attendance
-       SET check_out_time = NOW(),
-           check_out_lat  = $1,
-           check_out_lng  = $2,
+       SET logout_time = NOW(),
+           logout_lat  = $1,
+           logout_lng  = $2,
            total_duration_minutes = $3
        WHERE id = $4
-       RETURNING id, check_in_time, check_out_time, total_distance_km, total_duration_minutes`,
+       RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes`,
       [lat, lng, durationMins, attendance_id]
     );
 
@@ -135,7 +135,7 @@ router.post('/check-out', async (req, res) => {
       [attendance_id]
     );
 
-    logDayCheckOut(req.employee.username, durationMins, result.rows[0].total_distance_km);
+    logDayLogout(req.employee.username, durationMins, result.rows[0].total_distance_km);
     return res.json({
       attendance: result.rows[0],
       summary: {
@@ -145,7 +145,7 @@ router.post('/check-out', async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error('Attendance check-out error', { error: err.message, stack: err.stack });
+    logger.error('Attendance logout error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -158,12 +158,12 @@ router.get('/today', async (req, res) => {
 
   try {
     const attResult = await pool.query(
-      `SELECT id, check_in_time, check_in_lat, check_in_lng,
-              check_out_time, check_out_lat, check_out_lng,
+      `SELECT id, login_time, login_lat, login_lng,
+              logout_time, logout_lat, logout_lng,
               total_distance_km, total_duration_minutes, sync_status
        FROM attendance
        WHERE employee_id = $1
-         AND ${isCurrentBusinessDay('check_in_time')}
+         AND ${isCurrentBusinessDay('login_time')}
        LIMIT 1`,
       [employeeId]
     );
@@ -177,14 +177,14 @@ router.get('/today', async (req, res) => {
     const visitsResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
               d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters,
-              cv.check_in_time, cv.check_out_time,
+              cv.login_time, cv.logout_time,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at,
-              cv.justification_note, cv.sync_status
+              cv.login_justification_note, cv.sync_status
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
        WHERE cv.attendance_id = $1
-       ORDER BY cv.check_in_time`,
+       ORDER BY cv.login_time`,
       [att.id]
     );
 
@@ -225,24 +225,24 @@ router.get('/', async (req, res) => {
 
     if (from) {
       params.push(from);
-      conditions.push(`a.check_in_time >= $${params.length}`);
+      conditions.push(`a.login_time >= $${params.length}`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`a.check_in_time <= $${params.length}::date + INTERVAL '1 day'`);
+      conditions.push(`a.login_time <= $${params.length}::date + INTERVAL '1 day'`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, e.name AS employee_name,
-              a.check_in_time, a.check_in_lat, a.check_in_lng,
-              a.check_out_time, a.check_out_lat, a.check_out_lng,
+              a.login_time, a.login_lat, a.login_lng,
+              a.logout_time, a.logout_lat, a.logout_lng,
               a.total_distance_km, a.total_duration_minutes, a.sync_status
        FROM attendance a
        JOIN employees e ON e.id = a.employee_id
        ${whereClause}
-       ORDER BY a.check_in_time DESC
+       ORDER BY a.login_time DESC
        LIMIT 1000`,
       params
     );
@@ -267,8 +267,8 @@ router.get('/:id', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT a.id, a.employee_id, e.name AS employee_name,
-              a.check_in_time, a.check_in_lat, a.check_in_lng,
-              a.check_out_time, a.check_out_lat, a.check_out_lng,
+              a.login_time, a.login_lat, a.login_lng,
+              a.logout_time, a.logout_lat, a.logout_lng,
               a.total_distance_km, a.total_duration_minutes, a.sync_status
        FROM attendance a
        JOIN employees e ON e.id = a.employee_id

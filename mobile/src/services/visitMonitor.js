@@ -17,7 +17,7 @@ import { enqueueAction } from './syncManager';
  * dashboard).
  *
  * Foreground-only means the interval alone can leave the dashboard showing a
- * stale check-in-time status for hours if the rep just pockets the phone
+ * stale login-time status for hours if the rep just pockets the phone
  * after logging in — the interval only fires while foregrounded and won't
  * catch up on missed ticks. To keep that window as small as possible, a
  * check also fires immediately on start and every time the app returns to
@@ -29,12 +29,18 @@ const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 let timer = null;
 let appStateSubscription = null;
 let logoutAlertAlready = false;
+let consecutiveOutside = 0;
+let warnedForCurrentStreak = false;
 
 /**
  * @param {object} params
  * @param {{id: number|string}} params.visit - the open visit to monitor
- * @param {(distanceMeters: number) => void} [params.onWarning] - called every
- *   time a ping comes back outside the dealer's radius
+ * @param {(distanceMeters: number) => void} [params.onWarning] - called only
+ *   once a streak of 2 CONSECUTIVE checks (20 minutes apart) both come back
+ *   outside the dealer's radius — a single outside ping is treated as GPS
+ *   noise, not a real departure, so it doesn't alert on its own. Coming back
+ *   inside resets the streak, so it takes 2 fresh consecutive misses again
+ *   before the next alert.
  * @param {(distanceMeters: number) => void} [params.onLogoutAlert] - called
  *   once per visit, the first time the backend reports 2+ cumulative breaches
  */
@@ -44,6 +50,8 @@ export function startVisitMonitoring({ visit, onWarning, onLogoutAlert }) {
   if (!visit?.id) return;
 
   logoutAlertAlready = false;
+  consecutiveOutside = 0;
+  warnedForCurrentStreak = false;
 
   const check = async () => {
     try {
@@ -79,6 +87,8 @@ export function stopVisitMonitoring() {
     appStateSubscription = null;
   }
   logoutAlertAlready = false;
+  consecutiveOutside = 0;
+  warnedForCurrentStreak = false;
 }
 
 async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert }) {
@@ -87,7 +97,15 @@ async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert
     const res = await api.post(`/visits/${visitId}/location-check`, payload);
     const { visit, distance_meters: distanceMeters } = res.data;
 
-    if (visit?.last_location_status === 'outside' && onWarning) {
+    if (visit?.last_location_status === 'outside') {
+      consecutiveOutside += 1;
+    } else {
+      consecutiveOutside = 0;
+      warnedForCurrentStreak = false;
+    }
+
+    if (consecutiveOutside >= 2 && !warnedForCurrentStreak && onWarning) {
+      warnedForCurrentStreak = true;
       onWarning(distanceMeters);
     }
 
@@ -99,7 +117,7 @@ async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert
     if (!error.response) {
       // Offline — queue it like any other action; the visit_id is a real
       // server id already (this only runs on visits that synced their
-      // check-in), so no temp-id resolution is needed.
+      // login), so no temp-id resolution is needed.
       await enqueueAction('post', `/visits/${visitId}/location-check`, payload);
     } else {
       console.warn('Failed to report location check:', error.message);

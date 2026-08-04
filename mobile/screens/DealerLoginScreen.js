@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Alert, ScrollView } from 'react-native';
+import { StyleSheet, View, ScrollView } from 'react-native';
 import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, GPSStatusCard, PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing } from '../src/theme';
 
 const MIN_REASON_LENGTH = 20;
 
-export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, navigation }) {
+export default function DealerLoginScreen({ dealer, attendance, onLogin, navigation }) {
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [coords, setCoords] = useState(null);
@@ -39,13 +40,13 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
     }
   };
 
-  const handleCheckIn = async () => {
+  const handleLogin = async () => {
     if (!coords) {
-      Alert.alert('Location Required', 'Please wait for GPS to acquire your location.');
+      showAlert('Location Required', 'Please wait for GPS to acquire your location.');
       return;
     }
     if (!attendance) {
-      Alert.alert('Error', 'No active attendance session found. Please log in for the day first.');
+      showAlert('Error', 'No active attendance session found. Please log in for the day first.');
       return;
     }
 
@@ -62,7 +63,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
 
       let visitData = null;
       try {
-        const response = await api.post('/visits/check-in', payload);
+        const response = await api.post('/visits/login', payload);
         // Merge dealer_id/coordinates explicitly — guarantees these fields are
         // present for the active-visit lookup and background geofence setup
         // in App.js regardless of RETURNING clause state.
@@ -77,37 +78,37 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
         if (!error.response) {
           // Network error — enqueue and proceed
           const localId = 'offline-' + Date.now();
-          await enqueueAction('post', '/visits/check-in', payload, { localId, resolves: 'visit' });
-          Alert.alert('Offline Mode', 'Dealer login saved locally and will sync when online.');
+          await enqueueAction('post', '/visits/login', payload, { localId, resolves: 'visit' });
+          showAlert('Offline Mode', 'Dealer login saved locally and will sync when online.');
           visitData = {
             id: localId,
-            check_in_time: new Date().toISOString(),
+            login_time: new Date().toISOString(),
             dealer_id: dealer.id,
             dealer_name: dealer.name,
             dealer_latitude: dealer.latitude,
             dealer_longitude: dealer.longitude,
             dealer_radius_meters: dealer.radius_meters,
-            check_in_lat: coords.lat,
-            check_in_lng: coords.lng,
+            login_lat: coords.lat,
+            login_lng: coords.lng,
             within_radius: true,
           };
         } else if (error.response.data?.error === 'reason_required') {
           setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
           return;
         } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
-          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to log in. Move to an open area for a stronger signal.');
+          showAlert('GPS Too Imprecise', 'Your GPS accuracy is too low to log in. Move to an open area for a stronger signal.');
           return;
         } else {
           throw error;
         }
       }
 
-      if (visitData && onCheckIn) {
-        onCheckIn(visitData);
+      if (visitData && onLogin) {
+        onLogin(visitData);
       }
     } catch (error) {
       console.error('Dealer login error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to log in. Please try again.');
+      showAlert('Error', error.response?.data?.error || 'Failed to log in. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -146,7 +147,7 @@ export default function DealerCheckInScreen({ dealer, attendance, onCheckIn, nav
 
           <PrimaryButton
             title={needsReason ? 'Submit reason & login' : 'Dealer Login'}
-            onPress={handleCheckIn}
+            onPress={handleLogin}
             disabled={!coords || !accuracyOk || (needsReason && !reasonOk)}
             loading={loading}
             style={styles.submitButton}

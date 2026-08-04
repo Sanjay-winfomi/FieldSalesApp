@@ -8,7 +8,7 @@ import { enqueueAction } from './syncManager';
  *
  * visitMonitor.js only samples location while the app is foregrounded, which
  * leaves a manager-facing status stuck at whatever it was the last time the
- * rep had the app open — often the check-in moment, for the entire visit,
+ * rep had the app open — often the login moment, for the entire visit,
  * since reps log in and pocket the phone. Geofencing is the OS primitive
  * built for exactly this: register a circular region around the dealer and
  * the OS wakes this task on ENTER/EXIT even if the app is fully closed, with

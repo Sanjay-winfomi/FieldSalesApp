@@ -77,18 +77,24 @@ describe('visitMonitor', () => {
     expect(onLogoutAlert).not.toHaveBeenCalled();
   });
 
-  test('fires onWarning whenever a ping reports outside', async () => {
+  test('does not fire onWarning on a single outside ping — only after 2 consecutive', async () => {
     api.post.mockResolvedValue({
       data: { visit: { last_location_status: 'outside', log_out_alert_sent: false }, distance_meters: 287 },
     });
     const onWarning = jest.fn();
 
     startVisitMonitoring({ visit: VISIT, onWarning });
-    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
-    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    // Immediate check on start = 1st outside ping — not enough on its own.
+    expect(onWarning).not.toHaveBeenCalled();
 
-    expect(onWarning).toHaveBeenCalledTimes(3); // immediate check on start + 2 interval ticks
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    // 2nd consecutive outside ping — now it fires, exactly once.
+    expect(onWarning).toHaveBeenCalledTimes(1);
     expect(onWarning).toHaveBeenCalledWith(287);
+
+    await jest.advanceTimersByTimeAsync(__testing.CHECK_INTERVAL_MS);
+    // 3rd ping still outside, but the streak was already warned about.
+    expect(onWarning).toHaveBeenCalledTimes(1);
   });
 
   test('fires onLogoutAlert once the backend reports the cumulative breach alert', async () => {

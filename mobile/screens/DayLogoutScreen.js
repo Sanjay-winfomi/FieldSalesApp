@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Alert, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { Clock, TrendingUp } from 'lucide-react-native';
 import { getCurrentLocation, getReadableAddress } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LocationCard, PrimaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
-export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }) {
+export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
   const [loading, setLoading] = useState(false);
   const [coords, setCoords] = useState(null);
   const [address, setAddress] = useState('');
@@ -43,13 +44,13 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
     });
   };
 
-  const handleCheckOut = async () => {
+  const handleLogout = async () => {
     if (!coords) {
-      Alert.alert('Location Required', 'Please wait for GPS to acquire your location.');
+      showAlert('Location Required', 'Please wait for GPS to acquire your location.');
       return;
     }
     if (!attendance) {
-      Alert.alert('Error', 'No active attendance session found.');
+      showAlert('Error', 'No active attendance session found.');
       return;
     }
 
@@ -63,27 +64,27 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
 
       let updatedAttendance = null;
       try {
-        const response = await api.post('/attendance/check-out', payload);
+        const response = await api.post('/attendance/logout', payload);
         updatedAttendance = response.data.attendance;
       } catch (error) {
         if (!error.response) {
-          await enqueueAction('post', '/attendance/check-out', payload);
-          Alert.alert('Offline Mode', 'Logout saved locally and will sync when online.');
+          await enqueueAction('post', '/attendance/logout', payload);
+          showAlert('Offline Mode', 'Logout saved locally and will sync when online.');
           updatedAttendance = {
             ...attendance,
-            check_out_time: new Date().toISOString(),
+            logout_time: new Date().toISOString(),
           };
         } else {
           throw error;
         }
       }
 
-      if (updatedAttendance && onCheckOut) {
-        onCheckOut(updatedAttendance);
+      if (updatedAttendance && onLogout) {
+        onLogout(updatedAttendance);
       }
     } catch (error) {
       console.error('Logout error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
+      showAlert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -104,7 +105,7 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
                 <Clock size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
                 <Text style={styles.summaryLabel}>Login</Text>
               </View>
-              <Text style={styles.summaryValue}>{formatTime(attendance?.check_in_time)}</Text>
+              <Text style={styles.summaryValue}>{formatTime(attendance?.login_time)}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.summaryRow}>
@@ -120,7 +121,7 @@ export default function DayCheckOutScreen({ attendance, onCheckOut, navigation }
 
           <PrimaryButton
             title="Logout for the day"
-            onPress={handleCheckOut}
+            onPress={handleLogout}
             disabled={!coords}
             loading={loading}
             variant="danger"

@@ -9,7 +9,7 @@ let unsubscribeNetInfo = null;
 let flushInFlight = null;
 
 // Called once (by App.js) whenever a queued action turns out to conflict
-// with state the server already has (e.g. a retried/offline check-out racing
+// with state the server already has (e.g. a retried/offline logout racing
 // one that already succeeded) — so the app can refresh from the server
 // instead of the UI silently drifting out of sync with what was dropped.
 let conflictHandler = null;
@@ -20,7 +20,7 @@ export const setConflictHandler = (fn) => {
 /**
  * Enqueue an API request to be processed later.
  * @param {string} method - e.g., 'post', 'put'
- * @param {string} url - endpoint, e.g., '/visits/check-in'
+ * @param {string} url - endpoint, e.g., '/visits/login'
  * @param {object} data - payload
  * @param {object} [opts]
  * @param {string} [opts.localId] - temp id this action's response should resolve
@@ -110,7 +110,7 @@ export const flushQueue = async () => {
       // every single action settles (not just once at the end), so that if
       // the app is killed mid-flush, an already-synced action can't still be
       // sitting in the persisted queue and get resubmitted (duplicate
-      // check-in/check-out records) on the next flush attempt.
+      // login/logout records) on the next flush attempt.
       let remaining = [...queue];
       const persistRemaining = () => AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
 
@@ -167,7 +167,7 @@ export const flushQueue = async () => {
             remaining.push(action);
           } else if (error.response?.status === 409) {
             // Conflict with state the server already has (duplicate day
-            // check-in, a check-out/check-in racing one that already synced,
+            // login, a logout/login racing one that already synced,
             // an interrupt report for a visit already closed, ...). Reconcile
             // rather than silently drop: resolve any dependent queued actions
             // against whatever id the server gave us, and hand the

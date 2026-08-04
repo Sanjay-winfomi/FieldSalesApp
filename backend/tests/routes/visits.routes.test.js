@@ -8,19 +8,19 @@ const visitsRouter = require('../../src/routes/visits.routes');
 const REP = { id: 1, role: 'rep', username: 'arun' };
 const MANAGER = { id: 2, role: 'manager', username: 'priya' };
 
-describe('POST /api/x/check-in', () => {
+describe('POST /api/x/login', () => {
   afterEach(() => jest.clearAllMocks());
 
   test('400 when required fields are missing', async () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/check-in').send({ dealer_id: 1 });
+    const res = await request(app).post('/api/x/login').send({ dealer_id: 1 });
     expect(res.status).toBe(400);
   });
 
   test('422 when GPS accuracy exceeds the threshold', async () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
-      .post('/api/x/check-in')
+      .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 1, lat: 11, lng: 77, accuracy_meters: 999 });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('gps_accuracy_exceeded');
@@ -28,26 +28,26 @@ describe('POST /api/x/check-in', () => {
 
   test('422 with reason_required when outside radius and no reason given', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, check_in_lat: 11, check_in_lng: 77 }] }) // attendance
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
       .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 100 }] }); // dealer
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
-      .post('/api/x/check-in')
+      .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 1, lat: 12, lng: 78, accuracy_meters: 10 }); // ~150km away
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('reason_required');
   });
 
-  test('201 checks in successfully inside the radius', async () => {
+  test('201 logs in successfully inside the radius', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, check_in_lat: 11, check_in_lng: 77 }] }) // attendance
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
       .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 200 }] }) // dealer
       .mockResolvedValueOnce({ rows: [] }) // last visit (none)
-      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, check_in_time: 'now', check_in_lat: 11, check_in_lng: 77 }] }) // insert visit
+      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, login_time: 'now', login_lat: 11, login_lng: 77 }] }) // insert visit
       .mockResolvedValueOnce({ rows: [] }); // update attendance distance
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
-      .post('/api/x/check-in')
+      .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 1, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(201);
     expect(res.body.visit.id).toBe(55);
@@ -56,47 +56,47 @@ describe('POST /api/x/check-in', () => {
 
   test('404 when the dealer does not exist', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, check_in_lat: 11, check_in_lng: 77 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] })
       .mockResolvedValueOnce({ rows: [] });
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
-      .post('/api/x/check-in')
+      .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 999, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(404);
   });
 });
 
-describe('POST /api/x/check-out', () => {
+describe('POST /api/x/logout', () => {
   afterEach(() => jest.clearAllMocks());
 
-  test('409 with the authoritative visit record when already checked out', async () => {
+  test('409 with the authoritative visit record when already logged out', async () => {
     pool.query.mockResolvedValueOnce({
       rows: [{
         id: 55, attendance_id: 1, dealer_id: 1,
-        check_in_time: '2026-07-27T05:00:00Z', check_out_time: '2026-07-27T06:00:00Z',
-        check_in_lat: 11, check_in_lng: 77,
+        login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T06:00:00Z',
+        login_lat: 11, login_lng: 77,
         dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 200,
       }],
     });
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/check-out').send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10 });
+    const res = await request(app).post('/api/x/logout').send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(409);
-    expect(res.body.visit).toEqual({ id: 55, check_out_time: '2026-07-27T06:00:00Z' });
+    expect(res.body.visit).toEqual({ id: 55, logout_time: '2026-07-27T06:00:00Z' });
   });
 
-  test('200 checks out successfully inside the radius', async () => {
+  test('200 logs out successfully inside the radius', async () => {
     pool.query
       .mockResolvedValueOnce({
         rows: [{
           id: 55, attendance_id: 1, dealer_id: 1,
-          check_in_time: '2026-07-27T05:00:00Z', check_out_time: null,
-          check_in_lat: 11, check_in_lng: 77,
+          login_time: '2026-07-27T05:00:00Z', logout_time: null,
+          login_lat: 11, login_lng: 77,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 200,
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 55, check_out_time: 'now', visit_duration_minutes: 30, out_of_radius: false, matched_check_in: false }] });
+      .mockResolvedValueOnce({ rows: [{ id: 55, logout_time: 'now', visit_duration_minutes: 30, out_of_radius: false, matched_login: false }] });
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
-    const res = await request(app).post('/api/x/check-out').send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10 });
+    const res = await request(app).post('/api/x/logout').send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(200);
     expect(res.body.visit.out_of_radius).toBe(false);
   });
@@ -122,7 +122,7 @@ describe('POST /api/x/:id/location-check', () => {
     pool.query
       .mockResolvedValueOnce({
         rows: [{
-          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 0, log_out_alert_sent: false,
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 0, log_out_alert_sent: false,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200,
         }],
       })
@@ -138,7 +138,7 @@ describe('POST /api/x/:id/location-check', () => {
     pool.query
       .mockResolvedValueOnce({
         rows: [{
-          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 0, log_out_alert_sent: false,
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 0, log_out_alert_sent: false,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
         }],
       })
@@ -155,7 +155,7 @@ describe('POST /api/x/:id/location-check', () => {
     pool.query
       .mockResolvedValueOnce({
         rows: [{
-          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 1, log_out_alert_sent: false,
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 1, log_out_alert_sent: false,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
         }],
       })
@@ -172,7 +172,7 @@ describe('POST /api/x/:id/location-check', () => {
     pool.query
       .mockResolvedValueOnce({
         rows: [{
-          id: 55, dealer_id: 1, check_out_time: null, outside_radius_count: 3, log_out_alert_sent: true,
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 3, log_out_alert_sent: true,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
         }],
       })

@@ -59,12 +59,12 @@ router.get('/not-visited', requireRole('manager'), async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT d.${DEALER_FIELDS.split(', ').join(', d.')}, MAX(cv.check_in_time) AS last_visit_time
+      `SELECT d.${DEALER_FIELDS.split(', ').join(', d.')}, MAX(cv.login_time) AS last_visit_time
        FROM dealers d
        LEFT JOIN client_visits cv ON cv.dealer_id = d.id
        GROUP BY d.id
-       HAVING MAX(cv.check_in_time) IS NULL
-           OR MAX(cv.check_in_time) < NOW() - ($1 || ' days')::INTERVAL
+       HAVING MAX(cv.login_time) IS NULL
+           OR MAX(cv.login_time) < NOW() - ($1 || ' days')::INTERVAL
        ORDER BY last_visit_time ASC NULLS FIRST`,
       [days]
     );

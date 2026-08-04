@@ -11,7 +11,7 @@ import { colors, typography, spacing, radius } from '../theme';
 /**
  * Full-screen modal dealer picker — same api.get('/dealers', { search })
  * fetch pattern as DealerDirectoryScreen, but as a lightweight searchable
- * list rather than the full check-in-oriented dealer directory, since it's
+ * list rather than the full login-oriented dealer directory, since it's
  * only used here to pick a dealer for a reminder.
  */
 export default function DealerPickerModal({ visible, onClose, onSelect }) {

@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS dealers (
 
 CREATE INDEX IF NOT EXISTS idx_dealers_created_at ON dealers (created_at);
 
--- Per-dealer check-in/check-out geofence radius (Dealer Geofencing spec).
+-- Per-dealer login/logout geofence radius (Dealer Geofencing spec).
 -- Defaults to 200m; a manager may override per dealer from the web admin UI.
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS radius_meters INTEGER NOT NULL DEFAULT 200;
 
@@ -48,30 +48,62 @@ CREATE TABLE IF NOT EXISTS attendance (
   id                      SERIAL PRIMARY KEY,
   employee_id             INTEGER       NOT NULL REFERENCES employees (id) ON DELETE CASCADE,
   business_date           DATE,
-  check_in_time           TIMESTAMPTZ,
-  check_in_lat            DOUBLE PRECISION,
-  check_in_lng            DOUBLE PRECISION,
-  check_out_time          TIMESTAMPTZ,
-  check_out_lat           DOUBLE PRECISION,
-  check_out_lng           DOUBLE PRECISION,
+  login_time              TIMESTAMPTZ,
+  login_lat               DOUBLE PRECISION,
+  login_lng               DOUBLE PRECISION,
+  logout_time             TIMESTAMPTZ,
+  logout_lat              DOUBLE PRECISION,
+  logout_lng              DOUBLE PRECISION,
   total_distance_km       DOUBLE PRECISION DEFAULT 0,
   total_duration_minutes  INTEGER,
   sync_status             VARCHAR(20)   NOT NULL DEFAULT 'synced' CHECK (sync_status IN ('synced', 'pending')),
   created_at              TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
--- business_date is populated by the app at check-in (see attendance.routes.js)
+-- Renames for pre-existing databases that still have the old check-in/
+-- check-out column names (fresh databases already get the new names from
+-- the CREATE TABLE above, so these are no-ops there).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_in_time')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'login_time') THEN
+    ALTER TABLE attendance RENAME COLUMN check_in_time TO login_time;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_in_lat')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'login_lat') THEN
+    ALTER TABLE attendance RENAME COLUMN check_in_lat TO login_lat;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_in_lng')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'login_lng') THEN
+    ALTER TABLE attendance RENAME COLUMN check_in_lng TO login_lng;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_out_time')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'logout_time') THEN
+    ALTER TABLE attendance RENAME COLUMN check_out_time TO logout_time;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_out_lat')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'logout_lat') THEN
+    ALTER TABLE attendance RENAME COLUMN check_out_lat TO logout_lat;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'check_out_lng')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance' AND column_name = 'logout_lng') THEN
+    ALTER TABLE attendance RENAME COLUMN check_out_lng TO logout_lng;
+  END IF;
+END $$;
+
+-- business_date is populated by the app at login (see attendance.routes.js)
 -- using the same DAY_BOUNDARY_HOUR-aware expression as businessDay.js. It backs
--- a unique constraint that makes "already checked in today" an atomic DB
+-- a unique constraint that makes "already logged in today" an atomic DB
 -- guarantee (via INSERT ... ON CONFLICT) instead of a check-then-insert race
 -- between the SELECT guard and the INSERT, which could otherwise let two
--- concurrent check-in requests (double-tap, retry-on-timeout) both succeed.
+-- concurrent login requests (double-tap, retry-on-timeout) both succeed.
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS business_date DATE;
-UPDATE attendance SET business_date = DATE((check_in_time) AT TIME ZONE 'Asia/Kolkata' - INTERVAL '5 hours')
-  WHERE business_date IS NULL AND check_in_time IS NOT NULL;
+UPDATE attendance SET business_date = DATE((login_time) AT TIME ZONE 'Asia/Kolkata' - INTERVAL '5 hours')
+  WHERE business_date IS NULL AND login_time IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_attendance_employee_id ON attendance (employee_id);
-CREATE INDEX IF NOT EXISTS idx_attendance_check_in_time ON attendance (check_in_time);
+ALTER INDEX IF EXISTS idx_attendance_check_in_time RENAME TO idx_attendance_login_time;
+CREATE INDEX IF NOT EXISTS idx_attendance_login_time ON attendance (login_time);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_employee_business_date
   ON attendance (employee_id, business_date) WHERE business_date IS NOT NULL;
 
@@ -82,42 +114,111 @@ CREATE TABLE IF NOT EXISTS client_visits (
   id                          SERIAL PRIMARY KEY,
   attendance_id               INTEGER       NOT NULL REFERENCES attendance (id) ON DELETE CASCADE,
   dealer_id                   INTEGER       NOT NULL REFERENCES dealers (id),
-  check_in_time               TIMESTAMPTZ,
-  check_in_lat                DOUBLE PRECISION,
-  check_in_lng                DOUBLE PRECISION,
-  check_out_time              TIMESTAMPTZ,
-  check_out_lat               DOUBLE PRECISION,
-  check_out_lng               DOUBLE PRECISION,
+  login_time                  TIMESTAMPTZ,
+  login_lat                   DOUBLE PRECISION,
+  login_lng                   DOUBLE PRECISION,
+  logout_time                 TIMESTAMPTZ,
+  logout_lat                  DOUBLE PRECISION,
+  logout_lng                  DOUBLE PRECISION,
   visit_duration_minutes      INTEGER,
   distance_from_previous_km   DOUBLE PRECISION DEFAULT 0,
   out_of_radius               BOOLEAN       NOT NULL DEFAULT FALSE,
-  justification_note          TEXT,
+  login_justification_note    TEXT,
   sync_status                 VARCHAR(20)   NOT NULL DEFAULT 'synced' CHECK (sync_status IN ('synced', 'pending')),
   created_at                  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_time')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_time') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_time TO login_time;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_lat')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_lat') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_lat TO login_lat;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_lng')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_lng') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_lng TO login_lng;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_time')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_time') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_time TO logout_time;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_lat')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_lat') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_lat TO logout_lat;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_lng')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_lng') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_lng TO logout_lng;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'justification_note')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_justification_note') THEN
+    ALTER TABLE client_visits RENAME COLUMN justification_note TO login_justification_note;
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_visits_attendance_id ON client_visits (attendance_id);
 CREATE INDEX IF NOT EXISTS idx_visits_dealer_id     ON client_visits (dealer_id);
 CREATE INDEX IF NOT EXISTS idx_visits_created_at    ON client_visits (created_at);
-CREATE INDEX IF NOT EXISTS idx_visits_check_in_time ON client_visits (check_in_time);
+ALTER INDEX IF EXISTS idx_visits_check_in_time RENAME TO idx_visits_login_time;
+CREATE INDEX IF NOT EXISTS idx_visits_login_time ON client_visits (login_time);
 
 -- Dealer Geofencing & GPS Validation spec — per-event accuracy/distance capture,
--- check-in radius flag (check-out already had out_of_radius), the check-in vs
--- check-out tolerance-match flag, and a separate check-out justification (the
--- existing justification_note column now holds the check-in reason).
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_in_accuracy_m DOUBLE PRECISION;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_out_accuracy_m DOUBLE PRECISION;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_in_distance_m DOUBLE PRECISION;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_out_distance_m DOUBLE PRECISION;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_in_inside_radius BOOLEAN;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS matched_check_in BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS check_out_justification_note TEXT;
+-- login radius flag (logout already had out_of_radius), the login vs
+-- logout tolerance-match flag, and a separate logout justification (the
+-- login_justification_note column holds the login reason).
+-- These renames MUST run before the ADD COLUMN IF NOT EXISTS block below —
+-- otherwise ADD COLUMN creates the new column empty first, the rename's
+-- NOT EXISTS guard then finds it already there and skips, and any real data
+-- in the old column is silently orphaned instead of carried over.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_accuracy_m')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_accuracy_m') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_accuracy_m TO login_accuracy_m;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_accuracy_m')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_accuracy_m') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_accuracy_m TO logout_accuracy_m;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_distance_m')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_distance_m') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_distance_m TO login_distance_m;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_distance_m')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_distance_m') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_distance_m TO logout_distance_m;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_in_inside_radius')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'login_inside_radius') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_in_inside_radius TO login_inside_radius;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'matched_check_in')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'matched_login') THEN
+    ALTER TABLE client_visits RENAME COLUMN matched_check_in TO matched_login;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'check_out_justification_note')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_visits' AND column_name = 'logout_justification_note') THEN
+    ALTER TABLE client_visits RENAME COLUMN check_out_justification_note TO logout_justification_note;
+  END IF;
+END $$;
+
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS login_accuracy_m DOUBLE PRECISION;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS logout_accuracy_m DOUBLE PRECISION;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS login_distance_m DOUBLE PRECISION;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS logout_distance_m DOUBLE PRECISION;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS login_inside_radius BOOLEAN;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS matched_login BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS logout_justification_note TEXT;
 
 -- Periodic in-visit location verification (Random Location Verification spec):
 -- while a visit is open, the app re-samples GPS every few minutes. If the rep
 -- is found outside the dealer's radius for longer than a grace period, the
 -- visit is flagged interrupted — a distinct signal from out_of_radius (which
--- only describes the check-in/check-out moments) that a manager can review.
+-- only describes the login/logout moments) that a manager can review.
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted_at TIMESTAMPTZ;
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS interrupted_distance_m DOUBLE PRECISION;
@@ -134,15 +235,15 @@ ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS outside_radius_count INTEGER 
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS log_out_alert_sent BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Distance (meters) from the dealer at the most recent periodic location
--- check — distinct from check_in_distance_m, which only reflects the
--- one-time check-in moment. Lets the dashboard show a live "distance from
--- dealer" figure for an open visit instead of a stale check-in-time value.
+-- check — distinct from login_distance_m, which only reflects the
+-- one-time login moment. Lets the dashboard show a live "distance from
+-- dealer" figure for an open visit instead of a stale login-time value.
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_distance_m DOUBLE PRECISION;
 
 -- ============================================================
 -- 5. exception_log
 -- ============================================================
--- Every check-in/check-out performed outside the dealer's approved radius,
+-- Every login/logout performed outside the dealer's approved radius,
 -- with the mandatory justification the rep entered, for manager review.
 -- 'interrupted' events (added for Random Location Verification) have no
 -- rep-entered reason — they're system-detected, not self-reported.
@@ -151,13 +252,13 @@ CREATE TABLE IF NOT EXISTS exception_log (
   employee_id       INTEGER       NOT NULL REFERENCES employees (id) ON DELETE CASCADE,
   dealer_id         INTEGER       NOT NULL REFERENCES dealers (id),
   visit_id          INTEGER       REFERENCES client_visits (id) ON DELETE CASCADE,
-  event_type        VARCHAR(12)   NOT NULL CHECK (event_type IN ('check-in', 'check-out', 'interrupted')),
+  event_type        VARCHAR(12)   NOT NULL CHECK (event_type IN ('login', 'logout', 'interrupted')),
   latitude          DOUBLE PRECISION NOT NULL,
   longitude         DOUBLE PRECISION NOT NULL,
   distance_meters   DOUBLE PRECISION,
   gps_accuracy_m    DOUBLE PRECISION,
   reason            TEXT,
-  matched_check_in  BOOLEAN       NOT NULL DEFAULT FALSE,
+  matched_login     BOOLEAN       NOT NULL DEFAULT FALSE,
   manager_reviewed  BOOLEAN       NOT NULL DEFAULT FALSE,
   created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -165,11 +266,23 @@ CREATE TABLE IF NOT EXISTS exception_log (
 -- event_type predates 'interrupted' (11 chars, exceeds the original
 -- VARCHAR(10)) on databases created before this migration — widen the column
 -- and its CHECK constraint so re-running migrate.js on an existing DB doesn't
--- leave either one rejecting the new event type.
+-- leave either one rejecting the new event type. Also relabels the stored
+-- 'check-in'/'check-out' values (and the matched_check_in column) to
+-- 'login'/'logout' for pre-existing rows.
 ALTER TABLE exception_log ALTER COLUMN event_type TYPE VARCHAR(12);
 ALTER TABLE exception_log DROP CONSTRAINT IF EXISTS exception_log_event_type_check;
+UPDATE exception_log SET event_type = 'login' WHERE event_type = 'check-in';
+UPDATE exception_log SET event_type = 'logout' WHERE event_type = 'check-out';
 ALTER TABLE exception_log ADD CONSTRAINT exception_log_event_type_check
-  CHECK (event_type IN ('check-in', 'check-out', 'interrupted'));
+  CHECK (event_type IN ('login', 'logout', 'interrupted'));
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'exception_log' AND column_name = 'matched_check_in')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'exception_log' AND column_name = 'matched_login') THEN
+    ALTER TABLE exception_log RENAME COLUMN matched_check_in TO matched_login;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_exception_log_employee    ON exception_log (employee_id);
 CREATE INDEX IF NOT EXISTS idx_exception_log_created_at  ON exception_log (created_at);

@@ -22,32 +22,32 @@ router.get('/today', async (req, res) => {
         e.name,
         e.region,
         a.id            AS attendance_id,
-        a.check_in_time,
-        a.check_out_time,
+        a.login_time,
+        a.logout_time,
         a.total_distance_km,
         a.sync_status   AS day_sync_status,
         -- Latest visit
         lv.dealer_name,
-        lv.check_in_time  AS visit_check_in,
-        lv.check_out_time AS visit_check_out,
-        lv.check_in_lat   AS last_lat,
-        lv.check_in_lng   AS last_lng,
+        lv.login_time  AS visit_login,
+        lv.logout_time AS visit_logout,
+        lv.login_lat   AS last_lat,
+        lv.login_lng   AS last_lng,
         -- "Time to log out" alert: the rep's current open visit has hit 2+
-        -- cumulative out-of-radius checks and hasn't been checked out of yet.
-        (lv.check_out_time IS NULL AND lv.log_out_alert_sent) AS needs_logout_alert,
+        -- cumulative out-of-radius checks and hasn't been logged out of yet.
+        (lv.logout_time IS NULL AND lv.log_out_alert_sent) AS needs_logout_alert,
         -- Visit count today
         (SELECT COUNT(*) FROM client_visits cv2 WHERE cv2.attendance_id = a.id) AS visits_count
       FROM employees e
       LEFT JOIN attendance a
         ON a.employee_id = e.id
-        AND ${isCurrentBusinessDay('a.check_in_time')}
+        AND ${isCurrentBusinessDay('a.login_time')}
       LEFT JOIN LATERAL (
-        SELECT cv.check_in_time, cv.check_out_time, cv.check_in_lat, cv.check_in_lng,
+        SELECT cv.login_time, cv.logout_time, cv.login_lat, cv.login_lng,
                cv.log_out_alert_sent, d.name AS dealer_name
         FROM client_visits cv
         JOIN dealers d ON d.id = cv.dealer_id
         WHERE cv.attendance_id = a.id
-        ORDER BY cv.check_in_time DESC
+        ORDER BY cv.login_time DESC
         LIMIT 1
       ) lv ON true
       WHERE e.role = 'rep'
@@ -60,25 +60,25 @@ router.get('/today', async (req, res) => {
       let timestamp;
 
       if (!row.attendance_id) {
-        status       = 'not_checked_in';
-        lastActivity = 'Not checked in yet';
+        status       = 'not_logged_in';
+        lastActivity = 'Not logged in yet';
         timestamp    = null;
-      } else if (row.check_out_time) {
+      } else if (row.logout_time) {
         status       = 'day_ended';
-        lastActivity = `Office check-out, ${new Date(row.check_out_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
-        timestamp    = row.check_out_time;
-      } else if (row.visit_check_in && !row.visit_check_out) {
-        status       = 'checked_in';
+        lastActivity = `Office logout, ${new Date(row.logout_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+        timestamp    = row.logout_time;
+      } else if (row.visit_login && !row.visit_logout) {
+        status       = 'logged_in';
         lastActivity = `At ${row.dealer_name}`;
-        timestamp    = row.visit_check_in;
+        timestamp    = row.visit_login;
       } else if (row.dealer_name) {
-        status       = 'checked_in';
+        status       = 'logged_in';
         lastActivity = `Travelling from ${row.dealer_name}`;
-        timestamp    = row.visit_check_out;
+        timestamp    = row.visit_logout;
       } else {
-        status       = 'checked_in';
-        lastActivity = 'Checked in — no visits yet';
-        timestamp    = row.check_in_time;
+        status       = 'logged_in';
+        lastActivity = 'Logged in — no visits yet';
+        timestamp    = row.login_time;
       }
 
       return {
@@ -126,12 +126,12 @@ router.get('/rep/:id/today', async (req, res) => {
 
     // 2. Fetch today's attendance
     const attResult = await pool.query(
-      `SELECT id, check_in_time, check_in_lat, check_in_lng,
-              check_out_time, check_out_lat, check_out_lng,
+      `SELECT id, login_time, login_lat, login_lng,
+              logout_time, logout_lat, logout_lng,
               total_distance_km, total_duration_minutes, sync_status
        FROM attendance
        WHERE employee_id = $1
-         AND ${isCurrentBusinessDay('check_in_time')}
+         AND ${isCurrentBusinessDay('login_time')}
        LIMIT 1`,
       [repId]
     );
@@ -146,18 +146,18 @@ router.get('/rep/:id/today', async (req, res) => {
     const visitsResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
               d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters,
-              cv.check_in_time, cv.check_in_lat, cv.check_in_lng,
-              cv.check_out_time, cv.check_out_lat, cv.check_out_lng,
+              cv.login_time, cv.login_lat, cv.login_lng,
+              cv.logout_time, cv.logout_lat, cv.logout_lng,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
-              cv.check_in_distance_m, cv.check_in_inside_radius,
-              cv.justification_note, cv.check_out_justification_note,
+              cv.login_distance_m, cv.login_inside_radius,
+              cv.login_justification_note, cv.logout_justification_note,
               cv.last_location_status, cv.last_location_check_at, cv.last_location_distance_m,
               cv.outside_radius_count, cv.log_out_alert_sent, cv.interrupted, cv.interrupted_at,
               cv.sync_status
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
        WHERE cv.attendance_id = $1
-       ORDER BY cv.check_in_time DESC`,
+       ORDER BY cv.login_time DESC`,
       [attendance.id]
     );
 

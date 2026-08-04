@@ -195,10 +195,10 @@ app.use('/api/geocode',    requireAuth, geocodeRouter);
 app.use('/api/notes',      requireAuth, notesRouter);
 app.use('/api/reminders',  requireAuth, remindersRouter);
 
-// Exposes the actual configured check-in tolerance radius so the UI never
+// Exposes the actual configured login tolerance radius so the UI never
 // has to hardcode a value that could drift from what .env really says.
 app.get('/api/config', requireAuth, (req, res) => {
-  res.json({ checkinRadiusMeters: parseInt(process.env.CHECKIN_RADIUS_METERS || '100') });
+  res.json({ loginRadiusMeters: parseInt(process.env.LOGIN_RADIUS_METERS || '100') });
 });
 
 // ── Manager-only routes ───────────────────────────────────────────────────────

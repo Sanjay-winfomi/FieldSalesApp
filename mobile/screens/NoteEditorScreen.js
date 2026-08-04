@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Text, View, TextInput, Alert, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, PrimaryButton, LoadingCard } from '../src/components';
 import { colors, typography, spacing, serifFontFamily } from '../src/theme';
 
@@ -30,7 +31,7 @@ export default function NoteEditorScreen({ navigation, route }) {
       setContent(res.data.note.content);
     } catch (err) {
       console.error('Failed to fetch note:', err);
-      Alert.alert('Error', 'Could not load this note.');
+      showAlert('Error', 'Could not load this note.');
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -57,10 +58,10 @@ export default function NoteEditorScreen({ navigation, route }) {
     } catch (err) {
       const serverError = err.response?.data?.error;
       if (serverError === 'content_too_short') {
-        Alert.alert('Note too short', `Notes need at least ${MIN_CONTENT_LENGTH} characters.`);
+        showAlert('Note too short', `Notes need at least ${MIN_CONTENT_LENGTH} characters.`);
       } else {
         console.error('Failed to save note:', err);
-        Alert.alert('Error', 'Could not save this note. Please try again.');
+        showAlert('Error', 'Could not save this note. Please try again.');
       }
     } finally {
       setSaving(false);
@@ -68,7 +69,7 @@ export default function NoteEditorScreen({ navigation, route }) {
   };
 
   const handleDelete = () => {
-    Alert.alert('Delete note', 'Are you sure you want to delete this note?', [
+    showAlert('Delete note', 'Are you sure you want to delete this note?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -81,12 +82,12 @@ export default function NoteEditorScreen({ navigation, route }) {
           } catch (err) {
             if (isNetworkError(err)) {
               await enqueueAction('delete', `/notes/${noteId}`);
-              Alert.alert('Offline Mode', 'Delete saved locally and will sync when online.');
+              showAlert('Offline Mode', 'Delete saved locally and will sync when online.');
               navigation.goBack();
               return;
             }
             console.error('Failed to delete note:', err);
-            Alert.alert('Error', 'Could not delete this note.');
+            showAlert('Error', 'Could not delete this note.');
             setDeleting(false);
           }
         },

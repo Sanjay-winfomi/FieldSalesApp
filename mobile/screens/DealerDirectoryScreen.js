@@ -87,7 +87,7 @@ export default function DealerDirectoryScreen({ navigation }) {
   }, [searchQuery]);
 
   // Refetch whenever the Dealers tab regains focus (e.g. after a manager adds
-  // a dealer, or the rep returns from a check-in) — otherwise the list only
+  // a dealer, or the rep returns from a login) — otherwise the list only
   // ever reflected whatever was fetched the last time the tab mounted.
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {

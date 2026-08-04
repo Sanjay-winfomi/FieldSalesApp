@@ -64,8 +64,8 @@ export default function HistoryScreen({ navigation }) {
 
   const sections = useMemo(() => {
     const filtered = visits.filter((v) => {
-      if (statusFilter === 'completed' && !v.check_out_time) return false;
-      if (statusFilter === 'in_progress' && v.check_out_time) return false;
+      if (statusFilter === 'completed' && !v.logout_time) return false;
+      if (statusFilter === 'in_progress' && v.logout_time) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         if (!(v.dealer_name || '').toLowerCase().includes(q)) return false;
@@ -75,8 +75,8 @@ export default function HistoryScreen({ navigation }) {
 
     const byDate = new Map();
     filtered.forEach((v) => {
-      const key = v.check_in_time ? new Date(v.check_in_time).toDateString() : 'Unknown';
-      if (!byDate.has(key)) byDate.set(key, { heading: formatDateHeading(v.check_in_time), items: [] });
+      const key = v.login_time ? new Date(v.login_time).toDateString() : 'Unknown';
+      if (!byDate.has(key)) byDate.set(key, { heading: formatDateHeading(v.login_time), items: [] });
       byDate.get(key).items.push(v);
     });
     return Array.from(byDate.values());
@@ -127,7 +127,7 @@ export default function HistoryScreen({ navigation }) {
           <View key={section.heading + sIndex} style={styles.dateSection}>
             <Text style={styles.dateHeading}>{section.heading}</Text>
             {section.items.map((visit, index) => {
-              const completed = !!visit.check_out_time;
+              const completed = !!visit.logout_time;
               const isLast = index === section.items.length - 1;
               return (
                 <FadeSlideIn key={visit.id} delay={Math.min(index, 6) * 25}>
@@ -153,7 +153,7 @@ export default function HistoryScreen({ navigation }) {
                       <View style={styles.timeRow}>
                         <Clock size={14} color={colors.textMuted} style={{ marginRight: 6 }} />
                         <Text style={styles.timeText}>
-                          {formatTime(visit.check_in_time)} → {formatTime(visit.check_out_time)}
+                          {formatTime(visit.login_time)} → {formatTime(visit.logout_time)}
                         </Text>
                       </View>
 

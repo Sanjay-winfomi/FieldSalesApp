@@ -19,7 +19,7 @@ export default function AboutScreen({ navigation }) {
           <Text style={styles.version}>Version {appJson.expo.version}</Text>
           <Text style={styles.description}>
             Attendance and dealer visit tracking for field sales teams — day login/logout,
-            dealer check-in/check-out with location verification, visit history, notes, and
+            dealer login/logout with location verification, visit history, notes, and
             dealer follow-up reminders.
           </Text>
         </Card>

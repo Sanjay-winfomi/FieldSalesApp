@@ -14,14 +14,14 @@ function formatCoord(value) {
   return value != null ? parseFloat(value).toFixed(5) : 'N/A';
 }
 
-// Live status if the periodic in-visit check has run, else the check-in
+// Live status if the periodic in-visit check has run, else the login
 // moment's own inside/outside flag (visit may still be open with no ping yet).
 function radiusCompliance(visit) {
   const inside = visit.last_location_status
     ? visit.last_location_status === 'inside'
-    : visit.check_in_inside_radius;
-  const distanceM = visit.last_location_distance_m ?? visit.check_in_distance_m;
-  const reason = visit.check_out_justification_note || visit.justification_note;
+    : visit.login_inside_radius;
+  const distanceM = visit.last_location_distance_m ?? visit.login_distance_m;
+  const reason = visit.logout_justification_note || visit.login_justification_note;
   return { inside, distanceM, reason };
 }
 
@@ -99,17 +99,17 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                   <div style={styles.metaRow}>
                     <div style={styles.metaCol}>
                       <span style={styles.metaLabel}>Login time</span>
-                      <span style={styles.metaValue}>{formatTimeOnly(data.attendance.check_in_time)}</span>
+                      <span style={styles.metaValue}>{formatTimeOnly(data.attendance.login_time)}</span>
                       <span style={styles.coordVal}>
-                        GPS: {data.attendance.check_in_lat != null ? data.attendance.check_in_lat.toFixed(5) : 'N/A'}, {data.attendance.check_in_lng != null ? data.attendance.check_in_lng.toFixed(5) : 'N/A'}
+                        GPS: {data.attendance.login_lat != null ? data.attendance.login_lat.toFixed(5) : 'N/A'}, {data.attendance.login_lng != null ? data.attendance.login_lng.toFixed(5) : 'N/A'}
                       </span>
                     </div>
                     <div style={styles.metaCol}>
                       <span style={styles.metaLabel}>Logout time</span>
-                      <span style={styles.metaValue}>{formatTimeOnly(data.attendance.check_out_time)}</span>
-                      {data.attendance.check_out_time && (
+                      <span style={styles.metaValue}>{formatTimeOnly(data.attendance.logout_time)}</span>
+                      {data.attendance.logout_time && (
                         <span style={styles.coordVal}>
-                          GPS: {data.attendance.check_out_lat != null ? data.attendance.check_out_lat.toFixed(5) : 'N/A'}, {data.attendance.check_out_lng != null ? data.attendance.check_out_lng.toFixed(5) : 'N/A'}
+                          GPS: {data.attendance.logout_lat != null ? data.attendance.logout_lat.toFixed(5) : 'N/A'}, {data.attendance.logout_lng != null ? data.attendance.logout_lng.toFixed(5) : 'N/A'}
                         </span>
                       )}
                     </div>
@@ -154,7 +154,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                           <h4 style={styles.dealerName}>{visit.dealer_name}</h4>
                           <span style={styles.timelineTime}>
                             <Clock size={11} style={{ marginRight: 4, verticalAlign: -1 }} />
-                            {formatTimeOnly(visit.check_in_time)} – {formatTimeOnly(visit.check_out_time)}
+                            {formatTimeOnly(visit.login_time)} – {formatTimeOnly(visit.logout_time)}
                           </span>
                         </div>
                         <p style={styles.dealerAddress}>{visit.dealer_address}</p>
@@ -184,7 +184,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                               </div>
                               <div style={styles.complianceCoordsRow}>
                                 <span>Dealer GPS: {formatCoord(visit.dealer_lat)}, {formatCoord(visit.dealer_lng)}</span>
-                                <span>Rep GPS: {formatCoord(visit.check_in_lat)}, {formatCoord(visit.check_in_lng)}</span>
+                                <span>Rep GPS: {formatCoord(visit.login_lat)}, {formatCoord(visit.login_lng)}</span>
                               </div>
                               {!inside && reason && (
                                 <div style={styles.complianceReason}>Reason: "{reason}"</div>
@@ -195,7 +195,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                                   {visit.last_location_check_at && ` · last checked ${formatTimeOnly(visit.last_location_check_at)}`}
                                 </div>
                               )}
-                              {visit.log_out_alert_sent && !visit.check_out_time && (
+                              {visit.log_out_alert_sent && !visit.logout_time && (
                                 <div style={styles.complianceAlert}>
                                   <AlertTriangle size={12} style={{ marginRight: 5, flexShrink: 0 }} />
                                   Repeatedly outside radius — rep notified to log out

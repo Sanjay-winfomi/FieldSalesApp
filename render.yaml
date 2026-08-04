@@ -66,11 +66,11 @@ services:
       # — comma-separated if there's more than one (preview + production).
       - key: ALLOWED_ORIGINS
         sync: false
-      - key: CHECKIN_RADIUS_METERS
+      - key: LOGIN_RADIUS_METERS
         value: 200
       - key: GPS_ACCURACY_THRESHOLD_METERS
         value: 30
-      - key: CHECKIN_MATCH_TOLERANCE_METERS
+      - key: LOGIN_MATCH_TOLERANCE_METERS
         value: 20
       - key: DAY_BOUNDARY_HOUR
         value: 5

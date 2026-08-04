@@ -83,8 +83,8 @@ Authorization: Bearer {{token}}
 # Stage 5: Attendance (full day flow)
 # ─────────────────────────────────────────────────────────────────────────────
 
-### Step 1: Day check-in (Gandhipuram Coimbatore coords)
-POST {{base}}/api/attendance/check-in
+### Step 1: Day login (Gandhipuram Coimbatore coords)
+POST {{base}}/api/attendance/login
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -101,9 +101,9 @@ Authorization: Bearer {{token}}
 
 ###
 
-### Step 3: Dealer check-in at Kovai Steel Traders (dealer_id=3)
+### Step 3: Dealer login at Kovai Steel Traders (dealer_id=3)
 ### Use attendance_id returned from Step 1
-POST {{base}}/api/visits/check-in
+POST {{base}}/api/visits/login
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -116,8 +116,8 @@ Content-Type: application/json
 
 ###
 
-### Step 4: Dealer check-out (within radius)
-POST {{base}}/api/visits/check-out
+### Step 4: Dealer logout (within radius)
+POST {{base}}/api/visits/logout
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -129,8 +129,8 @@ Content-Type: application/json
 
 ###
 
-### Step 4b: Dealer check-out OUTSIDE radius — missing justification (expect 400)
-POST {{base}}/api/visits/check-out
+### Step 4b: Dealer logout OUTSIDE radius — missing justification (expect 400)
+POST {{base}}/api/visits/logout
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -142,8 +142,8 @@ Content-Type: application/json
 
 ###
 
-### Step 4c: Dealer check-out OUTSIDE radius — WITH justification (should succeed)
-POST {{base}}/api/visits/check-out
+### Step 4c: Dealer logout OUTSIDE radius — WITH justification (should succeed)
+POST {{base}}/api/visits/logout
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -156,8 +156,8 @@ Content-Type: application/json
 
 ###
 
-### Step 5: Day check-out
-POST {{base}}/api/attendance/check-out
+### Step 5: Day logout
+POST {{base}}/api/attendance/logout
 Authorization: Bearer {{token}}
 Content-Type: application/json
 

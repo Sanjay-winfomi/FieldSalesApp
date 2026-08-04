@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Alert, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { Timer } from 'lucide-react-native';
 import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LocationCard, PrimaryButton, TextField, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
 const MIN_REASON_LENGTH = 20;
 
-export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, navigation }) {
+export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navigation }) {
   const [loading, setLoading] = useState(false);
   const [coords, setCoords] = useState(null);
   const [address, setAddress] = useState('');
@@ -40,13 +41,13 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
     }
   };
 
-  const handleCheckOut = async () => {
+  const handleLogout = async () => {
     if (!coords) {
-      Alert.alert('Location Required', 'Please wait for GPS to acquire your location.');
+      showAlert('Location Required', 'Please wait for GPS to acquire your location.');
       return;
     }
     if (!activeVisit) {
-      Alert.alert('Error', 'No active dealer visit found.');
+      showAlert('Error', 'No active dealer visit found.');
       return;
     }
 
@@ -62,35 +63,35 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
 
       let updatedVisit = null;
       try {
-        const response = await api.post('/visits/check-out', payload);
+        const response = await api.post('/visits/logout', payload);
         updatedVisit = response.data.visit;
       } catch (error) {
         if (!error.response) {
           // Network error — enqueue and proceed
-          await enqueueAction('post', '/visits/check-out', payload);
-          Alert.alert('Offline Mode', 'Dealer logout saved locally and will sync when online.');
+          await enqueueAction('post', '/visits/logout', payload);
+          showAlert('Offline Mode', 'Dealer logout saved locally and will sync when online.');
           updatedVisit = {
             ...activeVisit,
             id: activeVisit.id,
-            check_out_time: new Date().toISOString(),
+            logout_time: new Date().toISOString(),
           };
         } else if (error.response.data?.error === 'reason_required') {
           setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
           return;
         } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
-          Alert.alert('GPS Too Imprecise', 'Your GPS accuracy is too low to log out. Move to an open area for a stronger signal.');
+          showAlert('GPS Too Imprecise', 'Your GPS accuracy is too low to log out. Move to an open area for a stronger signal.');
           return;
         } else {
           throw error;
         }
       }
 
-      if (updatedVisit && onCheckOut) {
-        onCheckOut(updatedVisit);
+      if (updatedVisit && onLogout) {
+        onLogout(updatedVisit);
       }
     } catch (error) {
       console.error('Dealer logout error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
+      showAlert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -103,16 +104,16 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
   const needsReason = !!reasonRequired;
   const reasonOk = reason.trim().length >= MIN_REASON_LENGTH;
 
-  // Calculate elapsed time if activeVisit has a check_in_time
+  // Calculate elapsed time if activeVisit has a login_time
   const getElapsedMinutes = () => {
-    if (!activeVisit?.check_in_time) return null;
-    const start = new Date(activeVisit.check_in_time);
+    if (!activeVisit?.login_time) return null;
+    const start = new Date(activeVisit.login_time);
     return Math.round((Date.now() - start) / 60000);
   };
 
   const formatVisitStart = () => {
-    if (!activeVisit?.check_in_time) return '—';
-    return new Date(activeVisit.check_in_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (!activeVisit?.login_time) return '—';
+    return new Date(activeVisit.login_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
   const dealerName = dealer?.name || 'Dealer';
@@ -152,7 +153,7 @@ export default function DealerCheckOutScreen({ dealer, activeVisit, onCheckOut, 
 
           <PrimaryButton
             title={needsReason ? 'Submit reason & logout' : 'Dealer Logout'}
-            onPress={handleCheckOut}
+            onPress={handleLogout}
             disabled={!coords || !accuracyOk || (needsReason && !reasonOk)}
             loading={loading}
             variant="danger"

@@ -6,7 +6,7 @@ import { colors, typography, spacing } from '../../theme';
 
 /**
  * Compact single-row location display — used where a full GPSStatusCard
- * would take too much vertical space (e.g. check-out screens that already
+ * would take too much vertical space (e.g. logout screens that already
  * show a summary card above).
  */
 export default function LocationCard({ address, coords, statusMessage }) {

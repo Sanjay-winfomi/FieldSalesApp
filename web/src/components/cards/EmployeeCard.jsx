@@ -5,9 +5,9 @@ import StatusBadge from '../StatusBadge';
 import { colors, typography, spacing } from '../../theme';
 
 const STATUS_META = {
-  checked_in: { label: 'Logged in', tone: 'success', dot: colors.success },
+  logged_in: { label: 'Logged in', tone: 'success', dot: colors.success },
   day_ended: { label: 'Day ended', tone: 'warning', dot: colors.warning },
-  not_checked_in: { label: 'Not logged in', tone: 'neutral', dot: colors.textMuted },
+  not_logged_in: { label: 'Not logged in', tone: 'neutral', dot: colors.textMuted },
 };
 
 function initials(name) {
@@ -18,11 +18,11 @@ function initials(name) {
 /**
  * One rep in the dashboard's live list — avatar, name/role/region, current
  * activity, visit/distance stats, and a status badge with a live dot for
- * reps currently checked in.
+ * reps currently logged in.
  */
 export default function EmployeeCard({ rep, onViewDetails, timestampLabel }) {
-  const meta = STATUS_META[rep.status] || STATUS_META.not_checked_in;
-  const isLive = rep.status === 'checked_in';
+  const meta = STATUS_META[rep.status] || STATUS_META.not_logged_in;
+  const isLive = rep.status === 'logged_in';
 
   return (
     <Card hoverable onClick={onViewDetails} style={styles.card} aria-label={`View details for ${rep.name}`}>

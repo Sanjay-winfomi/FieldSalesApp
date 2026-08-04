@@ -46,19 +46,19 @@ export default function HomeScreen({ navigation }) {
     onSelectDealer,
   } = useAppState();
 
-  const checkInTime = attendance?.check_in_time ? formatTime(attendance.check_in_time) : '';
+  const loginTime = attendance?.login_time ? formatTime(attendance.login_time) : '';
 
   const workingMinutes = useMemo(() => {
-    if (!attendance?.check_in_time) return 0;
+    if (!attendance?.login_time) return 0;
     if (attendance.total_duration_minutes != null) return attendance.total_duration_minutes;
-    return Math.max(0, Math.round((Date.now() - new Date(attendance.check_in_time)) / 60000));
+    return Math.max(0, Math.round((Date.now() - new Date(attendance.login_time)) / 60000));
   }, [attendance]);
 
   const uniqueDealersVisited = useMemo(() => {
     return new Set(visits.map((v) => v.dealer_id)).size;
   }, [visits]);
 
-  const activeVisit = visits.find((v) => !v.check_out_time);
+  const activeVisit = visits.find((v) => !v.logout_time);
   const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
@@ -109,13 +109,13 @@ export default function HomeScreen({ navigation }) {
         )}
 
         <FadeSlideIn delay={40}>
-          {dayStatus === 'not_checked_in' && (
+          {dayStatus === 'not_logged_in' && (
             <StatusCard
               label="Day status"
               value="Not logged in"
               tone="neutral"
               icon={<Clock size={22} color={colors.textSecondary} />}
-              onPress={() => navigation.navigate('DayCheckIn')}
+              onPress={() => navigation.navigate('DayLogin')}
               action={
                 <View style={styles.smallActionBtn}>
                   <Text style={styles.smallActionBtnText}>Login</Text>
@@ -124,10 +124,10 @@ export default function HomeScreen({ navigation }) {
             />
           )}
 
-          {dayStatus === 'checked_in' && (
+          {dayStatus === 'logged_in' && (
             <StatusCard
               label="Day status"
-              value={`Logged in ${checkInTime}`}
+              value={`Logged in ${loginTime}`}
               tone="success"
               icon={<Check size={22} color={colors.successDark} />}
             />
@@ -157,14 +157,14 @@ export default function HomeScreen({ navigation }) {
               icon={<MapPin size={22} color={colors.primary} />}
               action={
                 <Pressable
-                  style={styles.checkOutBtn}
+                  style={styles.logoutBtn}
                   onPress={() => {
                     const dl = { id: activeVisit.dealer_id, name: activeVisit.dealer_name };
                     onSelectDealer(dl, true, navigation);
                   }}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.checkOutBtnText}>Dealer Logout</Text>
+                  <Text style={styles.logoutBtnText}>Dealer Logout</Text>
                 </Pressable>
               }
             />
@@ -205,7 +205,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         </FadeSlideIn>
 
-        {dayStatus === 'checked_in' && (
+        {dayStatus === 'logged_in' && (
           <FadeSlideIn delay={160} style={{ marginTop: spacing.cardGap }}>
             <PrimaryButton
               title="Proceed to logout"
@@ -215,7 +215,7 @@ export default function HomeScreen({ navigation }) {
                   // with an open dealer visit still running.
                   return;
                 }
-                navigation.navigate('DayCheckOut');
+                navigation.navigate('DayLogout');
               }}
               disabled={!!activeVisit}
             />
@@ -322,8 +322,8 @@ const styles = StyleSheet.create({
   smallActionBtn: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
   smallActionBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
   completedPill: { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: '#FDE68A' },
-  checkOutBtn: { backgroundColor: colors.danger, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
-  checkOutBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+  logoutBtn: { backgroundColor: colors.danger, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  logoutBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
 
   sectionLabel: { ...typography.cardTitle, fontSize: 16, color: colors.text, marginBottom: spacing.md },
   summaryGrid: { flexDirection: 'row' },

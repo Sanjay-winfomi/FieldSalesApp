@@ -81,20 +81,20 @@ router.get('/attendance', async (req, res) => {
   const { format } = req.query;
   const conditions = [];
   const params = [];
-  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.login_time');
   if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
     const result = await pool.query(
       `SELECT e.name AS employee_name, e.region,
-              a.check_in_time, a.check_out_time,
+              a.login_time, a.logout_time,
               a.total_duration_minutes, ROUND(a.total_distance_km::numeric, 2) AS total_distance_km,
               (SELECT COUNT(*) FROM client_visits cv WHERE cv.attendance_id = a.id) AS visits_count
        FROM attendance a
        JOIN employees e ON e.id = a.employee_id
        ${whereClause}
-       ORDER BY a.check_in_time DESC
+       ORDER BY a.login_time DESC
        LIMIT 2000`,
       params
     );
@@ -111,7 +111,7 @@ router.get('/dealer-visits', async (req, res) => {
   const { format, dealer_id } = req.query;
   const conditions = [];
   const params = [];
-  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'cv.check_in_time')
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'cv.login_time')
     || pushDealerIdFilter(dealer_id, params, conditions, 'cv.dealer_id');
   if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -119,14 +119,14 @@ router.get('/dealer-visits', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT e.name AS employee_name, d.name AS dealer_name, d.address AS dealer_address,
-              cv.check_in_time, cv.check_out_time, cv.visit_duration_minutes,
+              cv.login_time, cv.logout_time, cv.visit_duration_minutes,
               ROUND(cv.distance_from_previous_km::numeric, 2) AS distance_from_previous_km, cv.out_of_radius
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id
        JOIN employees e ON e.id = a.employee_id
        JOIN dealers d    ON d.id = cv.dealer_id
        ${whereClause}
-       ORDER BY cv.check_in_time DESC
+       ORDER BY cv.login_time DESC
        LIMIT 2000`,
       params
     );
@@ -143,7 +143,7 @@ router.get('/distance-duration', async (req, res) => {
   const { format } = req.query;
   const conditions = [];
   const params = [];
-  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.check_in_time');
+  const filterError = buildDateEmployeeFilter(req.query, params, conditions, 'a.login_time');
   if (filterError) return res.status(400).json({ error: filterError });
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -212,7 +212,7 @@ router.get('/exceptions', async (req, res) => {
       `SELECT el.id, e.name AS employee_name, d.name AS dealer_name, el.event_type,
               el.latitude, el.longitude, ROUND(el.distance_meters::numeric, 1) AS distance_meters,
               ROUND(el.gps_accuracy_m::numeric, 1) AS gps_accuracy_m, el.reason,
-              el.matched_check_in, el.manager_reviewed, el.created_at
+              el.matched_login, el.manager_reviewed, el.created_at
        FROM exception_log el
        JOIN employees e ON e.id = el.employee_id
        JOIN dealers d    ON d.id = el.dealer_id

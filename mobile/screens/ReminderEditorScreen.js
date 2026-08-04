@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, Pressable, Alert, Platform, Modal, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Pressable, Platform, Modal, KeyboardAvoidingView } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ChevronDown, CalendarDays } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { scheduleReminderNotifications } from '../src/services/reminderNotifications';
+import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, PrimaryButton, DealerPickerModal } from '../src/components';
 import { colors, typography, spacing, radius, serifFontFamily } from '../src/theme';
 
@@ -76,12 +77,12 @@ export default function ReminderEditorScreen({ navigation }) {
     } catch (err) {
       const serverError = err.response?.data?.error;
       if (serverError === 'note_too_short') {
-        Alert.alert('Note too short', `Reminders need at least ${MIN_NOTE_LENGTH} characters.`);
+        showAlert('Note too short', `Reminders need at least ${MIN_NOTE_LENGTH} characters.`);
       } else if (serverError === 'reminder_date_in_past') {
-        Alert.alert('Invalid date', 'The reminder date cannot be in the past.');
+        showAlert('Invalid date', 'The reminder date cannot be in the past.');
       } else {
         console.error('Failed to save reminder:', err);
-        Alert.alert('Error', 'Could not save this reminder. Please try again.');
+        showAlert('Error', 'Could not save this reminder. Please try again.');
       }
     } finally {
       setSaving(false);

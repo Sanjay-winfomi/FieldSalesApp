@@ -9,28 +9,28 @@ const MANAGER = { id: 2, role: 'manager', username: 'priya' };
 describe('GET /api/x/today', () => {
   afterEach(() => jest.clearAllMocks());
 
-  test('maps a not-checked-in rep correctly', async () => {
+  test('maps a not-logged-in rep correctly', async () => {
     pool.query.mockResolvedValueOnce({
       rows: [{ employee_id: 1, name: 'Arun', region: 'South', attendance_id: null, visits_count: '0' }],
     });
     const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).get('/api/x/today');
     expect(res.status).toBe(200);
-    expect(res.body.reps[0].status).toBe('not_checked_in');
+    expect(res.body.reps[0].status).toBe('not_logged_in');
   });
 
-  test('maps a checked-in-at-dealer rep correctly', async () => {
+  test('maps a logged-in-at-dealer rep correctly', async () => {
     pool.query.mockResolvedValueOnce({
       rows: [{
         employee_id: 1, name: 'Arun', region: 'South', attendance_id: 5,
-        check_in_time: '2026-07-27T05:00:00Z', check_out_time: null,
-        dealer_name: 'Dealer A', visit_check_in: '2026-07-27T06:00:00Z', visit_check_out: null,
+        login_time: '2026-07-27T05:00:00Z', logout_time: null,
+        dealer_name: 'Dealer A', visit_login: '2026-07-27T06:00:00Z', visit_logout: null,
         visits_count: '1',
       }],
     });
     const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).get('/api/x/today');
-    expect(res.body.reps[0].status).toBe('checked_in');
+    expect(res.body.reps[0].status).toBe('logged_in');
     expect(res.body.reps[0].last_activity).toBe('At Dealer A');
   });
 });

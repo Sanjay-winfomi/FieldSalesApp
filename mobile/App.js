@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Alert, AppState } from 'react-native';
+import { StyleSheet, View, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -12,18 +12,21 @@ import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, s
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
 import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
+import { configureGeofenceNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
 import { AppStateContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
+import { ThemedAlertHost } from './src/components';
+import { showAlert } from './src/services/themedAlert';
 
 // Screen Imports
 import SplashScreen from './screens/SplashScreen';
 import LoginScreen from './screens/LoginScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
-import DayCheckInScreen from './screens/DayCheckInScreen';
-import DealerCheckInScreen from './screens/DealerCheckInScreen';
-import DealerCheckOutScreen from './screens/DealerCheckOutScreen';
-import DayCheckOutScreen from './screens/DayCheckOutScreen';
+import DayLoginScreen from './screens/DayLoginScreen';
+import DealerLoginScreen from './screens/DealerLoginScreen';
+import DealerLogoutScreen from './screens/DealerLogoutScreen';
+import DayLogoutScreen from './screens/DayLogoutScreen';
 import NotesScreen from './screens/NotesScreen';
 import NoteEditorScreen from './screens/NoteEditorScreen';
 import RemindersScreen from './screens/RemindersScreen';
@@ -77,17 +80,17 @@ export default function App() {
   const [locationPermissionCanAskAgain, setLocationPermissionCanAskAgain] = useState(true);
   const navigationRef = useNavigationContainerRef();
   // fetchTodayState is triggered from several independent, possibly-overlapping
-  // sources (pull-to-refresh, sync-conflict reconciliation, post-checkout
+  // sources (pull-to-refresh, sync-conflict reconciliation, post-logout
   // refresh, login) — sequences requests so a slower, older response can't
   // overwrite state a newer response already set.
   const todayStateSeqRef = useRef(0);
 
   // Computed state
   const dayStatus = !attendance
-    ? 'not_checked_in'
-    : attendance.check_out_time
+    ? 'not_logged_in'
+    : attendance.logout_time
       ? 'day_ended'
-      : 'checked_in';
+      : 'logged_in';
 
   const visitsCount = visits.length;
   const distanceTravelled = attendance ? `${parseFloat(attendance.total_distance_km || 0).toFixed(1)} km` : '0.0 km';
@@ -97,6 +100,7 @@ export default function App() {
   // permission in place rather than prompting mid-flow.
   useEffect(() => {
     configureNotificationHandler();
+    configureGeofenceNotificationChannel();
   }, []);
 
   // Auto-sync any queued offline actions whenever a session is active, and
@@ -108,7 +112,7 @@ export default function App() {
   }, [employee]);
 
   // A queued offline action can conflict with state the server already has
-  // (e.g. a retried day check-out racing one that already succeeded) —
+  // (e.g. a retried day logout racing one that already succeeded) —
   // syncManager reconciles by dropping the redundant action but reports it
   // here, rather than leaving the UI silently out of sync with what the
   // server actually recorded.
@@ -133,14 +137,22 @@ export default function App() {
   // around the dealer (geofenceTask.js) so the OS itself reports the rep
   // leaving/re-entering the radius even if the app is fully closed — reps
   // routinely log in and pocket the phone, so the foreground-only ping alone
-  // left the dashboard showing a stale check-in-time status for the whole
+  // left the dashboard showing a stale login-time status for the whole
   // visit. Both paths report to the same backend endpoint, so they
   // complement rather than conflict. Restarts whenever the active visit
-  // changes (new check-in, or checked out — which clears it) so it always
+  // changes (new login, or logged out — which clears it) so it always
   // tracks the current visit, never a stale one.
-  useEffect(() => {
-    const activeVisit = visits.find((v) => !v.check_out_time);
+  const activeVisit = visits.find((v) => !v.logout_time);
 
+  // Keyed on the active visit's id (not the `visits` array itself) — a
+  // fetchTodayState() refresh of the SAME open visit (e.g. triggered by
+  // onLogoutAlert below) produces a new `visits` array reference every time,
+  // which would otherwise restart monitoring and reset its one-shot alert
+  // dedupe (visitMonitor's logoutAlertAlready), re-firing onLogoutAlert,
+  // re-triggering fetchTodayState, and looping the alert forever.
+  const activeVisitId = activeVisit?.id ?? null;
+
+  useEffect(() => {
     if (!activeVisit) {
       stopVisitMonitoring();
       stopDealerGeofence();
@@ -150,13 +162,16 @@ export default function App() {
     startVisitMonitoring({
       visit: activeVisit,
       onWarning: () => {
-        Alert.alert('Leaving dealer premises', 'You appear to have left the dealer location. Please return, or log out if the visit has ended.');
+        sendGeofenceNotification({
+          title: 'Leaving dealer premises',
+          body: 'You appear to have left the dealer location. Please return, or log out if the visit has ended.',
+        });
       },
       onLogoutAlert: () => {
-        Alert.alert(
-          'Time to log out',
-          'You have been outside the dealer premises multiple times during this visit. Please return and log out — your manager has also been notified.'
-        );
+        sendGeofenceNotification({
+          title: 'Time to log out',
+          body: 'You have been outside the dealer premises multiple times during this visit. Please return and log out — your manager has also been notified.',
+        });
         fetchTodayState();
       },
     });
@@ -177,7 +192,8 @@ export default function App() {
       stopVisitMonitoring();
       stopDealerGeofence();
     };
-  }, [visits]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVisitId]);
 
   // Detect location permission revoked mid-session (e.g. via OS settings while
   // the app was backgrounded) so GPS-dependent screens can warn instead of
@@ -246,18 +262,18 @@ export default function App() {
     await fetchTodayState();
   };
 
-  const handleDayCheckIn = (newAttendance) => {
+  const handleDayLogin = (newAttendance) => {
     setAttendance(newAttendance);
   };
 
-  const handleSelectDealer = (dealer, shouldCheckIn, navigation) => {
+  const handleSelectDealer = (dealer, shouldLogin, navigation) => {
     setSelectedDealer(dealer);
 
-    if (!shouldCheckIn) return; // First tap — just select, no navigation
+    if (!shouldLogin) return; // First tap — just select, no navigation
 
     // Second tap — the user wants to check in at this dealer
-    if (dayStatus === 'not_checked_in') {
-      Alert.alert(
+    if (dayStatus === 'not_logged_in') {
+      showAlert(
         'Login required',
         'You need to log in for the day before visiting a dealer. Go to the Home tab and tap "Login".',
         [
@@ -269,32 +285,32 @@ export default function App() {
     }
 
     if (dayStatus === 'day_ended') {
-      Alert.alert('Day ended', 'Your work day has already ended. You cannot log in to a dealer.');
+      showAlert('Day ended', 'Your work day has already ended. You cannot log in to a dealer.');
       return;
     }
 
-    // dayStatus === 'checked_in' — find if there is an active open visit for this dealer
+    // dayStatus === 'logged_in' — find if there is an active open visit for this dealer
     const activeVisit =
-      visits.find(v => v.dealer_id === dealer.id && !v.check_out_time) ||
-      visits.find(v => !v.check_out_time);
+      visits.find(v => v.dealer_id === dealer.id && !v.logout_time) ||
+      visits.find(v => !v.logout_time);
 
     if (activeVisit) {
-      navigation.navigate('DealerCheckOut');
+      navigation.navigate('DealerLogout');
     } else {
-      navigation.navigate('DealerCheckIn');
+      navigation.navigate('DealerLogin');
     }
   };
 
-  const handleDealerCheckIn = (newVisit) => {
+  const handleDealerLogin = (newVisit) => {
     setVisits((prev) => [...prev, newVisit]);
   };
 
-  const handleDealerCheckOut = async (updatedVisit) => {
+  const handleDealerLogout = async (updatedVisit) => {
     setVisits((prev) => prev.map(v => v.id === updatedVisit.id ? updatedVisit : v));
     await fetchTodayState(); // Refresh to get updated total distance
   };
 
-  const handleDayCheckOut = (updatedAttendance) => {
+  const handleDayLogout = (updatedAttendance) => {
     setAttendance(updatedAttendance);
   };
 
@@ -355,6 +371,7 @@ export default function App() {
             status bar on some devices. iOS already needs insets regardless
             of this setting, so it's unaffected there. */}
         <StatusBar style="dark" />
+        <ThemedAlertHost />
         <NavigationContainer ref={navigationRef}>
           <AppStateContext.Provider value={appStateValue}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -380,21 +397,21 @@ export default function App() {
 
               <Stack.Screen name="MainTabs" component={MainTabs} />
 
-              <Stack.Screen name="DayCheckIn">
+              <Stack.Screen name="DayLogin">
                 {({ navigation }) => (
-                  <DayCheckInScreen
+                  <DayLoginScreen
                     navigation={navigation}
-                    onCheckIn={(data) => {
-                      handleDayCheckIn(data);
+                    onLogin={(data) => {
+                      handleDayLogin(data);
                       navigation.navigate('MainTabs');
                     }}
-                    onAlreadyCheckedIn={async () => {
+                    onAlreadyLoggedIn={async () => {
                       // The local screen only rendered because dayStatus looked
-                      // like 'not_checked_in' — a 409 here means the server's
+                      // like 'not_logged_in' — a 409 here means the server's
                       // truth has since diverged (e.g. another device, or a
-                      // queued offline check-in already synced). Resync from
+                      // queued offline login already synced). Resync from
                       // the server rather than leaving the rep stranded on a
-                      // check-in screen with stale local state.
+                      // login screen with stale local state.
                       await fetchTodayState();
                       navigation.navigate('MainTabs');
                     }}
@@ -402,35 +419,35 @@ export default function App() {
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="DealerCheckIn">
+              <Stack.Screen name="DealerLogin">
                 {({ navigation }) => (
-                  <DealerCheckInScreen
+                  <DealerLoginScreen
                     navigation={navigation}
                     dealer={selectedDealer}
                     attendance={attendance}
-                    onCheckIn={(data) => {
-                      handleDealerCheckIn(data);
+                    onLogin={(data) => {
+                      handleDealerLogin(data);
                       navigation.navigate('MainTabs');
                     }}
                   />
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="DealerCheckOut">
+              <Stack.Screen name="DealerLogout">
                 {({ navigation }) => {
                   // Primary: match by dealer_id (both are integers from the API)
                   // Fallback: the most-recent open visit — handles edge cases where
                   // dealer_id was missing in state (e.g. app opened mid-session).
                   const activeVisit =
-                    visits.find(v => v.dealer_id === selectedDealer?.id && !v.check_out_time) ||
-                    visits.find(v => !v.check_out_time);
+                    visits.find(v => v.dealer_id === selectedDealer?.id && !v.logout_time) ||
+                    visits.find(v => !v.logout_time);
                   return (
-                    <DealerCheckOutScreen
+                    <DealerLogoutScreen
                       navigation={navigation}
                       dealer={selectedDealer}
                       activeVisit={activeVisit}
-                      onCheckOut={async (data) => {
-                        await handleDealerCheckOut(data);
+                      onLogout={async (data) => {
+                        await handleDealerLogout(data);
                         navigation.navigate('MainTabs');
                       }}
                     />
@@ -438,13 +455,13 @@ export default function App() {
                 }}
               </Stack.Screen>
 
-              <Stack.Screen name="DayCheckOut">
+              <Stack.Screen name="DayLogout">
                 {({ navigation }) => (
-                  <DayCheckOutScreen
+                  <DayLogoutScreen
                     navigation={navigation}
                     attendance={attendance}
-                    onCheckOut={(data) => {
-                      handleDayCheckOut(data);
+                    onLogout={(data) => {
+                      handleDayLogout(data);
                       navigation.navigate('MainTabs');
                     }}
                   />
