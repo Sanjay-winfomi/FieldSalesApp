@@ -17,6 +17,7 @@ const pool                = require('../db/pool');
 const { haversineKm }     = require('../utils/haversine');
 const { logDealerLogin, logDealerLogout, logVisitInterrupted } = require('../utils/activityLog');
 const { requireRole }     = require('../middleware/auth.middleware');
+const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -62,7 +63,17 @@ router.post('/login', async (req, res) => {
     return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
   }
 
+  const idempotencyKey = req.get('Idempotency-Key') || null;
+
   try {
+    // A retried request (e.g. the mobile client's cold-start retry) that
+    // already created a visit replays that result instead of inserting a
+    // second open visit — this route has no other guard against that.
+    const cached = await getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     // Verify attendance belongs to this employee
     const attResult = await pool.query(
       `SELECT id, login_lat, login_lng FROM attendance
@@ -156,12 +167,14 @@ router.post('/login', async (req, res) => {
     }
 
     logDealerLogin(req.employee.username, dealer.name);
-    return res.status(201).json({
+    const body = {
       visit: {
         ...visit,
         dealer_name: dealer.name,
       },
-    });
+    };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/login', 201, body);
+    return res.status(201).json(body);
   } catch (err) {
     logger.error('Visit login error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
@@ -191,7 +204,14 @@ router.post('/logout', async (req, res) => {
     return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
   }
 
+  const idempotencyKey = req.get('Idempotency-Key') || null;
+
   try {
+    const cached = await getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     // Verify visit belongs to this employee via attendance join, and pull
     // the dealer's registered location + radius for the geofence check below.
     const visitResult = await pool.query(
@@ -285,11 +305,13 @@ router.post('/logout', async (req, res) => {
     }
 
     logDealerLogout(req.employee.username, visit.dealer_name, durationMins, outOfRadius);
-    return res.json({
+    const body = {
       visit: {
         ...updatedVisit.rows[0],
       },
-    });
+    };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/logout', 200, body);
+    return res.json(body);
   } catch (err) {
     logger.error('Visit logout error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
@@ -315,7 +337,17 @@ router.post('/:id/location-check', async (req, res) => {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
+  const idempotencyKey = req.get('Idempotency-Key') || null;
+
   try {
+    // Without this, a retried ping would increment outside_radius_count a
+    // second time for the same real breach and could double-fire the
+    // "time to log out" alert.
+    const cached = await getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     const visitResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, cv.logout_time, cv.outside_radius_count, cv.log_out_alert_sent,
               d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters
@@ -376,7 +408,9 @@ router.post('/:id/location-check', async (req, res) => {
       logVisitInterrupted(req.employee.username, visit.dealer_name, distanceM);
     }
 
-    return res.json({ visit: updated.rows[0], distance_meters: distanceM });
+    const body = { visit: updated.rows[0], distance_meters: distanceM };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/location-check', 200, body);
+    return res.json(body);
   } catch (err) {
     logger.error('POST /api/visits/:id/location-check error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });

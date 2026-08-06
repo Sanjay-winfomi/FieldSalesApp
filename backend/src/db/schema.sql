@@ -325,3 +325,21 @@ CREATE TABLE IF NOT EXISTS reminders (
 
 CREATE INDEX IF NOT EXISTS idx_reminders_employee_id   ON reminders (employee_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_reminder_date ON reminders (reminder_date);
+
+-- ============================================================
+-- 8. idempotency_keys
+-- ============================================================
+-- Lets a retried mutating request (see mobile api.js's cold-start retry)
+-- replay the original response instead of repeating the write. The key is
+-- client-generated and stable across retries of one logical request; see
+-- backend/src/utils/idempotency.js.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  key              VARCHAR(100)  PRIMARY KEY,
+  employee_id      INTEGER       REFERENCES employees (id) ON DELETE CASCADE,
+  endpoint         VARCHAR(100)  NOT NULL,
+  response_status  INTEGER       NOT NULL,
+  response_body    JSONB         NOT NULL,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (created_at);

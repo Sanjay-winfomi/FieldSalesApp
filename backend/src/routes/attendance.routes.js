@@ -10,6 +10,7 @@ const logger = require('../utils/logger');
 const pool    = require('../db/pool');
 const { logDayLogin, logDayLogout } = require('../utils/activityLog');
 const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
+const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -38,7 +39,16 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
+  const idempotencyKey = req.get('Idempotency-Key') || null;
+
   try {
+    // A retry of a request that already completed replays the original
+    // response instead of re-running the insert below.
+    const cached = await getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     // Atomic guard against a second login on the same business day: the
     // unique index on (employee_id, business_date) makes two concurrent
     // login requests (double-tap, retry-on-timeout) resolve to exactly one
@@ -65,7 +75,9 @@ router.post('/login', async (req, res) => {
     }
 
     logDayLogin(req.employee.username, lat, lng);
-    return res.status(201).json({ attendance: result.rows[0] });
+    const body = { attendance: result.rows[0] };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'attendance/login', 201, body);
+    return res.status(201).json(body);
   } catch (err) {
     logger.error('Attendance login error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
@@ -88,7 +100,14 @@ router.post('/logout', async (req, res) => {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
+  const idempotencyKey = req.get('Idempotency-Key') || null;
+
   try {
+    const cached = await getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     const existing = await pool.query(
       `SELECT id, login_time, logout_time, total_distance_km
        FROM attendance
@@ -136,14 +155,16 @@ router.post('/logout', async (req, res) => {
     );
 
     logDayLogout(req.employee.username, durationMins, result.rows[0].total_distance_km);
-    return res.json({
+    const body = {
       attendance: result.rows[0],
       summary: {
         visits_count:       parseInt(visitsResult.rows[0].visits_count),
         total_distance_km:  parseFloat(result.rows[0].total_distance_km || 0),
         total_duration_min: durationMins,
       },
-    });
+    };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'attendance/logout', 200, body);
+    return res.json(body);
   } catch (err) {
     logger.error('Attendance logout error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
