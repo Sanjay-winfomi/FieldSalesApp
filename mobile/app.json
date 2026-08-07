@@ -55,8 +55,8 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#F5FBF6",
-          "image": "./assets/brand/winfomi-logo.png",
-          "imageWidth": 220,
+          "image": "./assets/brand/winfomi-splash-icon.png",
+          "imageWidth": 160,
           "resizeMode": "contain"
         }
       ]
