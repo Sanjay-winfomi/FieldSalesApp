@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2 } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  MetricCard, EmployeeCard, EmptyState, SkeletonCard,
+  MetricCard, EmployeeCard, EmptyState, SkeletonCard, SearchBar,
 } from '../components';
 import { colors, typography, spacing } from '../theme';
 
@@ -59,6 +59,13 @@ export default function DashboardPage({
     [reps]
   );
 
+  const [repSearch, setRepSearch] = useState('');
+  const filteredReps = useMemo(() => {
+    const q = repSearch.trim().toLowerCase();
+    if (!q) return reps;
+    return reps.filter((r) => r.name?.toLowerCase().includes(q) || r.region?.toLowerCase().includes(q));
+  }, [reps, repSearch]);
+
   return (
     <div style={styles.page} className="ft-page">
       <div style={styles.headerRow}>
@@ -103,9 +110,19 @@ export default function DashboardPage({
       )}
 
       <div className="ft-dashboard-left">
-        <div style={styles.columnHeader}>
-          <Users2 size={14} color={colors.textSecondary} />
-          Field representatives ({reps.length})
+        <div style={styles.columnHeaderRow}>
+          <div style={styles.columnHeader}>
+            <Users2 size={14} color={colors.textSecondary} />
+            Field representatives ({reps.length})
+          </div>
+          {reps.length > 0 && (
+            <SearchBar
+              value={repSearch}
+              onChange={setRepSearch}
+              placeholder="Search by name or region..."
+              style={{ maxWidth: 280 }}
+            />
+          )}
         </div>
 
         <div style={styles.repGrid}>
@@ -115,8 +132,12 @@ export default function DashboardPage({
             <div style={{ gridColumn: '1 / -1' }}>
               <EmptyState title="No representatives yet" subtitle="Field reps will appear here once they're added." />
             </div>
+          ) : filteredReps.length === 0 ? (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EmptyState title="No representative found" subtitle="Try a different name or region." />
+            </div>
           ) : (
-            reps.map((rep) => (
+            filteredReps.map((rep) => (
               <EmployeeCard
                 key={rep.id}
                 rep={rep}
@@ -149,7 +170,11 @@ const styles = {
     display: 'flex', alignItems: 'center', backgroundColor: colors.dangerLight, color: colors.dangerDark,
     border: `1px solid #FECACA`, borderRadius: 12, padding: '12px 16px', marginBottom: spacing.lg, fontSize: 14,
   },
-  columnHeader: { display: 'flex', alignItems: 'center', gap: 8, ...typography.bodyMedium, color: colors.textSecondary, marginBottom: spacing.md },
+  columnHeaderRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.md,
+  },
+  columnHeader: { display: 'flex', alignItems: 'center', gap: 8, ...typography.bodyMedium, color: colors.textSecondary },
   repGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
