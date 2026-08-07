@@ -54,11 +54,6 @@ export default function DashboardPage({
     ? Math.round(((stats.logged_in + stats.day_ended) / reps.length) * 100)
     : 0;
 
-  const repsNeedingLogout = useMemo(
-    () => reps.filter((r) => r.needs_logout_alert),
-    [reps]
-  );
-
   const [repSearch, setRepSearch] = useState('');
   const filteredReps = useMemo(() => {
     const q = repSearch.trim().toLowerCase();
@@ -98,14 +93,6 @@ export default function DashboardPage({
         <div style={styles.errorBanner}>
           <AlertTriangle size={16} style={{ marginRight: 8, flexShrink: 0 }} />
           {error}
-        </div>
-      )}
-
-      {repsNeedingLogout.length > 0 && (
-        <div style={styles.errorBanner}>
-          <AlertTriangle size={16} style={{ marginRight: 8, flexShrink: 0 }} />
-          {repsNeedingLogout.map((r) => r.name).join(', ')}
-          {repsNeedingLogout.length === 1 ? ' has' : ' have'} been outside the dealer radius repeatedly and should log out.
         </div>
       )}
 

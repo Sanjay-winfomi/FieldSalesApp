@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { apiClient } from '../api';
-import { SectionHeader, Card, EmptyState, StatusBadge } from '../components';
+import { SectionHeader, Card, EmptyState, StatusBadge, IconButton } from '../components';
 import { colors, typography, spacing } from '../theme';
 
 // Maps a notification's `type` to an icon + StatusBadge tone — mirrors the
@@ -27,7 +27,7 @@ function formatTime(value) {
  * notification center conventionally behaves), which is what lets the bell's
  * badge clear.
  */
-export default function NotificationsPage({ onUnreadCountChange }) {
+export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -60,6 +60,9 @@ export default function NotificationsPage({ onUnreadCountChange }) {
 
   return (
     <div style={styles.page} className="ft-page">
+      {onBack && (
+        <IconButton icon={<ArrowLeft size={18} />} title="Back to Dashboard" onClick={onBack} style={styles.backBtn} />
+      )}
       <SectionHeader title="Notifications" subtitle="Dealer visit alerts and login/logout exceptions across your team" />
 
       <Card noPadding style={{ overflow: 'hidden' }}>
@@ -103,6 +106,7 @@ export default function NotificationsPage({ onUnreadCountChange }) {
 
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 900, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
+  backBtn: { marginBottom: spacing.md },
   loading: { padding: '40px 24px', textAlign: 'center', color: colors.textMuted, fontSize: 13 },
   list: { display: 'flex', flexDirection: 'column' },
   row: { display: 'flex', gap: spacing.md, padding: '16px 20px', borderBottom: `1px solid ${colors.border}` },
