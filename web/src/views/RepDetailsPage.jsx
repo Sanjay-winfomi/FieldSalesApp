@@ -14,6 +14,13 @@ function formatCoord(value) {
   return value != null ? parseFloat(value).toFixed(5) : 'N/A';
 }
 
+// Elapsed time since the rep's current excursion outside the radius started
+// (visit_radius_events.left_at) — clears on its own once they're back
+// inside, unlike the old static message this replaces.
+function minutesAgo(iso) {
+  return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+}
+
 // Live status if the periodic in-visit check has run, else the login
 // moment's own inside/outside flag (visit may still be open with no ping yet).
 function radiusCompliance(visit) {
@@ -195,10 +202,10 @@ export default function RepDetailsPage({ token, repId, onBack }) {
                                   {visit.last_location_check_at && ` · last checked ${formatTimeOnly(visit.last_location_check_at)}`}
                                 </div>
                               )}
-                              {visit.log_out_alert_sent && !visit.logout_time && (
+                              {visit.radius_left_at && !visit.logout_time && (
                                 <div style={styles.complianceAlert}>
                                   <AlertTriangle size={12} style={{ marginRight: 5, flexShrink: 0 }} />
-                                  Repeatedly outside radius — rep notified to log out
+                                  {data.employee.name} outside the radius {minutesAgo(visit.radius_left_at)} min ago
                                 </div>
                               )}
                             </div>

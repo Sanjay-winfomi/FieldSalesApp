@@ -153,9 +153,14 @@ router.get('/rep/:id/today', async (req, res) => {
               cv.login_justification_note, cv.logout_justification_note,
               cv.last_location_status, cv.last_location_check_at, cv.last_location_distance_m,
               cv.outside_radius_count, cv.log_out_alert_sent, cv.interrupted, cv.interrupted_at,
-              cv.sync_status
+              cv.sync_status, vre.left_at AS radius_left_at
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
+       -- The currently-open excursion (if any) — at most one per visit
+       -- (idx_visit_radius_events_open). Its left_at drives the "outside
+       -- the radius N min ago" wording below instead of a static message
+       -- that used to keep showing even after the rep came back inside.
+       LEFT JOIN visit_radius_events vre ON vre.visit_id = cv.id AND vre.returned_at IS NULL
        WHERE cv.attendance_id = $1
        ORDER BY cv.login_time DESC`,
       [attendance.id]
