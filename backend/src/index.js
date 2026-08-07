@@ -43,6 +43,7 @@ const geocodeRouter    = require('./routes/geocode.routes');
 const notesRouter      = require('./routes/notes.routes');
 const remindersRouter  = require('./routes/reminders.routes');
 const notificationsRouter = require('./routes/notifications.routes');
+const syncFailuresRouter = require('./routes/syncFailures.routes');
 
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
@@ -195,6 +196,9 @@ app.use('/api/dealers',    requireAuth, dealersRouter);
 app.use('/api/geocode',    requireAuth, geocodeRouter);
 app.use('/api/notes',      requireAuth, notesRouter);
 app.use('/api/reminders',  requireAuth, remindersRouter);
+// Any authenticated employee (rep or manager) — a rep's own device is what
+// reports its own permanently-failed sync attempts here.
+app.use('/api/sync-failures', requireAuth, syncFailuresRouter);
 
 // Exposes the actual configured login tolerance radius so the UI never
 // has to hardcode a value that could drift from what .env really says.

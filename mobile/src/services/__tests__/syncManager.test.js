@@ -1,4 +1,4 @@
-jest.mock('../api', () => ({ api: { request: jest.fn() } }));
+jest.mock('../api', () => ({ api: { request: jest.fn(), post: jest.fn(() => Promise.resolve()) } }));
 jest.mock('@react-native-community/netinfo', () => ({
   addEventListener: jest.fn(() => () => {}),
 }));

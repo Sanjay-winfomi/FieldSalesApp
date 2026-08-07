@@ -194,6 +194,12 @@ export const flushQueue = async () => {
               remaining.push({ ...action, retryCount });
             } else {
               console.error(`Discarding queued action ${action.id} after ${MAX_RETRIES} failed retries:`, error.message);
+              // Otherwise this vanishes with only a console log nobody sees —
+              // report it so a manager gets an actual notification instead.
+              // Best-effort: if this call itself fails, the discard still
+              // proceeds (nothing further to retry it against).
+              api.post('/sync-failures', { method: action.method, url: action.url, error: error.message })
+                .catch(() => {});
             }
           }
           await persistRemaining();

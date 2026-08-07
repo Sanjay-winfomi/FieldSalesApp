@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff } from 'lucide-react';
 import { apiClient } from '../api';
 import { SectionHeader, Card, EmptyState, StatusBadge, IconButton } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -13,6 +13,7 @@ const TYPE_META = {
   login_exception:     { icon: LogIn,         tone: 'warning' },
   logout_exception:    { icon: LogOut,        tone: 'warning' },
   needs_verification:  { icon: ShieldAlert,   tone: 'warning' },
+  sync_failure:        { icon: WifiOff,       tone: 'danger' },
 };
 
 function formatTime(value) {
