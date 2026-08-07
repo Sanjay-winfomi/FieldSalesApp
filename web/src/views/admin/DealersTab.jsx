@@ -263,8 +263,13 @@ export default function DealersTab() {
   const confirmDelete = async () => {
     setDeleteSubmitting(true);
     try {
-      await apiClient.delete(`/dealers/${deleteTarget.id}`);
-      setSuccessMessage(`${deleteTarget.name} was deleted.`);
+      const res = await apiClient.delete(`/dealers/${deleteTarget.id}`);
+      const visitCount = res.data.deletedVisitCount || 0;
+      setSuccessMessage(
+        visitCount > 0
+          ? `${deleteTarget.name} was deleted, along with ${visitCount} recorded visit(s).`
+          : `${deleteTarget.name} was deleted.`
+      );
       setDeleteTarget(null);
       fetchDealers();
     } catch (err) {
@@ -460,7 +465,7 @@ export default function DealersTab() {
       <ConfirmationModal
         open={!!deleteTarget}
         title="Delete dealer?"
-        message={`This permanently removes ${deleteTarget?.name}. Dealers with recorded visits can't be deleted — edit the record instead if it's no longer active.`}
+        message={`This permanently removes ${deleteTarget?.name} AND all of its recorded visit history, exceptions, and reminders. This cannot be undone — if this dealer is no longer active, consider editing it instead.`}
         confirmLabel="Delete"
         danger
         loading={deleteSubmitting}

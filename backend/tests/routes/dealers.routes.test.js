@@ -79,13 +79,19 @@ describe('DELETE /api/x/:id — manager only', () => {
     expect(res.status).toBe(404);
   });
 
-  test('409 when the dealer has recorded visits', async () => {
+  // Deletion now cascades (schema.sql) instead of being blocked — deleting a
+  // dealer with recorded visits succeeds and permanently removes that
+  // history too; deletedVisitCount just reports what was removed.
+  test('200 deletes a dealer with recorded visits, cascading to its history', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // existence check
-      .mockResolvedValueOnce({ rows: [{ count: 3 }] }); // visit count
+      .mockResolvedValueOnce({ rows: [{ count: 3 }] }) // visit count
+      .mockResolvedValueOnce({ rows: [] }); // delete
     const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).delete('/api/x/1');
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.deletedVisitCount).toBe(3);
   });
 
   test('200 deletes a dealer with no recorded visits', async () => {
@@ -97,5 +103,6 @@ describe('DELETE /api/x/:id — manager only', () => {
     const res = await request(app).delete('/api/x/1');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+    expect(res.body.deletedVisitCount).toBe(0);
   });
 });

@@ -147,20 +147,15 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
       return res.status(404).json({ error: 'Dealer not found' });
     }
 
-    // Unlike employees, dealers aren't ON DELETE CASCADE from client_visits /
-    // exception_log (visit history shouldn't silently vanish just because a
-    // dealer record is removed) — so a dealer with recorded visits can't be
-    // deleted outright. Check up front for a clear message instead of
-    // surfacing the raw foreign-key violation as a generic 500.
+    // Deletes cascade (schema.sql) — removing a dealer also permanently
+    // removes its visit history, exception records, radius-event history,
+    // notifications, and reminders. Counted up front (not to block the
+    // delete, just to report what was actually removed) since this is
+    // irreversible.
     const visitCount = await pool.query('SELECT COUNT(*)::int AS count FROM client_visits WHERE dealer_id = $1', [id]);
-    if (visitCount.rows[0].count > 0) {
-      return res.status(409).json({
-        error: `Cannot delete — ${visitCount.rows[0].count} recorded visit(s) reference this dealer. Edit it instead if it's no longer active.`,
-      });
-    }
 
     await pool.query('DELETE FROM dealers WHERE id = $1', [id]);
-    return res.json({ success: true });
+    return res.json({ success: true, deletedVisitCount: visitCount.rows[0].count });
   } catch (err) {
     logger.error('DELETE /api/dealers/:id error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });

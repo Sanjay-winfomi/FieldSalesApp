@@ -397,3 +397,34 @@ CREATE INDEX IF NOT EXISTS idx_manager_notifications_created_at ON manager_notif
 CREATE INDEX IF NOT EXISTS idx_manager_notifications_unread ON manager_notifications (read_at) WHERE read_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (created_at);
+
+-- ============================================================
+-- Dealer deletion — cascade instead of block
+-- ============================================================
+-- Deleting a dealer now permanently removes its visit history, exception
+-- records, radius-event history, notifications, and reminders too (an
+-- explicit, requested change — deleting a dealer used to be blocked
+-- outright whenever it had recorded visits; see dealers.routes.js). Re-adds
+-- each dealer_id foreign key with ON DELETE CASCADE, replacing whichever
+-- (unnamed, default-RESTRICT) constraint Postgres auto-created originally.
+-- Idempotent: a table already carrying a cascading FK to dealers is skipped.
+DO $$
+DECLARE
+  tbl TEXT;
+  existing_con TEXT;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY['client_visits', 'exception_log', 'visit_radius_events', 'manager_notifications', 'reminders']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = tbl::regclass AND confrelid = 'dealers'::regclass AND contype = 'f' AND confdeltype = 'c'
+    ) THEN
+      SELECT conname INTO existing_con FROM pg_constraint
+      WHERE conrelid = tbl::regclass AND confrelid = 'dealers'::regclass AND contype = 'f' LIMIT 1;
+      IF existing_con IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', tbl, existing_con);
+      END IF;
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (dealer_id) REFERENCES dealers(id) ON DELETE CASCADE', tbl, tbl || '_dealer_id_fkey');
+    END IF;
+  END LOOP;
+END $$;
