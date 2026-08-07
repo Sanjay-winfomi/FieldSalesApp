@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard } from 'lucide-react';
+import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard, Bell } from 'lucide-react';
 import { colors, typography, spacing, shadows } from '../../theme';
 
 // Served from web/public/winfomi-logo.png — see LoginPage.jsx for why this
@@ -22,7 +22,7 @@ function initials(name) {
  * indicator, a manager profile menu (name, region, logout), and last-sync
  * time. Collapses the nav links behind a hamburger below ~860px.
  */
-export default function AppHeader({ activeView, onNavigate, manager, lastUpdated, loading, onRefresh, onLogout }) {
+export default function AppHeader({ activeView, onNavigate, manager, lastUpdated, loading, onRefresh, onLogout, unreadNotifications = 0, onOpenNotifications }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
@@ -72,6 +72,22 @@ export default function AppHeader({ activeView, onNavigate, manager, lastUpdated
         </nav>
 
         <div style={styles.rightSection} className="ft-topbar-right">
+          {onOpenNotifications && (
+            <button
+              type="button"
+              className="ft-icon-btn"
+              style={styles.bellBtn}
+              onClick={onOpenNotifications}
+              title="Notifications"
+              aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}
+            >
+              <Bell size={17} color={colors.textSecondary} />
+              {unreadNotifications > 0 && (
+                <span style={styles.bellBadge}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>
+              )}
+            </button>
+          )}
+
           <button
             type="button"
             className="ft-icon-btn"
@@ -150,6 +166,16 @@ const styles = {
   syncPill: {
     display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 14px', borderRadius: 999,
     fontSize: 12, fontWeight: 600, color: colors.textSecondary,
+  },
+  bellBtn: {
+    position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 999,
+  },
+  bellBadge: {
+    position: 'absolute', top: 2, right: 2, minWidth: 16, height: 16, borderRadius: 8,
+    backgroundColor: colors.danger, color: '#FFFFFF', fontSize: 10, fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
+    lineHeight: 1, border: `1.5px solid ${colors.card}`,
   },
   profileBtn: {
     display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 6px 0 6px', borderRadius: 10,

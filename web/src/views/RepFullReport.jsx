@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Download, Route, Timer, CalendarCheck, MapPin, BellRing } from 'lucide-react';
+import { Download, Route, Timer, CalendarCheck, MapPin, BellRing } from 'lucide-react';
 import { apiClient } from '../api';
 import {
   Card, FilterBar, Button, DataTable, MetricCard, EmptyState,
@@ -89,7 +89,6 @@ export default function RepFullReport({ token, repId, employeeName }) {
         }}
       >
         <div style={styles.dateField}>
-          <Calendar size={14} style={{ marginRight: 6, color: colors.textMuted }} />
           <input type="date" style={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
         </div>
         <span style={styles.filterDash}>to</span>

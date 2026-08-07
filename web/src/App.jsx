@@ -9,6 +9,7 @@ import RepDetailsPage from './views/RepDetailsPage';
 import DashboardPage from './views/DashboardPage';
 import ReportsPage from './views/ReportsPage';
 import AdminPage from './views/AdminPage';
+import NotificationsPage from './views/NotificationsPage';
 import { colors } from './theme';
 import './App.css';
 
@@ -27,8 +28,9 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState('');
   const [selectedRepId, setSelectedRepId] = useState(null);
-  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'reports' | 'admin'
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'reports' | 'admin' | 'notifications'
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   // Keep the shared apiClient's auth header in sync so ReportsPage/AdminPage
   // (which rely solely on the interceptor, not manual headers) work correctly.
@@ -64,6 +66,26 @@ export default function App() {
       return () => clearInterval(interval);
     }
   }, [token, fetchDashboard]);
+
+  const fetchUnreadNotifications = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await apiClient.get('/notifications/unread-count', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUnreadNotifications(res.data.count || 0);
+    } catch {
+      // Non-fatal — the bell just won't show a fresh count until the next poll.
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (token) {
+      fetchUnreadNotifications();
+      const interval = setInterval(fetchUnreadNotifications, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [token, fetchUnreadNotifications]);
 
   const handleLoginSuccess = (accessToken, employee) => {
     sessionStorage.setItem('ft_token', accessToken);
@@ -107,6 +129,8 @@ export default function App() {
           loading={loading}
           onRefresh={fetchDashboard}
           onLogout={handleLogout}
+          unreadNotifications={unreadNotifications}
+          onOpenNotifications={() => { setActiveView('notifications'); setSelectedRepId(null); }}
         />
         <RepDetailsPage
           token={token}
@@ -127,6 +151,8 @@ export default function App() {
         loading={loading}
         onRefresh={fetchDashboard}
         onLogout={handleLogout}
+        unreadNotifications={unreadNotifications}
+        onOpenNotifications={() => setActiveView('notifications')}
       />
 
       {activeView === 'dashboard' && (
@@ -140,6 +166,7 @@ export default function App() {
 
       {activeView === 'reports' && <ReportsPage />}
       {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} />}
+      {activeView === 'notifications' && <NotificationsPage onUnreadCountChange={setUnreadNotifications} />}
     </div>
   );
 }

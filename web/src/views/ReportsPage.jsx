@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Download, AlertTriangle, Calendar } from 'lucide-react';
+import { Download, AlertTriangle, RotateCcw } from 'lucide-react';
 import { apiClient } from '../api';
 import {
-  SectionHeader, FilterSelect, Button, Card, FilterBar, DataTable, EmptyState,
+  SectionHeader, FilterSelect, RepMultiSelect, Button, Card, FilterBar, DataTable, EmptyState,
 } from '../components';
 import { colors, typography, spacing } from '../theme';
 import { downloadCsv, toDateInputValue, buildDynamicColumns } from '../utils/reports';
@@ -17,7 +17,7 @@ const REPORT_TABS = [
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('attendance');
   const [employees, setEmployees] = useState([]);
-  const [employeeId, setEmployeeId] = useState('');
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]);
   const [from, setFrom] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -41,7 +41,7 @@ export default function ReportsPage() {
     setError('');
     try {
       const params = { from, to };
-      if (employeeId) params.employee_id = employeeId;
+      if (selectedEmployeeIds.length > 0) params.employee_ids = selectedEmployeeIds.join(',');
       const res = await apiClient.get(`/reports/${activeTab}`, { params });
       setRows(res.data.rows);
       setTruncated(!!res.data.truncated);
@@ -52,7 +52,7 @@ export default function ReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, from, to, employeeId]);
+  }, [activeTab, from, to, selectedEmployeeIds]);
 
   useEffect(() => {
     fetchReport();
@@ -73,7 +73,7 @@ export default function ReportsPage() {
 
   const handleExport = () => {
     const params = new URLSearchParams({ from, to, format: 'csv' });
-    if (employeeId) params.set('employee_id', employeeId);
+    if (selectedEmployeeIds.length > 0) params.set('employee_ids', selectedEmployeeIds.join(','));
     downloadCsv(`/reports/${activeTab}?${params.toString()}`, `${activeTab}-report.csv`);
   };
 
@@ -160,17 +160,8 @@ export default function ReportsPage() {
         </div>
       </Card>
 
-      <FilterBar
-        onReset={() => {
-          const d = new Date();
-          d.setDate(d.getDate() - 30);
-          setFrom(toDateInputValue(d));
-          setTo(toDateInputValue(new Date()));
-          setEmployeeId('');
-        }}
-      >
+      <FilterBar>
         <div style={styles.dateField}>
-          <Calendar size={14} style={{ marginRight: 6, color: colors.textMuted }} />
           <input type="date" style={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
         </div>
         <span style={styles.filterDash}>to</span>
@@ -178,23 +169,39 @@ export default function ReportsPage() {
           <input type="date" style={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
         </div>
 
-        <FilterSelect
-          value={employeeId}
-          onChange={setEmployeeId}
-          ariaLabel="Filter by representative"
-          options={[{ value: '', label: 'All representatives' }, ...employees.map((e) => ({ value: e.id, label: e.name }))]}
-        />
-
-        <Button
-          variant="success"
-          icon={<Download size={14} />}
-          onClick={handleExport}
-          disabled={rows.length === 0}
-          fullWidthMobile
-          style={{ marginLeft: 'auto' }}
-        >
-          Export CSV
-        </Button>
+        <div style={styles.actionsStack}>
+          <Button
+            variant="success"
+            icon={<Download size={14} />}
+            onClick={handleExport}
+            disabled={rows.length === 0}
+            fullWidthMobile
+          >
+            Export CSV
+          </Button>
+          <div style={styles.repSearchRow}>
+            <RepMultiSelect
+              employees={employees}
+              selectedIds={selectedEmployeeIds}
+              onChange={setSelectedEmployeeIds}
+              style={{ minWidth: 220 }}
+            />
+            <Button
+              variant="secondary"
+              icon={<RotateCcw size={14} />}
+              onClick={() => {
+                const d = new Date();
+                d.setDate(d.getDate() - 30);
+                setFrom(toDateInputValue(d));
+                setTo(toDateInputValue(new Date()));
+                setSelectedEmployeeIds([]);
+              }}
+              style={{ height: 34, padding: '0 12px', fontSize: 12 }}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
       </FilterBar>
 
       {truncated && !error && (
@@ -213,7 +220,7 @@ export default function ReportsPage() {
             // active report, date range, or rep filter changes — otherwise a
             // manager left on page 4 of a longer report would land on the same
             // page number after switching to a shorter one/different filters.
-            key={`${activeTab}-${from}-${to}-${employeeId}`}
+            key={`${activeTab}-${from}-${to}-${selectedEmployeeIds.join(',')}`}
             columns={columns}
             rows={rows}
             loading={loading}
@@ -245,4 +252,9 @@ const styles = {
   dateField: { display: 'flex', alignItems: 'center', border: `1px solid ${colors.border}`, borderRadius: 10, padding: '0 10px', height: 42 },
   dateInput: { border: 'none', outline: 'none', fontSize: 13, color: colors.text, background: 'transparent' },
   filterDash: { fontSize: 13, color: colors.textMuted },
+  // Export CSV stacked above the rep-search/Reset row, right-aligned as a
+  // group — Export CSV sits above Reset per the requested layout, rather than
+  // the two living in separate FilterBar header/body rows as before.
+  actionsStack: { display: 'flex', flexDirection: 'column', gap: spacing.sm, alignItems: 'flex-end', marginLeft: 'auto' },
+  repSearchRow: { display: 'flex', gap: spacing.sm, alignItems: 'center' },
 };

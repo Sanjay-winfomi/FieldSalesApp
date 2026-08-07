@@ -41,17 +41,45 @@ export function formatCellValue(value) {
   return value;
 }
 
+// A handful of abbreviations read wrong under naive per-word capitalization
+// ("Total Distance Km", "Gps Accuracy") — fixed up after the generic pass.
+const ACRONYM_FIXES = { Km: 'KM', Gps: 'GPS', Id: 'ID' };
+
+// "employee_name" -> "Employee Name". Shared by every report table (and CSV
+// headers are generated separately, server-side, from the raw keys — this is
+// purely a display concern).
+export function titleCase(key) {
+  return key
+    .replace(/_/g, ' ')
+    .split(' ')
+    .map((word) => {
+      const capitalized = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      return ACRONYM_FIXES[capitalized] || capitalized;
+    })
+    .join(' ');
+}
+
+// Raw primary/foreign-key fields that report rows carry for internal use
+// (row identity, the exceptions "Mark reviewed" action) but that shouldn't
+// be shown as a table column or exported to CSV — see reports.routes.js's
+// toCsv(excludeKeys) for the CSV-side counterpart of this same exclusion.
+export const ID_LIKE_KEYS = ['id', 'employee_id', 'dealer_id', 'attendance_id', 'visit_id'];
+
 // Generic "one column per field present on the first row" builder — used
 // wherever a report's shape isn't fixed ahead of time (every /reports/*
-// endpoint returns different fields depending on report type).
+// endpoint returns different fields depending on report type). ID-like
+// fields are skipped as columns but remain on the row object itself, so
+// callers that need them (e.g. the exceptions row's own id) still can.
 export function buildDynamicColumns(rows) {
   if (rows.length === 0) return [];
-  return Object.keys(rows[0]).map((key) => ({
-    key,
-    label: key.replace(/_/g, ' '),
-    render: (row) => {
-      const value = formatCellValue(row[key]);
-      return <span title={String(value)}>{value}</span>;
-    },
-  }));
+  return Object.keys(rows[0])
+    .filter((key) => !ID_LIKE_KEYS.includes(key))
+    .map((key) => ({
+      key,
+      label: titleCase(key),
+      render: (row) => {
+        const value = formatCellValue(row[key]);
+        return <span title={String(value)}>{value}</span>;
+      },
+    }));
 }
