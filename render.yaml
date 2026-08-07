@@ -11,12 +11,18 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    # Applies schema.sql then seeds demo data before every boot. Both are
-    # idempotent (schema.sql uses CREATE TABLE IF NOT EXISTS; seed.js uses
-    # ON CONFLICT DO NOTHING / existence checks), so re-running them on every
-    # restart is safe — this avoids needing shell access to seed once by hand,
-    # which free-tier Render instances don't have anyway.
-    startCommand: npm run migrate && npm run seed && npm start
+    # Applies schema.sql before every boot — safe to re-run (CREATE TABLE IF
+    # NOT EXISTS / idempotent ALTER TABLEs), and never resurrects deleted
+    # rows since it only touches structure, not demo data.
+    #
+    # seed.js is deliberately NOT run here anymore: it inserts a dealer/
+    # employee only if one with that name doesn't already exist, which
+    # sounded idempotent but actually meant any demo dealer/employee a
+    # manager deleted got silently re-created on the next boot (e.g. after
+    # Render's free-tier idle spin-down). Seeding is now a one-time, manual
+    # step — run `npm run seed` locally against this service's DB (via
+    # backend/.env) only when setting up a fresh/empty database.
+    startCommand: npm run migrate && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
