@@ -61,7 +61,7 @@ function SplashRoute({ navigation, setEmployee, fetchTodayState }) {
         console.error('Error initializing app:', error);
         navigation.replace('Login');
       }
-    }, 1500); // Minimum splash screen display time
+    }, 500); // Minimum splash screen display time
 
     return () => clearTimeout(timer);
   }, []);
