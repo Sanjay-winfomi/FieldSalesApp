@@ -17,6 +17,7 @@ export default function TextField({
   secureTextEntry,
   autoCapitalize = 'sentences',
   keyboardType,
+  multiline = false,
   style,
 }) {
   const [focused, setFocused] = useState(false);
@@ -26,10 +27,10 @@ export default function TextField({
   return (
     <View style={style}>
       {!!label && <Text style={styles.label}>{label}</Text>}
-      <View style={[styles.inputRow, { borderColor }]}>
+      <View style={[styles.inputRow, multiline && styles.inputRowMultiline, { borderColor }]}>
         {icon}
         <TextInput
-          style={[styles.input, icon && { marginLeft: spacing.sm }]}
+          style={[styles.input, multiline && styles.inputMultiline, icon && { marginLeft: spacing.sm }]}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -37,6 +38,8 @@ export default function TextField({
           secureTextEntry={secureTextEntry}
           autoCapitalize={autoCapitalize}
           keyboardType={keyboardType}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           accessibilityLabel={label || placeholder}
@@ -64,11 +67,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     backgroundColor: colors.card,
   },
+  inputRowMultiline: {
+    height: 'auto',
+    minHeight: 100,
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm,
+  },
   input: {
     flex: 1,
     height: '100%',
     ...typography.body,
     color: colors.text,
+  },
+  inputMultiline: {
+    height: 'auto',
+    minHeight: 84,
   },
   error: {
     ...typography.caption,

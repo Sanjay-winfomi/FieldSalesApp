@@ -47,6 +47,16 @@ export const setAuthInvalidatedHandler = (fn) => {
 // refresh token and racing each other.
 let refreshPromise = null;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Render's free tier spins the backend down after ~15min idle; the request
+// that wakes it back up can land while the container is still booting
+// (migrate/seed/start), during which Render's edge returns 502/503/504
+// instead of forwarding to a live server. That's a transient boot delay, not
+// a real failure, so retry a few times with backoff instead of surfacing it
+// to the screen as "failed" — the same request usually succeeds seconds later.
+const COLD_START_RETRY_DELAYS_MS = [4000, 8000, 15000];
+
 // Interceptor to add auth token
 api.interceptors.request.use(
   async (config) => {
@@ -54,6 +64,17 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // A retry (cold-start or otherwise) resubmits this same `config` object,
+    // so checking for an existing header before generating one makes the key
+    // stable across retries of one logical request — letting the backend
+    // recognize a resend and replay its original response instead of
+    // repeating the write (see backend/src/utils/idempotency.js).
+    const method = (config.method || 'get').toLowerCase();
+    if (method !== 'get' && !config.headers['Idempotency-Key']) {
+      config.headers['Idempotency-Key'] = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -64,7 +85,17 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+
+    // Cold-start retry: back off and retry instead of rejecting immediately.
+    if ([502, 503, 504].includes(error.response?.status) && originalRequest) {
+      const attempt = originalRequest._coldStartRetries || 0;
+      if (attempt < COLD_START_RETRY_DELAYS_MS.length) {
+        originalRequest._coldStartRetries = attempt + 1;
+        await sleep(COLD_START_RETRY_DELAYS_MS[attempt]);
+        return api(originalRequest);
+      }
+    }
+
     // Login/refresh returning 401 means wrong credentials or an expired/invalid
     // refresh token — that's a real, final answer, not a signal to attempt a
     // token refresh. Only retry-via-refresh for OTHER protected endpoints.

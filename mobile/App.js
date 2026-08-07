@@ -48,7 +48,11 @@ function SplashRoute({ navigation, setEmployee, fetchTodayState }) {
 
         if (token && empStr) {
           setEmployee(JSON.parse(empStr));
-          await fetchTodayState();
+          // Don't block leaving the splash on this — it hits the backend,
+          // which can take up to a minute to respond on a Render cold start.
+          // Navigate now; MainTabs already shows a refreshing state while
+          // this resolves in the background.
+          fetchTodayState();
           navigation.replace('MainTabs');
         } else {
           navigation.replace('Login');
@@ -173,6 +177,12 @@ export default function App() {
           body: 'You have been outside the dealer premises multiple times during this visit. Please return and log out — your manager has also been notified.',
         });
         fetchTodayState();
+      },
+      // Additive alongside onWarning/onLogoutAlert above (both unchanged) —
+      // fed by the backend's new staged 10/20/30-min excursion tracker.
+      // The server decides timing/copy; this just relays whatever it sends.
+      onRepNotification: (notification) => {
+        sendGeofenceNotification(notification);
       },
     });
 

@@ -44,18 +44,20 @@
           "isIosBackgroundLocationEnabled": true
         }
       ],
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/splash-icon.png",
-          "backgroundColor": "#F8FAFC"
-        }
-      ],
       "@react-native-community/datetimepicker",
       [
         "expo-notifications",
         {
           "color": "#1B7F5A"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F5FBF6",
+          "image": "./assets/brand/winfomi-logo.png",
+          "imageWidth": 220,
+          "resizeMode": "contain"
         }
       ]
     ],

@@ -43,8 +43,13 @@ let warnedForCurrentStreak = false;
  *   before the next alert.
  * @param {(distanceMeters: number) => void} [params.onLogoutAlert] - called
  *   once per visit, the first time the backend reports 2+ cumulative breaches
+ * @param {({title: string, body: string}) => void} [params.onRepNotification]
+ *   - additive alongside onWarning/onLogoutAlert (unchanged): fed by the
+ *   backend's new staged 10/20/30-min excursion tracker (visit_radius_events),
+ *   fired whenever that check's response says a rep-facing notification is
+ *   due. The server decides timing/copy; this just relays it.
  */
-export function startVisitMonitoring({ visit, onWarning, onLogoutAlert }) {
+export function startVisitMonitoring({ visit, onWarning, onLogoutAlert, onRepNotification }) {
   stopVisitMonitoring();
 
   if (!visit?.id) return;
@@ -62,7 +67,7 @@ export function startVisitMonitoring({ visit, onWarning, onLogoutAlert }) {
       const lat = location.coords.latitude;
       const lng = location.coords.longitude;
 
-      await reportLocationCheck(visit.id, lat, lng, { onWarning, onLogoutAlert });
+      await reportLocationCheck(visit.id, lat, lng, { onWarning, onLogoutAlert, onRepNotification });
     } catch (error) {
       // GPS acquisition failures here are non-fatal (best-effort background
       // check) — swallow rather than surface a disruptive alert mid-visit.
@@ -91,11 +96,15 @@ export function stopVisitMonitoring() {
   warnedForCurrentStreak = false;
 }
 
-async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert }) {
+async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert, onRepNotification }) {
   const payload = { lat, lng };
   try {
     const res = await api.post(`/visits/${visitId}/location-check`, payload);
-    const { visit, distance_meters: distanceMeters } = res.data;
+    const { visit, distance_meters: distanceMeters, rep_notification: repNotification } = res.data;
+
+    if (repNotification && onRepNotification) {
+      onRepNotification(repNotification);
+    }
 
     if (visit?.last_location_status === 'outside') {
       consecutiveOutside += 1;

@@ -23,6 +23,11 @@ const GOOD_ENOUGH_ACCURACY_METERS = 20;
 // Geofencing spec) — the rep is prompted to move to an open area instead of
 // proceeding on an unreliable fix, mirrored by a hard backend-side check too.
 export const MAX_ACCEPTABLE_ACCURACY_METERS = 30;
+// Mirrors backend's LOGIN_MATCH_TOLERANCE_METERS default (visits.routes.js) —
+// duplicated client-side, same pattern as MAX_ACCEPTABLE_ACCURACY_METERS
+// above, so DealerLogoutScreen can gate the Logout button proactively
+// without an extra network round-trip. Keep in sync if that env var changes.
+export const LOGIN_MATCH_TOLERANCE_METERS = 20;
 const MAX_ACQUIRE_ATTEMPTS = 3;
 // Without a per-attempt timeout, a single poor-GPS reading (indoors, dense
 // urban, no sky view) can hang indefinitely, leaving the login/logout screens
@@ -127,6 +132,21 @@ export const getCurrentLocation = async () => {
     return null;
   }
 };
+
+// Mirrors backend/src/utils/haversine.js's haversineKm — needed client-side
+// so DealerLogoutScreen can compute inside-radius/drift-match distances
+// immediately from a fresh GPS reading, without waiting on a server round-trip.
+const EARTH_RADIUS_M = 6371000;
+export function haversineMeters(lat1, lng1, lat2, lng2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_M * c;
+}
 
 function formatAddressParts({ streetLine, locality, city, region, postalCode, country }) {
   const stateCode = region ? (INDIA_STATE_CODES[region] || region) : null;

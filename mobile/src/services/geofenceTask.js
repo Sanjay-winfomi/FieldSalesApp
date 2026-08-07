@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { api } from './api';
 import { enqueueAction } from './syncManager';
+import { sendGeofenceNotification } from './geofenceNotifications';
 
 /**
  * geofenceTask.js — background radius monitoring for an open dealer visit.
@@ -39,7 +40,14 @@ TaskManager.defineTask(DEALER_GEOFENCE_TASK, async ({ data, error }) => {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     const payload = { lat: location.coords.latitude, lng: location.coords.longitude };
     try {
-      await api.post(`/visits/${visitId}/location-check`, payload);
+      const response = await api.post(`/visits/${visitId}/location-check`, payload);
+      // Same staged 10/20/30-min tracker visitMonitor.js relays in the
+      // foreground — relayed here too so a rep-facing alert still fires on a
+      // background Enter/Exit crossing, not just while the app is open.
+      const repNotification = response.data?.rep_notification;
+      if (repNotification) {
+        sendGeofenceNotification(repNotification);
+      }
     } catch (postError) {
       if (!postError.response) {
         // Offline while backgrounded — queue like any other action, flushed

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Animated, Easing, Image } from 'react-native';
+import * as SplashScreenNative from 'expo-splash-screen';
 import { colors, spacing } from '../src/theme';
 
 const winfomiLogo = require('../assets/brand/winfomi-logo.png');
@@ -12,6 +13,10 @@ export default function SplashScreen() {
   const dot3 = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
+    // Native splash matches this screen's background/logo, so hiding it now
+    // (right as this screen mounts) reads as one continuous splash.
+    SplashScreenNative.hideAsync();
+
     Animated.parallel([
       Animated.timing(fade, {
         toValue: 1,
