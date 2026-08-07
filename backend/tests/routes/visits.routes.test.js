@@ -90,7 +90,7 @@ describe('POST /api/x/logout', () => {
         rows: [{
           id: 55, attendance_id: 1, dealer_id: 1,
           login_time: '2026-07-27T05:00:00Z', logout_time: null,
-          login_lat: 11, login_lng: 77,
+          login_lat: 11, login_lng: 77, login_inside_radius: true,
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 200,
         }],
       })
@@ -99,6 +99,72 @@ describe('POST /api/x/logout', () => {
     const res = await request(app).post('/api/x/logout').send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(200);
     expect(res.body.visit.out_of_radius).toBe(false);
+    expect(res.body.visit.needs_verification).toBe(false);
+  });
+
+  // Task 5 Case 1 — a normal (non-exception) login now has NO reason
+  // override: outside radius and not drift-matched to the login spot is a
+  // hard reject, replacing the old "accept with a >=20 char reason" path.
+  test('422 must_return_to_radius for a normal-login visit outside radius, even with a reason', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        id: 55, attendance_id: 1, dealer_id: 1,
+        login_time: '2026-07-27T05:00:00Z', logout_time: null,
+        login_lat: 11, login_lng: 77, login_inside_radius: true,
+        dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 100,
+      }],
+    });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/logout')
+      .send({ visit_id: 55, lat: 12, lng: 78, accuracy_meters: 10, reason: 'A perfectly long, valid-looking reason string here' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('must_return_to_radius');
+  });
+
+  // Task 5 Case 2 — login already used an exception: logout always requires
+  // a written reason (50-500 chars), regardless of current distance.
+  test('422 reason_required (50-500 chars) for an exception-login visit, even inside radius', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        id: 55, attendance_id: 1, dealer_id: 1,
+        login_time: '2026-07-27T05:00:00Z', logout_time: null,
+        login_lat: 11, login_lng: 77, login_inside_radius: false,
+        dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 200,
+      }],
+    });
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/logout')
+      .send({ visit_id: 55, lat: 11, lng: 77, accuracy_meters: 10, reason: 'too short' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('reason_required');
+    expect(res.body.minLength).toBe(50);
+    expect(res.body.maxLength).toBe(500);
+  });
+
+  // Task 5 Case 3 — exception at BOTH login and logout is flagged for the
+  // manager dashboard's "Needs Verification" status.
+  test('needs_verification is true when both login and logout used an exception', async () => {
+    const longReason = 'x'.repeat(60);
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, attendance_id: 1, dealer_id: 1,
+          login_time: '2026-07-27T05:00:00Z', logout_time: null,
+          login_lat: 11, login_lng: 77, login_inside_radius: false,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 100,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, logout_time: 'now', visit_duration_minutes: 30, out_of_radius: true, matched_login: false }] })
+      .mockResolvedValueOnce({ rows: [] }) // exception_log insert
+      .mockResolvedValueOnce({ rows: [] }); // createManagerNotification's insert
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/logout')
+      .send({ visit_id: 55, lat: 12, lng: 78, accuracy_meters: 10, reason: longReason });
+    expect(res.status).toBe(200);
+    expect(res.body.visit.needs_verification).toBe(true);
   });
 });
 
@@ -123,15 +189,16 @@ describe('POST /api/x/:id/location-check', () => {
       .mockResolvedValueOnce({
         rows: [{
           id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 0, log_out_alert_sent: false,
-          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200, employee_name: 'Arun',
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'inside', outside_radius_count: 0, log_out_alert_sent: false, interrupted: false }] });
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'inside', outside_radius_count: 0, log_out_alert_sent: false, interrupted: false }] })
+      .mockResolvedValueOnce({ rows: [] }); // visit_radius_events open-event lookup — none, inside, nothing else to do
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/55/location-check').send({ lat: 11, lng: 77 });
     expect(res.status).toBe(200);
     expect(res.body.visit.last_location_status).toBe('inside');
-    expect(pool.query).toHaveBeenCalledTimes(2); // no exception_log insert
+    expect(pool.query).toHaveBeenCalledTimes(3); // select, update, radius-events lookup — no exception_log insert
   });
 
   test('one breach: increments count but does not yet trigger the logout alert', async () => {
@@ -139,16 +206,18 @@ describe('POST /api/x/:id/location-check', () => {
       .mockResolvedValueOnce({
         rows: [{
           id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 0, log_out_alert_sent: false,
-          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 1, log_out_alert_sent: false, interrupted: false }] });
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 1, log_out_alert_sent: false, interrupted: false }] })
+      .mockResolvedValueOnce({ rows: [] }) // visit_radius_events open-event lookup — none yet
+      .mockResolvedValueOnce({ rows: [] }); // visit_radius_events insert — excursion starts, no alert on first check
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 }); // ~150km away
     expect(res.status).toBe(200);
     expect(res.body.visit.outside_radius_count).toBe(1);
     expect(res.body.visit.log_out_alert_sent).toBe(false);
-    expect(pool.query).toHaveBeenCalledTimes(2); // still no exception_log insert
+    expect(pool.query).toHaveBeenCalledTimes(4); // still no exception_log insert
   });
 
   test('second breach (non-consecutive) trips the logout alert and logs an exception', async () => {
@@ -156,16 +225,18 @@ describe('POST /api/x/:id/location-check', () => {
       .mockResolvedValueOnce({
         rows: [{
           id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 1, log_out_alert_sent: false,
-          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
         }],
       })
       .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 2, log_out_alert_sent: true, interrupted: true }] })
-      .mockResolvedValueOnce({ rows: [] }); // exception_log insert
+      .mockResolvedValueOnce({ rows: [] }) // exception_log insert
+      .mockResolvedValueOnce({ rows: [] }) // visit_radius_events open-event lookup — non-consecutive, so no open excursion right now
+      .mockResolvedValueOnce({ rows: [] }); // visit_radius_events insert — new excursion starts
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
     expect(res.status).toBe(200);
     expect(res.body.visit.log_out_alert_sent).toBe(true);
-    expect(pool.query).toHaveBeenCalledTimes(3);
+    expect(pool.query).toHaveBeenCalledTimes(5);
   });
 
   test('already-alerted visit stays idempotent — no duplicate exception_log insert', async () => {
@@ -173,14 +244,18 @@ describe('POST /api/x/:id/location-check', () => {
       .mockResolvedValueOnce({
         rows: [{
           id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 3, log_out_alert_sent: true,
-          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 4, log_out_alert_sent: true, interrupted: true }] });
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 4, log_out_alert_sent: true, interrupted: true }] })
+      // Open excursion already tracked, just started (left_at ~now) — dueStage
+      // is still 0 so no new alert fires, just the max-distance/count update.
+      .mockResolvedValueOnce({ rows: [{ id: 9, left_at: new Date().toISOString(), alert_count: 0, max_distance_m: 100 }] })
+      .mockResolvedValueOnce({ rows: [] }); // visit_radius_events update
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
     expect(res.status).toBe(200);
-    expect(pool.query).toHaveBeenCalledTimes(2); // no new exception_log insert
+    expect(pool.query).toHaveBeenCalledTimes(4); // no new exception_log insert
   });
 });
 

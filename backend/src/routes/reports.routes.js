@@ -14,9 +14,15 @@ const pool    = require('../db/pool');
 
 const router = express.Router();
 
-function toCsv(rows) {
+// Raw primary/foreign-key fields kept on report rows for internal use (the
+// exceptions "Mark reviewed" action needs `id`) but excluded from the CSV
+// itself — mirrors ID_LIKE_KEYS in web/src/utils/reports.jsx, which does the
+// same exclusion for the on-screen table columns.
+const ID_LIKE_KEYS = ['id', 'employee_id', 'dealer_id', 'attendance_id', 'visit_id'];
+
+function toCsv(rows, excludeKeys = []) {
   if (rows.length === 0) return '';
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(rows[0]).filter((h) => !excludeKeys.includes(h));
   const escape = (val) => {
     if (val === null || val === undefined) return '';
     const str = String(val);
@@ -39,16 +45,23 @@ function sendReport(res, rows, format, filename) {
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(toCsv(rows));
+    return res.send(toCsv(rows, ID_LIKE_KEYS));
   }
   return res.json({ rows, count: rows.length, truncated: rows.length >= ROW_CAP });
 }
 
-// Returns an error message string if employee_id was given but isn't a valid
-// integer, otherwise null.
+// Returns an error message string if employee_id/employee_ids was given but
+// invalid, otherwise null. `employee_ids` (comma-separated, from the report
+// filter's multi-select) takes precedence over the older singular
+// `employee_id` (still used as-is by RepFullReport.jsx) when both are present.
 function buildDateEmployeeFilter(query, params, conditions, dateColumn) {
-  const { from, to, employee_id } = query;
-  if (employee_id) {
+  const { from, to, employee_id, employee_ids } = query;
+  if (employee_ids) {
+    const ids = employee_ids.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isInteger);
+    if (ids.length === 0) return 'Invalid employee_ids';
+    params.push(ids);
+    conditions.push(`a.employee_id = ANY($${params.length}::int[])`);
+  } else if (employee_id) {
     const employeeId = parseInt(employee_id);
     if (!Number.isInteger(employeeId)) return 'Invalid employee_id';
     params.push(employeeId);
@@ -120,7 +133,9 @@ router.get('/dealer-visits', async (req, res) => {
     const result = await pool.query(
       `SELECT e.name AS employee_name, d.name AS dealer_name, d.address AS dealer_address,
               cv.login_time, cv.logout_time, cv.visit_duration_minutes,
-              ROUND(cv.distance_from_previous_km::numeric, 2) AS distance_from_previous_km, cv.out_of_radius
+              ROUND(cv.distance_from_previous_km::numeric, 2) AS distance_from_previous_km, cv.out_of_radius,
+              cv.login_inside_radius,
+              (cv.login_inside_radius = false AND cv.out_of_radius = true) AS needs_verification
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id
        JOIN employees e ON e.id = a.employee_id
@@ -186,7 +201,7 @@ router.get('/distance-duration', async (req, res) => {
 // shaped to fit ReportsPage.jsx's generic fetch/CSV-export flow. Marking an
 // exception reviewed is a write action and stays on PATCH /api/visits/exceptions/:id.
 router.get('/exceptions', async (req, res) => {
-  const { format, employee_id, dealer_id, from, to } = req.query;
+  const { format, employee_id, employee_ids, dealer_id, from, to } = req.query;
   const conditions = [];
   const params = [];
   // buildDateEmployeeFilter assumes an `a.employee_id` alias for the employee
@@ -196,9 +211,13 @@ router.get('/exceptions', async (req, res) => {
   const dealerFilterError = pushDealerIdFilter(dealer_id, params, conditions, 'el.dealer_id');
   if (dealerFilterError) return res.status(400).json({ error: dealerFilterError });
 
-  let employeeId;
-  if (employee_id) {
-    employeeId = parseInt(employee_id);
+  if (employee_ids) {
+    const ids = employee_ids.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isInteger);
+    if (ids.length === 0) return res.status(400).json({ error: 'Invalid employee_ids' });
+    params.push(ids);
+    conditions.push(`el.employee_id = ANY($${params.length}::int[])`);
+  } else if (employee_id) {
+    const employeeId = parseInt(employee_id);
     if (!Number.isInteger(employeeId)) {
       return res.status(400).json({ error: 'Invalid employee_id' });
     }
@@ -212,7 +231,17 @@ router.get('/exceptions', async (req, res) => {
       `SELECT el.id, e.name AS employee_name, d.name AS dealer_name, el.event_type,
               el.latitude, el.longitude, ROUND(el.distance_meters::numeric, 1) AS distance_meters,
               ROUND(el.gps_accuracy_m::numeric, 1) AS gps_accuracy_m, el.reason,
-              el.matched_login, el.manager_reviewed, el.created_at
+              el.matched_login, el.manager_reviewed, el.created_at,
+              -- Task 5 Case 3: an exception at BOTH login and logout for the
+              -- same visit — surfaced per-row (each row already carries its
+              -- own reason/distance/accuracy) rather than needing a new
+              -- combined-row endpoint.
+              EXISTS (
+                SELECT 1 FROM exception_log el2
+                WHERE el2.visit_id = el.visit_id
+                  AND el2.event_type <> el.event_type
+                  AND el2.event_type IN ('login', 'logout')
+              ) AS needs_verification
        FROM exception_log el
        JOIN employees e ON e.id = el.employee_id
        JOIN dealers d    ON d.id = el.dealer_id

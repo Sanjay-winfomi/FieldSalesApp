@@ -13,11 +13,15 @@
  */
 const pool = require('../db/pool');
 
-async function getIdempotentResponse(key) {
+// Scoped by employee_id, not just the key — the key is client-generated
+// (not a server-issued secret), so without this an attacker who observed or
+// guessed another employee's Idempotency-Key value could replay it under
+// their own request and receive that employee's cached response.
+async function getIdempotentResponse(key, employeeId) {
   if (!key) return null;
   const result = await pool.query(
-    `SELECT response_status, response_body FROM idempotency_keys WHERE key = $1`,
-    [key]
+    `SELECT response_status, response_body FROM idempotency_keys WHERE key = $1 AND employee_id = $2`,
+    [key, employeeId]
   );
   return result.rows[0] || null;
 }

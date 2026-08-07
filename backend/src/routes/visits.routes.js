@@ -18,6 +18,7 @@ const { haversineKm }     = require('../utils/haversine');
 const { logDealerLogin, logDealerLogout, logVisitInterrupted } = require('../utils/activityLog');
 const { requireRole }     = require('../middleware/auth.middleware');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
+const { createManagerNotification } = require('../utils/managerNotifications');
 
 const router = express.Router();
 
@@ -25,6 +26,21 @@ const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_MET
 const MATCH_TOLERANCE_M         = parseInt(process.env.LOGIN_MATCH_TOLERANCE_METERS || '20');
 const SYSTEM_DEFAULT_RADIUS_M   = parseInt(process.env.LOGIN_RADIUS_METERS || '200');
 const MIN_REASON_LENGTH         = 20;
+
+// Logout-specific reason bounds for a visit whose LOGIN already used an
+// exception (Task 5 Case 2/3) — stricter than MIN_REASON_LENGTH (login's own
+// rule, unchanged) since this is the rep's one chance to explain a logout
+// that a normal visit could never reach this branch for.
+const LOGOUT_EXCEPTION_REASON_MIN = 50;
+const LOGOUT_EXCEPTION_REASON_MAX = 500;
+
+// Staged radius-excursion alerts (Task 4): every 10 minutes continuously
+// outside the dealer radius advances one stage — 1st (10min) manager-only,
+// 2nd (20min) rep-only, 3rd+ (30min, and every 10min after) both. Computed
+// from the excursion's elapsed time, not from how many polls have landed, so
+// it's correct regardless of whether visitMonitor.js's foreground poll or
+// geofenceTask.js's background geofence event is what triggers the check.
+const RADIUS_ALERT_STAGE_MINUTES = 10;
 
 // Coerces lat/lng to finite numbers within valid geographic ranges, or null.
 function parseCoord(value, min, max) {
@@ -69,7 +85,7 @@ router.post('/login', async (req, res) => {
     // A retried request (e.g. the mobile client's cold-start retry) that
     // already created a visit replays that result instead of inserting a
     // second open visit — this route has no other guard against that.
-    const cached = await getIdempotentResponse(idempotencyKey);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -164,6 +180,15 @@ router.post('/login', async (req, res) => {
          VALUES ($1, $2, $3, 'login', $4, $5, $6, $7, $8)`,
         [employeeId, dealer_id, visit.id, lat, lng, distanceM, accuracyMeters, trimmedReason]
       );
+      await createManagerNotification({
+        type: 'login_exception',
+        title: 'Representative login exception',
+        body: `${req.employee.username} logged in at ${dealer.name} from outside the dealer radius (~${Math.round(distanceM)}m away). Reason: "${trimmedReason}"`,
+        severity: 'warning',
+        employeeId,
+        dealerId: dealer_id,
+        visitId: visit.id,
+      });
     }
 
     logDealerLogin(req.employee.username, dealer.name);
@@ -207,16 +232,20 @@ router.post('/logout', async (req, res) => {
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
-    const cached = await getIdempotentResponse(idempotencyKey);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
 
     // Verify visit belongs to this employee via attendance join, and pull
     // the dealer's registered location + radius for the geofence check below.
+    // login_inside_radius decides which of Task 5's logout branches applies:
+    // a normal login (true) gets the proactive inside-radius-or-drift-match
+    // gate with no override; an exception login (false) always requires a
+    // written reason regardless of current distance.
     const visitResult = await pool.query(
       `SELECT cv.id, cv.attendance_id, cv.dealer_id, cv.login_time, cv.logout_time,
-              cv.login_lat, cv.login_lng,
+              cv.login_lat, cv.login_lng, cv.login_inside_radius,
               d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng,
               d.radius_meters AS dealer_radius_meters
        FROM client_visits cv
@@ -265,11 +294,29 @@ router.post('/logout', async (req, res) => {
     }
 
     const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
-    if (!insideRadius && !matchedLogin && trimmedReason.length < MIN_REASON_LENGTH) {
+    const loginWasException = visit.login_inside_radius === false;
+
+    if (loginWasException) {
+      // Case 2/3 — the login already used an exception, so logout always
+      // requires a written reason (regardless of current distance), bounded
+      // to 50-500 characters. No inside-radius/drift-match escape hatch here
+      // — the rep already isn't in the "normal visit" path.
+      if (trimmedReason.length < LOGOUT_EXCEPTION_REASON_MIN || trimmedReason.length > LOGOUT_EXCEPTION_REASON_MAX) {
+        return res.status(422).json({
+          error: 'reason_required',
+          distanceMeters: distanceM,
+          minLength: LOGOUT_EXCEPTION_REASON_MIN,
+          maxLength: LOGOUT_EXCEPTION_REASON_MAX,
+        });
+      }
+    } else if (!insideRadius && !matchedLogin) {
+      // Case 1 — a normal login. No reason override: outside radius and not
+      // drift-matched to the login spot is a hard reject, matching "disable
+      // logout, no fallback" rather than the old accept-with-a-reason escape
+      // hatch (that escape hatch now applies only to exception-login visits).
       return res.status(422).json({
-        error: 'reason_required',
+        error: 'must_return_to_radius',
         distanceMeters: distanceM,
-        minLength: MIN_REASON_LENGTH,
       });
     }
 
@@ -294,6 +341,10 @@ router.post('/logout', async (req, res) => {
       [lat, lng, durationMins, outOfRadius, accuracyMeters, distanceM, matchedLogin, trimmedReason || null, visit_id]
     );
 
+    // Case 3 — exception at both login and logout — flagged for manager
+    // review as "Needs Verification" rather than a plain logout exception.
+    const needsVerification = loginWasException && outOfRadius;
+
     if (outOfRadius) {
       await pool.query(
         `INSERT INTO exception_log
@@ -302,12 +353,24 @@ router.post('/logout', async (req, res) => {
          VALUES ($1, $2, $3, 'logout', $4, $5, $6, $7, $8, $9)`,
         [employeeId, visit.dealer_id, visit_id, lat, lng, distanceM, accuracyMeters, trimmedReason || null, matchedLogin]
       );
+      await createManagerNotification({
+        type: needsVerification ? 'needs_verification' : 'logout_exception',
+        title: needsVerification ? 'Needs Verification' : 'Representative logout exception',
+        body: needsVerification
+          ? `${req.employee.username} used an exception at BOTH login and logout for ${visit.dealer_name} — please review.`
+          : `${req.employee.username} logged out of ${visit.dealer_name} from outside the dealer radius (~${Math.round(distanceM)}m away). Reason: "${trimmedReason}"`,
+        severity: 'warning',
+        employeeId,
+        dealerId: visit.dealer_id,
+        visitId: visit_id,
+      });
     }
 
     logDealerLogout(req.employee.username, visit.dealer_name, durationMins, outOfRadius);
     const body = {
       visit: {
         ...updatedVisit.rows[0],
+        needs_verification: needsVerification,
       },
     };
     await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/logout', 200, body);
@@ -343,17 +406,19 @@ router.post('/:id/location-check', async (req, res) => {
     // Without this, a retried ping would increment outside_radius_count a
     // second time for the same real breach and could double-fire the
     // "time to log out" alert.
-    const cached = await getIdempotentResponse(idempotencyKey);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
 
     const visitResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, cv.logout_time, cv.outside_radius_count, cv.log_out_alert_sent,
-              d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters
+              d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters,
+              e.name AS employee_name
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id
        JOIN dealers d ON d.id = cv.dealer_id
+       JOIN employees e ON e.id = a.employee_id
        WHERE cv.id = $1 AND a.employee_id = $2`,
       [id, employeeId]
     );
@@ -408,7 +473,99 @@ router.post('/:id/location-check', async (req, res) => {
       logVisitInterrupted(req.employee.username, visit.dealer_name, distanceM);
     }
 
-    const body = { visit: updated.rows[0], distance_meters: distanceM };
+    // Task 4 — staged 10/20/30-min excursion alerts. Runs alongside the
+    // untouched outside_radius_count/log_out_alert_sent/interrupted logic
+    // above (that mechanism keeps working exactly as before for anything
+    // already reading it); this is a separate, additive tracker.
+    let repNotification = null;
+    const openEventResult = await pool.query(
+      `SELECT id, left_at, alert_count, max_distance_m FROM visit_radius_events
+       WHERE visit_id = $1 AND returned_at IS NULL`,
+      [id]
+    );
+    const openEvent = openEventResult.rows[0] || null;
+
+    if (!insideRadius) {
+      if (!openEvent) {
+        // Excursion just started — open the tracker. No alert fires on the
+        // very first outside check; the clock starts now.
+        try {
+          await pool.query(
+            `INSERT INTO visit_radius_events (visit_id, employee_id, dealer_id, left_at, alert_count, max_distance_m)
+             VALUES ($1, $2, $3, NOW(), 0, $4)`,
+            [id, employeeId, visit.dealer_id, distanceM]
+          );
+        } catch (insertErr) {
+          // 23505 = unique_violation on idx_visit_radius_events_open — a
+          // concurrent check (visitMonitor's foreground poll racing
+          // geofenceTask's background event) already opened one for this
+          // visit a moment ago. That one owns the excursion; nothing to do.
+          if (insertErr.code !== '23505') throw insertErr;
+        }
+      } else {
+        const minutesOutside = (Date.now() - new Date(openEvent.left_at).getTime()) / 60000;
+        const dueStage = Math.floor(minutesOutside / RADIUS_ALERT_STAGE_MINUTES);
+        const newMaxDistance = Math.max(openEvent.max_distance_m ?? 0, distanceM ?? 0);
+        let newAlertCount = openEvent.alert_count;
+
+        if (dueStage > openEvent.alert_count) {
+          // Fire exactly the next stage, one at a time, even if a long gap
+          // between checks means multiple stages became "due" at once —
+          // avoids bursting several alerts in one response.
+          const stage = openEvent.alert_count + 1;
+          newAlertCount = stage;
+          const notifyManager = stage === 1 || stage >= 3;
+          const notifyRep = stage >= 2;
+
+          if (notifyManager) {
+            await createManagerNotification({
+              type: stage === 1 ? 'left_dealer' : 'still_outside',
+              title: stage === 1 ? 'Representative left dealer' : 'Representative still outside',
+              body: stage === 1
+                ? `${visit.employee_name} appears to have left ${visit.dealer_name}.`
+                : `${visit.employee_name} has been outside ${visit.dealer_name} for ${Math.round(minutesOutside)} minutes.`,
+              severity: 'warning',
+              employeeId,
+              dealerId: visit.dealer_id,
+              visitId: id,
+            });
+          }
+          if (notifyRep) {
+            repNotification = {
+              title: 'Time to log out?',
+              body: 'You appear to be outside the dealer location. If your visit has ended please complete Dealer Logout.',
+            };
+          }
+        }
+
+        await pool.query(
+          `UPDATE visit_radius_events SET alert_count = $1, max_distance_m = $2 WHERE id = $3`,
+          [newAlertCount, newMaxDistance, openEvent.id]
+        );
+      }
+    } else if (openEvent) {
+      // Back inside radius — close the excursion. Only notify if at least
+      // one alert stage actually fired (avoids a notification for a single
+      // brief GPS-jitter blip that never reached the 10-minute mark).
+      await pool.query(`UPDATE visit_radius_events SET returned_at = NOW() WHERE id = $1`, [openEvent.id]);
+      if (openEvent.alert_count > 0) {
+        await createManagerNotification({
+          type: 'returned',
+          title: 'Representative returned',
+          body: `${visit.employee_name} has returned to ${visit.dealer_name}.`,
+          severity: 'info',
+          employeeId,
+          dealerId: visit.dealer_id,
+          visitId: id,
+        });
+        repNotification = {
+          title: 'Return inside dealer',
+          body: "You're back inside the dealer premises.",
+        };
+      }
+    }
+
+    const body = { visit: updated.rows[0], distance_meters: distanceM, rep_notification: repNotification };
     await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/location-check', 200, body);
     return res.json(body);
   } catch (err) {
@@ -465,8 +622,9 @@ router.get('/', async (req, res) => {
     const result = await pool.query(
       `SELECT cv.id, cv.attendance_id, a.employee_id, e.name AS employee_name,
               cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
-              cv.login_time, cv.login_lat, cv.login_lng,
-              cv.logout_time, cv.logout_lat, cv.logout_lng,
+              cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius,
+              cv.login_justification_note,
+              cv.logout_time, cv.logout_lat, cv.logout_lng, cv.logout_justification_note,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv
@@ -479,7 +637,16 @@ router.get('/', async (req, res) => {
       params
     );
 
-    return res.json({ visits: result.rows });
+    // Case 3 (Task 5) — exception used at BOTH login and logout — surfaced
+    // as a derived field so the dashboard can show "Needs Verification"
+    // without a new persisted column (both source booleans already exist
+    // on this row).
+    const visits = result.rows.map((v) => ({
+      ...v,
+      needs_verification: v.login_inside_radius === false && v.out_of_radius === true,
+    }));
+
+    return res.json({ visits });
   } catch (err) {
     logger.error('GET /api/visits error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
@@ -533,7 +700,13 @@ router.get('/exceptions', requireRole('manager'), async (req, res) => {
               el.dealer_id, d.name AS dealer_name,
               el.visit_id, el.event_type, el.latitude, el.longitude,
               el.distance_meters, el.gps_accuracy_m, el.reason,
-              el.matched_login, el.manager_reviewed, el.created_at
+              el.matched_login, el.manager_reviewed, el.created_at,
+              EXISTS (
+                SELECT 1 FROM exception_log el2
+                WHERE el2.visit_id = el.visit_id
+                  AND el2.event_type <> el.event_type
+                  AND el2.event_type IN ('login', 'logout')
+              ) AS needs_verification
        FROM exception_log el
        JOIN employees e ON e.id = el.employee_id
        JOIN dealers d    ON d.id = el.dealer_id
@@ -589,8 +762,9 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query(
       `SELECT cv.id, cv.attendance_id, a.employee_id, e.name AS employee_name,
               cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
-              cv.login_time, cv.login_lat, cv.login_lng,
-              cv.logout_time, cv.logout_lat, cv.logout_lng,
+              cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius,
+              cv.login_justification_note,
+              cv.logout_time, cv.logout_lat, cv.logout_lng, cv.logout_justification_note,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv
@@ -609,6 +783,8 @@ router.get('/:id', async (req, res) => {
     if (!isManager && record.employee_id !== req.employee.id) {
       return res.status(403).json({ error: 'Not authorized to view this record' });
     }
+
+    record.needs_verification = record.login_inside_radius === false && record.out_of_radius === true;
 
     return res.json({ visit: record });
   } catch (err) {

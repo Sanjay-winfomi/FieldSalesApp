@@ -342,4 +342,58 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
+-- ============================================================
+-- 9. visit_radius_events
+-- ============================================================
+-- One row per continuous excursion outside a dealer's radius during an open
+-- visit — distinct from (and additive alongside) client_visits' existing
+-- outside_radius_count/log_out_alert_sent/interrupted* columns, which stay
+-- untouched for backward compatibility. This table drives the new staged
+-- 10/20/30-minute manager+rep alert sequence and is the literal "history"
+-- (time left, time returned, alert count, max distance) for that sequence.
+CREATE TABLE IF NOT EXISTS visit_radius_events (
+  id            SERIAL PRIMARY KEY,
+  visit_id      INTEGER       NOT NULL REFERENCES client_visits (id) ON DELETE CASCADE,
+  employee_id   INTEGER       NOT NULL REFERENCES employees (id) ON DELETE CASCADE,
+  dealer_id     INTEGER       NOT NULL REFERENCES dealers (id),
+  left_at       TIMESTAMPTZ   NOT NULL,
+  returned_at   TIMESTAMPTZ,
+  alert_count   INTEGER       NOT NULL DEFAULT 0,
+  max_distance_m DOUBLE PRECISION,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_visit_radius_events_visit_id ON visit_radius_events (visit_id);
+-- UNIQUE (not just an index): a visit has at most one open excursion at a
+-- time. visitMonitor.js's foreground poll and geofenceTask.js's background
+-- geofence event both call location-check independently and can land within
+-- moments of each other — without this, two concurrent requests could each
+-- see "no open excursion" and both INSERT one, double-tracking the same
+-- excursion. The route below catches the resulting unique-violation and
+-- treats it as having lost the race, rather than erroring.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_radius_events_open ON visit_radius_events (visit_id) WHERE returned_at IS NULL;
+
+-- ============================================================
+-- 10. manager_notifications
+-- ============================================================
+-- In-app alert feed for the manager dashboard's notification bell — not OS
+-- push (no push infrastructure exists in this app). Read-state is shared
+-- across all managers rather than per-manager-account (documented
+-- simplification, not a bug — revisit if per-manager tracking is needed).
+CREATE TABLE IF NOT EXISTS manager_notifications (
+  id            SERIAL PRIMARY KEY,
+  type          VARCHAR(40)   NOT NULL,
+  title         VARCHAR(150)  NOT NULL,
+  body          TEXT          NOT NULL,
+  severity      VARCHAR(20)   NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'warning', 'danger')),
+  employee_id   INTEGER       REFERENCES employees (id) ON DELETE CASCADE,
+  dealer_id     INTEGER       REFERENCES dealers (id),
+  visit_id      INTEGER       REFERENCES client_visits (id) ON DELETE CASCADE,
+  read_at       TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_created_at ON manager_notifications (created_at);
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_unread ON manager_notifications (read_at) WHERE read_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (created_at);

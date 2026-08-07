@@ -44,7 +44,7 @@ router.post('/login', async (req, res) => {
   try {
     // A retry of a request that already completed replays the original
     // response instead of re-running the insert below.
-    const cached = await getIdempotentResponse(idempotencyKey);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -103,7 +103,7 @@ router.post('/logout', async (req, res) => {
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
-    const cached = await getIdempotentResponse(idempotencyKey);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -198,7 +198,7 @@ router.get('/today', async (req, res) => {
     const visitsResult = await pool.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
               d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters,
-              cv.login_time, cv.logout_time,
+              cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius, cv.logout_time,
               cv.visit_duration_minutes, cv.distance_from_previous_km,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at,
               cv.login_justification_note, cv.sync_status

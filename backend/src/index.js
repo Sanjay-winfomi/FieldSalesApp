@@ -42,6 +42,7 @@ const reportsRouter    = require('./routes/reports.routes');
 const geocodeRouter    = require('./routes/geocode.routes');
 const notesRouter      = require('./routes/notes.routes');
 const remindersRouter  = require('./routes/reminders.routes');
+const notificationsRouter = require('./routes/notifications.routes');
 
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
@@ -205,6 +206,7 @@ app.get('/api/config', requireAuth, (req, res) => {
 app.use('/api/dashboard',  requireAuth, requireRole('manager'), dashboardRouter);
 app.use('/api/employees',  requireAuth, requireRole('manager'), employeesRouter);
 app.use('/api/reports',    requireAuth, requireRole('manager'), reportsRouter);
+app.use('/api/notifications', requireAuth, requireRole('manager'), notificationsRouter);
 
 // ── 404 catch-all ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
