@@ -4,8 +4,19 @@ import { api } from './api';
 
 const QUEUE_KEY = '@offline_action_queue';
 const MAX_RETRIES = 8;
+// Backoff for genuine-client-error retries (not network-error requeues, which
+// retry on the very next connectivity edge instead) — without this, a
+// transient 5xx got hammered on every single flush attempt.
+const BASE_RETRY_DELAY_MS = 30 * 1000;
+const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
+// Belt-and-suspenders alongside the NetInfo offline->online edge trigger in
+// startAutoSync: a device can report "online" while requests keep failing
+// (flaky wifi, a server blip) — without a periodic sweep the queue only
+// retries on the next full disconnect/reconnect cycle, which may never come.
+const PERIODIC_RETRY_MS = 60 * 1000;
 
 let unsubscribeNetInfo = null;
+let periodicRetryTimer = null;
 let flushInFlight = null;
 
 // Called once (by App.js) whenever a queued action turns out to conflict
@@ -65,6 +76,23 @@ export const getPendingCount = async () => {
 };
 
 /**
+ * Full queue contents — for a "what's stuck" inspector UI. Callers must
+ * treat this as read-only; go through removeQueuedAction to mutate.
+ */
+export const getQueueSnapshot = async () => getQueue();
+
+/**
+ * Drop a single queued action without attempting to send it — the manual
+ * "discard" side of the sync-queue inspector, for a record the user has
+ * decided isn't worth retrying (e.g. it's already stuck past MAX_RETRIES).
+ */
+export const removeQueuedAction = async (actionId) => {
+  const queue = await getQueue();
+  const next = queue.filter((a) => a.id !== actionId);
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+};
+
+/**
  * Discard the queue outright. Used on logout — without this, any actions
  * queued by the current user but not yet synced would sit until the next
  * login on this device and then flush under whichever employee logs in
@@ -90,6 +118,17 @@ export const isNetworkError = (error) => {
   }
   return typeof error.message === 'string' && /network|timeout/i.test(error.message);
 };
+
+// A 404 on a queued delete means the record is already gone — from the
+// user's perspective that IS the desired end state, not a failure, so
+// treat it as success rather than burning retries and firing a false
+// "gave up syncing" alert to the manager for something that isn't broken.
+// The same applies to an edit (put/patch) racing a delete from another
+// device/session: there's nothing left to apply the edit to, and the
+// record being gone already satisfies "the user's local copy no longer
+// needs to exist on the server" close enough to resolve it silently.
+const isIdempotentNotFound = (action, error) =>
+  error.response?.status === 404 && ['delete', 'put', 'patch'].includes(action.method);
 
 /**
  * Attempt to flush the queue to the server, in original order, rewriting
@@ -143,6 +182,16 @@ export const flushQueue = async () => {
           continue;
         }
 
+        if (action.nextRetryAt && Date.now() < action.nextRetryAt) {
+          // Backed off after a prior genuine-client-error retry — leave it
+          // queued untouched rather than hammering the same failing request
+          // on every flush attempt (each connectivity edge, and now also
+          // every periodic sweep — see startAutoSync).
+          remaining.push(action);
+          await persistRemaining();
+          continue;
+        }
+
         try {
           const response = await api.request({ method: action.method, url: action.url, data });
 
@@ -165,6 +214,8 @@ export const flushQueue = async () => {
           if (isNetworkError(error)) {
             // Still offline / network dropped mid-flush — keep as-is, retry later.
             remaining.push(action);
+          } else if (isIdempotentNotFound(action, error)) {
+            console.log(`Queued action ${action.id} resolved: server already has no such record (404) — treating as done.`);
           } else if (error.response?.status === 409) {
             // Conflict with state the server already has (duplicate day
             // login, a logout/login racing one that already synced,
@@ -191,7 +242,12 @@ export const flushQueue = async () => {
             // case it was transient, then give up so a bad record can't wedge the queue forever.
             const retryCount = (action.retryCount || 0) + 1;
             if (retryCount <= MAX_RETRIES) {
-              remaining.push({ ...action, retryCount });
+              // Exponential backoff (30s, 60s, 120s, ... capped at 30min) —
+              // otherwise this gets retried on every single flush (every
+              // connectivity edge and every periodic sweep) instead of
+              // giving a transient failure a moment to clear.
+              const delayMs = Math.min(BASE_RETRY_DELAY_MS * 2 ** (retryCount - 1), MAX_RETRY_DELAY_MS);
+              remaining.push({ ...action, retryCount, nextRetryAt: Date.now() + delayMs });
             } else {
               console.error(`Discarding queued action ${action.id} after ${MAX_RETRIES} failed retries:`, error.message);
               // Otherwise this vanishes with only a console log nobody sees —
@@ -236,6 +292,15 @@ export const startAutoSync = () => {
     wasOffline = !isOnline;
   });
 
+  // Also sweep periodically regardless of connectivity edges — NetInfo can
+  // report "online" while requests keep failing (flaky wifi, a server
+  // blip), and without this the queue would only get another chance on the
+  // next full offline->online transition, which may not come for a while.
+  // flushQueue() itself is cheap to call when there's nothing due (empty
+  // queue, or every item still backed off) — it just re-persists a same-size
+  // list — so a 1-minute interval is safe to leave running for the session.
+  periodicRetryTimer = setInterval(() => flushQueue(), PERIODIC_RETRY_MS);
+
   // Kick off an initial attempt in case there's already a backlog.
   flushQueue();
 
@@ -246,5 +311,9 @@ export const stopAutoSync = () => {
   if (unsubscribeNetInfo) {
     unsubscribeNetInfo();
     unsubscribeNetInfo = null;
+  }
+  if (periodicRetryTimer) {
+    clearInterval(periodicRetryTimer);
+    periodicRetryTimer = null;
   }
 };

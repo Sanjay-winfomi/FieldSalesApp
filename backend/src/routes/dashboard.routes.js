@@ -65,7 +65,10 @@ router.get('/today', async (req, res) => {
         timestamp    = null;
       } else if (row.logout_time) {
         status       = 'day_ended';
-        lastActivity = `Office logout, ${new Date(row.logout_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+        // Without an explicit timeZone, this renders in whatever timezone the
+        // server process runs in (UTC on Render) rather than IST — 'en-IN'
+        // only controls formatting style (AM/PM), not the timezone offset.
+        lastActivity = `Office logout, ${new Date(row.logout_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
         timestamp    = row.logout_time;
       } else if (row.visit_login && !row.visit_logout) {
         status       = 'logged_in';

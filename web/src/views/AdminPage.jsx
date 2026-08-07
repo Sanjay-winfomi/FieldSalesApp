@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Users, Store } from 'lucide-react';
+import { Users, Store, Route } from 'lucide-react';
 import EmployeesTab from './admin/EmployeesTab';
 import DealersTab from './admin/DealersTab';
+import AssignmentsTab from './admin/AssignmentsTab';
 import { colors, spacing } from '../theme';
 
 const TABS = [
   { key: 'employees', label: 'Employees', icon: Users },
   { key: 'dealers', label: 'Dealers', icon: Store },
+  { key: 'assignments', label: 'Assignments', icon: Route },
 ];
 
 export default function AdminPage({ currentEmployeeId }) {
@@ -33,7 +35,9 @@ export default function AdminPage({ currentEmployeeId }) {
         })}
       </div>
 
-      {activeTab === 'employees' ? <EmployeesTab currentEmployeeId={currentEmployeeId} /> : <DealersTab />}
+      {activeTab === 'employees' && <EmployeesTab currentEmployeeId={currentEmployeeId} />}
+      {activeTab === 'dealers' && <DealersTab />}
+      {activeTab === 'assignments' && <AssignmentsTab />}
     </div>
   );
 }

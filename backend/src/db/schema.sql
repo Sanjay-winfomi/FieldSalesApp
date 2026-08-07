@@ -428,3 +428,75 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ============================================================
+-- 13. dealer_assignments
+-- ============================================================
+-- Manager-authoritative ordered visit plan for a rep on a given (business)
+-- day. sequence_order is set exactly once by a manager's PUT /api/assignments
+-- save and is NEVER reordered by any backend logic — there is no route-
+-- optimization anywhere in this feature. Distinct from client_visits: this
+-- is the plan, client_visits is what actually happened, so editing/removing
+-- an assignment never touches visit history.
+CREATE TABLE IF NOT EXISTS dealer_assignments (
+  id                SERIAL PRIMARY KEY,
+  employee_id       INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  dealer_id         INTEGER NOT NULL REFERENCES dealers(id) ON DELETE CASCADE,
+  assignment_date   DATE NOT NULL,
+  sequence_order    INTEGER NOT NULL,
+  -- ON DELETE SET NULL (not RESTRICT, the FK default): employees.routes.js's
+  -- DELETE /:id assumes an employee can always be hard-deleted because every
+  -- dependent row cascades or nulls out — a manager who authored at least one
+  -- assignment would otherwise make their own account permanently
+  -- undeletable (FK violation) the moment they save a plan.
+  assigned_by       INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'navigating', 'arrived', 'completed', 'cancelled')),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (employee_id, dealer_id, assignment_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dealer_assignments_employee_date ON dealer_assignments (employee_id, assignment_date);
+CREATE INDEX IF NOT EXISTS idx_dealer_assignments_date ON dealer_assignments (assignment_date);
+
+-- ============================================================
+-- 14. dealer_navigations
+-- ============================================================
+-- One row per "Tap Navigate" attempt — the Google Routes API (Compute
+-- Routes Pro) result plus the rep's navigation lifecycle for that attempt
+-- (navigating -> arrived -> completed/cancelled). assignment_id is nullable
+-- because a rep can navigate to a dealer that isn't part of any manager
+-- assignment (free/manual selection) — that row just won't count toward
+-- the assignment-scoped Daily Travel Summary. Feeds navigation history and
+-- the summary; never affects client_visits or attendance.
+CREATE TABLE IF NOT EXISTS dealer_navigations (
+  id                            SERIAL PRIMARY KEY,
+  -- ON DELETE SET NULL, not CASCADE: a manager editing/removing an
+  -- assignment (assignments.routes.js's PUT drops any dealer left out of
+  -- dealer_ids, DELETE /:id removes one directly) must never destroy a
+  -- navigation record that already happened — that would silently erase
+  -- completed travel distance/time from navigation history and the Daily
+  -- Travel Summary. Losing the assignment link just demotes the row to an
+  -- unassigned/manual navigation, matching how a free-selection nav already
+  -- behaves.
+  assignment_id                 INTEGER REFERENCES dealer_assignments(id) ON DELETE SET NULL,
+  employee_id                   INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  dealer_id                     INTEGER NOT NULL REFERENCES dealers(id) ON DELETE CASCADE,
+  status                        VARCHAR(20) NOT NULL DEFAULT 'navigating'
+                                   CHECK (status IN ('navigating', 'arrived', 'completed', 'cancelled')),
+  origin_latitude                DOUBLE PRECISION,
+  origin_longitude               DOUBLE PRECISION,
+  distance_meters                INTEGER,
+  duration_seconds                INTEGER,
+  duration_in_traffic_seconds      INTEGER,
+  expected_arrival_time          TIMESTAMPTZ,
+  encoded_polyline               TEXT,
+  route_summary                  JSONB,
+  started_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at                       TIMESTAMPTZ,
+  created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dealer_navigations_employee_started ON dealer_navigations (employee_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_dealer_navigations_assignment ON dealer_navigations (assignment_id);

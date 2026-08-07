@@ -19,6 +19,7 @@ const { logDealerLogin, logDealerLogout, logVisitInterrupted } = require('../uti
 const { requireRole }     = require('../middleware/auth.middleware');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 const { createManagerNotification } = require('../utils/managerNotifications');
+const { markAssignmentVisited } = require('../utils/dealerAssignments');
 
 const router = express.Router();
 
@@ -192,6 +193,9 @@ router.post('/login', async (req, res) => {
     }
 
     logDealerLogin(req.employee.username, dealer.name);
+    // Non-blocking: if this dealer happens to be on today's manager-assigned
+    // list, mark it visited. Never affects the check-in response either way.
+    markAssignmentVisited({ employeeId, dealerId: dealer_id }).catch(() => {});
     const body = {
       visit: {
         ...visit,

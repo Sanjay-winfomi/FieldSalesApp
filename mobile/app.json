@@ -45,6 +45,7 @@
         }
       ],
       "@react-native-community/datetimepicker",
+      "react-native-maps",
       [
         "expo-notifications",
         {

@@ -44,6 +44,8 @@ const notesRouter      = require('./routes/notes.routes');
 const remindersRouter  = require('./routes/reminders.routes');
 const notificationsRouter = require('./routes/notifications.routes');
 const syncFailuresRouter = require('./routes/syncFailures.routes');
+const assignmentsRouter  = require('./routes/assignments.routes');
+const navigationRouter   = require('./routes/navigation.routes');
 
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
@@ -199,6 +201,10 @@ app.use('/api/reminders',  requireAuth, remindersRouter);
 // Any authenticated employee (rep or manager) — a rep's own device is what
 // reports its own permanently-failed sync attempts here.
 app.use('/api/sync-failures', requireAuth, syncFailuresRouter);
+// Mixed access, same as dealers/reminders above — role checks live at the
+// individual route level (manager-only assignment editing, rep-only "today").
+app.use('/api/assignments', requireAuth, assignmentsRouter);
+app.use('/api/navigation',  requireAuth, navigationRouter);
 
 // Exposes the actual configured login tolerance radius so the UI never
 // has to hardcode a value that could drift from what .env really says.

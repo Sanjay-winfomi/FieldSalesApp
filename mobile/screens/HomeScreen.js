@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, History, NotebookPen, BellRing,
 } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
-import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn } from '../src/components';
+import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal, AssignedDealerCard } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
 function formatTime(isoString) {
@@ -30,6 +30,7 @@ function getGreeting() {
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const [syncQueueVisible, setSyncQueueVisible] = useState(false);
   const {
     employee,
     dayStatus,
@@ -44,7 +45,24 @@ export default function HomeScreen({ navigation }) {
     onOpenLocationSettings,
     fetchTodayState,
     onSelectDealer,
+    assignedDealers,
+    fetchAssignedDealers,
+    onSelectAssignment,
   } = useAppState();
+
+  // Refresh the assigned-dealer list (and any in-progress navigation
+  // status on it) whenever this tab regains focus — e.g. returning from
+  // Check-In or the navigation screen. Same pattern already used by
+  // DealerDirectoryScreen's own focus listener.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', fetchAssignedDealers);
+    return unsubscribe;
+  }, [navigation, fetchAssignedDealers]);
+
+  const handleRefresh = () => {
+    fetchTodayState();
+    fetchAssignedDealers();
+  };
 
   const loginTime = attendance?.login_time ? formatTime(attendance.login_time) : '';
 
@@ -76,7 +94,7 @@ export default function HomeScreen({ navigation }) {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchTodayState} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
       >
         {locationPermissionDenied && (
@@ -99,14 +117,22 @@ export default function HomeScreen({ navigation }) {
 
         {pendingSyncCount > 0 && (
           <FadeSlideIn>
-            <View style={styles.syncBanner}>
+            <Pressable
+              style={styles.syncBanner}
+              onPress={() => setSyncQueueVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="View actions waiting to sync"
+            >
               <RefreshCw size={14} color={colors.primary} style={styles.bannerIcon} />
               <Text style={styles.syncBannerText}>
                 {pendingSyncCount} action{pendingSyncCount !== 1 ? 's' : ''} waiting to sync
               </Text>
-            </View>
+              <ChevronRight size={16} color={colors.primary} />
+            </Pressable>
           </FadeSlideIn>
         )}
+
+        <SyncQueueModal visible={syncQueueVisible} onClose={() => setSyncQueueVisible(false)} />
 
         <FadeSlideIn delay={40}>
           {dayStatus === 'not_logged_in' && (
@@ -168,6 +194,19 @@ export default function HomeScreen({ navigation }) {
                 </Pressable>
               }
             />
+          </FadeSlideIn>
+        )}
+
+        {assignedDealers.length > 0 && (
+          <FadeSlideIn delay={100}>
+            <Text style={styles.sectionLabel}>Today's Assigned Dealers</Text>
+            {assignedDealers.map((assignment) => (
+              <AssignedDealerCard
+                key={assignment.id}
+                assignment={assignment}
+                onNavigate={(a) => onSelectAssignment(a, navigation)}
+              />
+            ))}
           </FadeSlideIn>
         )}
 

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, Pressable, Platform, Modal, Keyboard
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ChevronDown, CalendarDays } from 'lucide-react-native';
 import { api } from '../src/services/api';
+import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { scheduleReminderNotifications } from '../src/services/reminderNotifications';
 import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, PrimaryButton, DealerPickerModal } from '../src/components';
@@ -52,8 +53,8 @@ export default function ReminderEditorScreen({ navigation }) {
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
+    const reminderDate = toDateString(date);
     try {
-      const reminderDate = toDateString(date);
       const res = await api.post('/reminders', {
         dealer_id: dealer.id,
         reminder_date: reminderDate,
@@ -75,6 +76,19 @@ export default function ReminderEditorScreen({ navigation }) {
 
       navigation.goBack();
     } catch (err) {
+      if (isNetworkError(err)) {
+        // Offline — queue the create so the note/dealer/date the user
+        // entered isn't lost. Still schedule the local device notifications
+        // now (they don't need a server id), but there's no reminder id yet
+        // to attach them to server-side — that PATCH is skipped; the
+        // notifications will just fire without a synced notif_id_* on the
+        // record until the next time this reminder is edited, if ever.
+        await enqueueAction('post', '/reminders', { dealer_id: dealer.id, reminder_date: reminderDate, note });
+        await scheduleReminderNotifications({ dealerName: dealer.name, reminderDate });
+        showAlert('Offline Mode', 'Reminder saved locally and will sync when online.');
+        navigation.goBack();
+        return;
+      }
       const serverError = err.response?.data?.error;
       if (serverError === 'note_too_short') {
         showAlert('Note too short', `Reminders need at least ${MIN_NOTE_LENGTH} characters.`);

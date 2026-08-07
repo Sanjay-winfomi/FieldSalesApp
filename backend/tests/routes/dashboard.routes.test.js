@@ -33,6 +33,23 @@ describe('GET /api/x/today', () => {
     expect(res.body.reps[0].status).toBe('logged_in');
     expect(res.body.reps[0].last_activity).toBe('At Dealer A');
   });
+
+  test('formats a day-ended rep\'s office logout time in IST, not server-local time', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        employee_id: 1, name: 'Arun', region: 'South', attendance_id: 5,
+        login_time: '2026-07-27T04:46:00Z', logout_time: '2026-07-27T05:08:00Z',
+        dealer_name: null, visit_login: null, visit_logout: null,
+        visits_count: '1',
+      }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/today');
+    expect(res.body.reps[0].status).toBe('day_ended');
+    // 05:08 UTC = 10:38 IST (UTC+5:30) — asserting the IST value catches a
+    // regression back to formatting in the server's own (UTC) timezone.
+    expect(res.body.reps[0].last_activity).toBe('Office logout, 10:38 am');
+  });
 });
 
 describe('GET /api/x/rep/:id/today', () => {

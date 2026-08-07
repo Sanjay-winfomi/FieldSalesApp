@@ -27,6 +27,7 @@ import DayLoginScreen from './screens/DayLoginScreen';
 import DealerLoginScreen from './screens/DealerLoginScreen';
 import DealerLogoutScreen from './screens/DealerLogoutScreen';
 import DayLogoutScreen from './screens/DayLogoutScreen';
+import DealerNavigationScreen from './screens/DealerNavigationScreen';
 import NotesScreen from './screens/NotesScreen';
 import NoteEditorScreen from './screens/NoteEditorScreen';
 import RemindersScreen from './screens/RemindersScreen';
@@ -78,6 +79,8 @@ export default function App() {
   const [attendance, setAttendance] = useState(null);
   const [visits, setVisits] = useState([]);
   const [selectedDealer, setSelectedDealer] = useState(null);
+  const [assignedDealers, setAssignedDealers] = useState([]);
+  const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
@@ -133,6 +136,15 @@ export default function App() {
     refreshPendingCount();
     const interval = setInterval(refreshPendingCount, 10000);
     return () => clearInterval(interval);
+  }, [employee]);
+
+  // Initial load of today's manager-assigned dealers whenever a session
+  // becomes active (fresh login or restored from Splash). HomeScreen's own
+  // focus listener handles refreshing it after that (e.g. returning from
+  // Check-In or the navigation screen).
+  useEffect(() => {
+    if (!employee) return;
+    fetchAssignedDealers();
   }, [employee]);
 
   // Random Location Verification: while there's an open dealer visit, ping
@@ -258,6 +270,18 @@ export default function App() {
     }
   };
 
+  // Same seq-ref-guarded shape as fetchTodayState — a separate function
+  // (not folded into it) so existing fetchTodayState() callers/behavior are
+  // completely unaffected by this feature.
+  const fetchAssignedDealers = async () => {
+    try {
+      const response = await api.get('/assignments/today');
+      setAssignedDealers(response.data.assignments || []);
+    } catch (error) {
+      console.error('Failed to fetch assigned dealers:', error);
+    }
+  };
+
   const handleLoginSuccess = async () => {
     const empStr = await AsyncStorage.getItem('employeeData');
     if (empStr) {
@@ -311,6 +335,16 @@ export default function App() {
     }
   };
 
+  // A tap on "Navigate" from Home's "Today's Assigned Dealers" card — opens
+  // the in-app route preview for that assignment. Distinct from
+  // handleSelectDealer's directory-tap flow above (which it hands off into
+  // once the rep arrives), since an assignment carries its own id/sequence
+  // that the directory's free dealer selection never had.
+  const handleSelectAssignment = (assignment, navigation) => {
+    setSelectedAssignment(assignment);
+    navigation.navigate('DealerNavigation');
+  };
+
   const handleDealerLogin = (newVisit) => {
     setVisits((prev) => [...prev, newVisit]);
   };
@@ -324,14 +358,12 @@ export default function App() {
     setAttendance(updatedAttendance);
   };
 
-  const handleLogout = async (navigation) => {
+  const finishLogout = async (navigation) => {
     try {
-      // Best-effort: try to sync any pending actions under this user's identity
-      // before clearing anything. Whatever's still left afterward (genuinely
-      // offline) must be discarded, not carried over — otherwise the next
-      // person who logs in on this device would have it flushed under their
-      // own account instead.
-      await flushQueue();
+      // Whatever's still queued at this point (genuinely offline, or the
+      // user chose to discard it) must not be carried over — otherwise the
+      // next person who logs in on this device would have it flushed under
+      // their own account instead.
       await clearQueue();
 
       await SecureStore.deleteItemAsync('accessToken');
@@ -346,6 +378,34 @@ export default function App() {
       // navigator), which has no meaningful "replace" of its own — reach the
       // parent root Stack explicitly so the whole app resets to Login.
       (navigation.getParent() || navigation).replace('Login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const handleLogout = async (navigation) => {
+    try {
+      // Best-effort: try to sync any pending actions under this user's
+      // identity before clearing anything.
+      await flushQueue();
+
+      const remaining = await getPendingCount();
+      if (remaining > 0) {
+        // Still genuinely offline (or the server keeps rejecting these) —
+        // logging out now would silently discard real data (a typed note,
+        // a dealer visit) with no way to recover it. Make the user choose.
+        showAlert(
+          'Unsynced changes',
+          `You have ${remaining} action${remaining !== 1 ? 's' : ''} that haven't synced yet — likely because you're offline. Logging out now will permanently discard ${remaining !== 1 ? 'them' : 'it'}.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Log out anyway', style: 'destructive', onPress: () => finishLogout(navigation) },
+          ]
+        );
+        return;
+      }
+
+      await finishLogout(navigation);
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -369,6 +429,9 @@ export default function App() {
     fetchTodayState,
     onSelectDealer: handleSelectDealer,
     onLogout: handleLogout,
+    assignedDealers,
+    fetchAssignedDealers,
+    onSelectAssignment: handleSelectAssignment,
   };
 
   return (
@@ -473,6 +536,22 @@ export default function App() {
                     onLogout={(data) => {
                       handleDayLogout(data);
                       navigation.navigate('MainTabs');
+                    }}
+                  />
+                )}
+              </Stack.Screen>
+
+              <Stack.Screen name="DealerNavigation">
+                {({ navigation }) => (
+                  <DealerNavigationScreen
+                    navigation={navigation}
+                    assignment={selectedAssignment}
+                    onArrived={(dealer) => {
+                      // Hands off into the existing, unmodified Check-In flow
+                      // exactly as if the rep had tapped this dealer from the
+                      // directory — handleSelectDealer already handles the
+                      // day-status checks and navigation.
+                      handleSelectDealer(dealer, true, navigation);
                     }}
                   />
                 )}

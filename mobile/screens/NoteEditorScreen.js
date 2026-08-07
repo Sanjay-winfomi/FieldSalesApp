@@ -56,6 +56,16 @@ export default function NoteEditorScreen({ navigation, route }) {
       }
       navigation.goBack();
     } catch (err) {
+      if (isNetworkError(err)) {
+        // Offline — queue the write instead of losing what was typed. A
+        // create has no server id to reference later, so nothing downstream
+        // depends on it; an edit already has the real noteId, so the queued
+        // PUT can target it directly once connectivity returns.
+        await enqueueAction(isEditing ? 'put' : 'post', isEditing ? `/notes/${noteId}` : '/notes', { content });
+        showAlert('Offline Mode', 'Note saved locally and will sync when online.');
+        navigation.goBack();
+        return;
+      }
       const serverError = err.response?.data?.error;
       if (serverError === 'content_too_short') {
         showAlert('Note too short', `Notes need at least ${MIN_CONTENT_LENGTH} characters.`);

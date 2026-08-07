@@ -19,6 +19,7 @@ describe('syncManager', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     api.request.mockReset();
+    api.post.mockReset().mockResolvedValue();
     setConflictHandler(null);
   });
 
@@ -86,7 +87,7 @@ describe('syncManager', () => {
     expect(await getPendingCount()).toBe(0);
   });
 
-  test('discards a genuine client error after exceeding max retries', async () => {
+  test('discards a genuine client error after exceeding max retries and reports it', async () => {
     const queue = [{
       id: 'a1', method: 'post', url: '/visits/login', data: {}, localId: null, resolves: null,
       retryCount: 8, timestamp: new Date().toISOString(),
@@ -97,5 +98,44 @@ describe('syncManager', () => {
     await flushQueue();
 
     expect(await getPendingCount()).toBe(0);
+    expect(api.post).toHaveBeenCalledWith(
+      '/sync-failures',
+      expect.objectContaining({ method: 'post', url: '/visits/login' })
+    );
+  });
+
+  test('backs off a bounded retry instead of retrying on the very next flush', async () => {
+    await enqueueAction('post', '/notes', { content: 'a'.repeat(100) });
+    api.request.mockRejectedValueOnce({ response: { status: 400, data: { error: 'bad request' } } });
+
+    await flushQueue();
+    expect(await getPendingCount()).toBe(1);
+
+    // Immediately flushing again should not re-attempt the request — it's
+    // still within its backoff window.
+    api.request.mockClear();
+    await flushQueue();
+    expect(api.request).not.toHaveBeenCalled();
+    expect(await getPendingCount()).toBe(1);
+  });
+
+  test('treats a 404 on a queued delete as already-resolved, not a failure', async () => {
+    await enqueueAction('delete', '/notes/5');
+    api.request.mockRejectedValueOnce({ response: { status: 404, data: { error: 'Note not found' } } });
+
+    await flushQueue();
+
+    expect(await getPendingCount()).toBe(0);
+    expect(api.post).not.toHaveBeenCalledWith('/sync-failures', expect.anything());
+  });
+
+  test('treats a 404 on a queued edit as already-resolved (record deleted elsewhere)', async () => {
+    await enqueueAction('put', '/notes/5', { content: 'a'.repeat(100) });
+    api.request.mockRejectedValueOnce({ response: { status: 404, data: { error: 'Note not found' } } });
+
+    await flushQueue();
+
+    expect(await getPendingCount()).toBe(0);
+    expect(api.post).not.toHaveBeenCalledWith('/sync-failures', expect.anything());
   });
 });
