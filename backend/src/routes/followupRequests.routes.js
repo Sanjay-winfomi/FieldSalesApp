@@ -21,7 +21,7 @@ const router = express.Router();
 const MIN_REASON_LENGTH = 10;
 
 const REQUEST_FIELDS = 'r.id, r.employee_id, r.dealer_id, r.assignment_id, r.requested_date, r.reason, ' +
-  'r.status, r.resolved_by, r.resolved_at, r.created_at';
+  'r.status, r.approved_date, r.resolved_by, r.resolved_at, r.created_at';
 
 function validateReason(reason) {
   if (typeof reason !== 'string') return null;
@@ -146,10 +146,23 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
       return res.status(409).json({ error: 'request_already_resolved', status: request.status });
     }
 
+    // A manager can approve for a different day than the rep asked for
+    // (e.g. that date is already full) — defaults to what was requested.
+    let approvedDate = request.requested_date;
+    if (req.body.approved_date != null) {
+      if (typeof req.body.approved_date !== 'string' || Number.isNaN(Date.parse(req.body.approved_date))) {
+        return res.status(400).json({ error: 'Invalid approved_date' });
+      }
+      if (req.body.approved_date < todayDateString()) {
+        return res.status(422).json({ error: 'approved_date_in_past' });
+      }
+      approvedDate = req.body.approved_date;
+    }
+
     const nextSeqResult = await pool.query(
       `SELECT COALESCE(MAX(sequence_order), 0) + 1 AS next_seq
        FROM dealer_assignments WHERE employee_id = $1 AND assignment_date = $2::date`,
-      [request.employee_id, request.requested_date]
+      [request.employee_id, approvedDate]
     );
     const nextSeq = nextSeqResult.rows[0].next_seq;
 
@@ -163,14 +176,15 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
        VALUES ($1, $2, $3::date, $4, $5)
        ON CONFLICT (employee_id, dealer_id, assignment_date) DO UPDATE SET updated_at = NOW()
        RETURNING id`,
-      [request.employee_id, request.dealer_id, request.requested_date, nextSeq, req.employee.id]
+      [request.employee_id, request.dealer_id, approvedDate, nextSeq, req.employee.id]
     );
     const assignmentId = assignmentResult.rows[0].id;
 
     const updated = await pool.query(
-      `UPDATE dealer_followup_requests SET status = 'approved', resolved_by = $1, resolved_at = NOW()
-       WHERE id = $2 RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
-      [req.employee.id, id]
+      `UPDATE dealer_followup_requests
+       SET status = 'approved', approved_date = $1, resolved_by = $2, resolved_at = NOW()
+       WHERE id = $3 RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
+      [approvedDate, req.employee.id, id]
     );
 
     return res.json({ request: updated.rows[0], assignment_id: assignmentId });

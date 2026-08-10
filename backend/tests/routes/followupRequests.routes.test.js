@@ -136,6 +136,41 @@ describe('PATCH /api/x/:id/approve', () => {
     expect(res.body.request.status).toBe('approved');
     expect(pool.query.mock.calls[2][1]).toEqual([REP.id, 5, FUTURE_DATE, 3, MANAGER.id]);
   });
+
+  const OVERRIDE_DATE = '2099-02-02';
+
+  test('a manager-supplied approved_date is used for the assignment instead of the rep\'s requested_date', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] })
+      .mockResolvedValueOnce({ rows: [{ next_seq: 1 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 555 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved', approved_date: OVERRIDE_DATE }] });
+
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).patch('/api/x/20/approve').send({ approved_date: OVERRIDE_DATE });
+
+    expect(res.status).toBe(200);
+    expect(res.body.request.approved_date).toBe(OVERRIDE_DATE);
+    // next-sequence lookup and the assignment insert both use the override date.
+    expect(pool.query.mock.calls[1][1]).toEqual([REP.id, OVERRIDE_DATE]);
+    expect(pool.query.mock.calls[2][1]).toEqual([REP.id, 5, OVERRIDE_DATE, 1, MANAGER.id]);
+    expect(pool.query.mock.calls[3][1]).toEqual([OVERRIDE_DATE, MANAGER.id, 20]);
+  });
+
+  test('400 when approved_date is not a valid date', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).patch('/api/x/20/approve').send({ approved_date: 'not-a-date' });
+    expect(res.status).toBe(400);
+  });
+
+  test('422 when approved_date is in the past', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).patch('/api/x/20/approve').send({ approved_date: '2020-01-01' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('approved_date_in_past');
+  });
 });
 
 describe('PATCH /api/x/:id/reject', () => {

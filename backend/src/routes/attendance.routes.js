@@ -11,6 +11,7 @@ const pool    = require('../db/pool');
 const { logDayLogin, logDayLogout } = require('../utils/activityLog');
 const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
+const { notifyUnvisitedAssignments } = require('../utils/dealerAssignments');
 
 const router = express.Router();
 
@@ -155,6 +156,10 @@ router.post('/logout', async (req, res) => {
     );
 
     logDayLogout(req.employee.username, durationMins, result.rows[0].total_distance_km);
+    // Non-blocking: if the rep is ending the day with any assigned dealer
+    // still not visited, let the manager know. Never affects the logout
+    // response either way.
+    notifyUnvisitedAssignments({ employeeId }).catch(() => {});
     const body = {
       attendance: result.rows[0],
       summary: {

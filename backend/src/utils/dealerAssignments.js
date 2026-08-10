@@ -6,6 +6,7 @@
 const logger = require('./logger');
 const pool = require('../db/pool');
 const { businessDateExpr } = require('./businessDay');
+const { createManagerNotification } = require('./managerNotifications');
 
 /**
  * Marks today's dealer_assignments row (if one exists) for this
@@ -52,4 +53,51 @@ async function markAssignmentVisited({ employeeId, dealerId }) {
   }
 }
 
-module.exports = { markAssignmentVisited };
+/**
+ * End-of-day check, called as a side effect of the existing Day Logout
+ * (see attendance.routes.js) — if the rep is ending the day with any
+ * assigned dealer still not completed/cancelled, notifies managers with the
+ * full list. Without this, an unvisited dealer was invisible to the
+ * manager unless the rep proactively used "Request follow-up" (opt-in, per
+ * dealer) — a rep who simply ran out of time and closed the app left no
+ * trace at all. Same defensive style as markAssignmentVisited: wrapped in
+ * try/catch, logs on failure, NEVER throws — Day Logout must succeed
+ * regardless of whether this check or the notification write fails.
+ * @param {object} opts
+ * @param {number} opts.employeeId
+ */
+async function notifyUnvisitedAssignments({ employeeId }) {
+  try {
+    const result = await pool.query(
+      `SELECT d.name AS dealer_name
+       FROM dealer_assignments da
+       JOIN dealers d ON d.id = da.dealer_id
+       WHERE da.employee_id = $1
+         AND da.assignment_date = ${businessDateExpr('NOW()')}
+         AND da.status NOT IN ('completed', 'cancelled')
+       ORDER BY da.sequence_order ASC`,
+      [employeeId]
+    );
+    if (result.rows.length === 0) return;
+
+    const employeeResult = await pool.query('SELECT username FROM employees WHERE id = $1', [employeeId]);
+    const username = employeeResult.rows[0]?.username || `Employee #${employeeId}`;
+    const dealerNames = result.rows.map((r) => r.dealer_name);
+
+    const body = dealerNames.length === 1
+      ? `${username} ended the day without visiting ${dealerNames[0]}.`
+      : `${username} ended the day without visiting ${dealerNames.length} assigned dealers: ${dealerNames.join(', ')}.`;
+
+    await createManagerNotification({
+      type: 'unvisited_assignments',
+      title: 'Assigned dealer(s) not visited today',
+      body,
+      severity: 'warning',
+      employeeId,
+    });
+  } catch (err) {
+    logger.error('Failed to notify unvisited assignments', { error: err.message, employeeId });
+  }
+}
+
+module.exports = { markAssignmentVisited, notifyUnvisitedAssignments };

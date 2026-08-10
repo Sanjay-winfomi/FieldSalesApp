@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, Check, X } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X } from 'lucide-react';
 import { apiClient } from '../api';
 import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -7,14 +7,15 @@ import { colors, typography, spacing } from '../theme';
 // Maps a notification's `type` to an icon + StatusBadge tone — mirrors the
 // severities createManagerNotification() assigns server-side.
 const TYPE_META = {
-  left_dealer:         { icon: MapPin,        tone: 'warning' },
-  still_outside:       { icon: MapPin,        tone: 'danger' },
-  returned:            { icon: CheckCircle2,  tone: 'success' },
-  login_exception:     { icon: LogIn,         tone: 'warning' },
-  logout_exception:    { icon: LogOut,        tone: 'warning' },
-  needs_verification:  { icon: ShieldAlert,   tone: 'warning' },
-  sync_failure:        { icon: WifiOff,       tone: 'danger' },
-  followup_request:    { icon: CalendarClock, tone: 'info' },
+  left_dealer:          { icon: MapPin,        tone: 'warning' },
+  still_outside:        { icon: MapPin,        tone: 'danger' },
+  returned:             { icon: CheckCircle2,  tone: 'success' },
+  login_exception:      { icon: LogIn,         tone: 'warning' },
+  logout_exception:     { icon: LogOut,        tone: 'warning' },
+  needs_verification:   { icon: ShieldAlert,   tone: 'warning' },
+  sync_failure:         { icon: WifiOff,       tone: 'danger' },
+  followup_request:     { icon: CalendarClock, tone: 'info' },
+  unvisited_assignments: { icon: CalendarX,    tone: 'warning' },
 };
 
 const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
@@ -40,6 +41,10 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // rest of the list.
   const [resolvingIds, setResolvingIds] = useState({});
   const [resolveErrors, setResolveErrors] = useState({});
+  // Keyed by followup_request_id — the date a manager has edited the
+  // approval to, if they've touched the input. Falls back to whatever the
+  // rep originally requested (followup_requested_date) until then.
+  const [approvalDates, setApprovalDates] = useState({});
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -61,14 +66,22 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // Approve/reject a follow-up request directly from its notification card.
   // Updates just that row's followup_status locally on success rather than
   // refetching the whole list, so the rest of the feed doesn't jump/reload.
-  const resolveFollowupRequest = async (requestId, action) => {
+  const resolveFollowupRequest = async (requestId, action, approvedDate) => {
     setResolvingIds((prev) => ({ ...prev, [requestId]: true }));
     setResolveErrors((prev) => ({ ...prev, [requestId]: '' }));
     try {
-      await apiClient.patch(`/followup-requests/${requestId}/${action}`);
+      if (action === 'approve' && approvedDate) {
+        await apiClient.patch(`/followup-requests/${requestId}/${action}`, { approved_date: approvedDate });
+      } else {
+        await apiClient.patch(`/followup-requests/${requestId}/${action}`);
+      }
       setNotifications((prev) => prev.map((n) => (
         n.followup_request_id === requestId
-          ? { ...n, followup_status: action === 'approve' ? 'approved' : 'rejected' }
+          ? {
+            ...n,
+            followup_status: action === 'approve' ? 'approved' : 'rejected',
+            followup_approved_date: action === 'approve' ? approvedDate : n.followup_approved_date,
+          }
           : n
       )));
     } catch (err) {
@@ -129,12 +142,27 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                     {n.followup_request_id && (
                       n.followup_status === 'pending' ? (
                         <div style={styles.followupActions}>
+                          <label style={styles.followupDateLabel}>
+                            Visit date
+                            <input
+                              type="date"
+                              className="ft-input"
+                              style={styles.followupDateInput}
+                              value={approvalDates[n.followup_request_id] ?? n.followup_requested_date ?? ''}
+                              onChange={(e) => setApprovalDates((prev) => ({ ...prev, [n.followup_request_id]: e.target.value }))}
+                              aria-label="Approval date"
+                            />
+                          </label>
                           <Button
                             variant="success"
                             style={styles.followupBtn}
                             icon={<Check size={14} />}
                             loading={!!resolvingIds[n.followup_request_id]}
-                            onClick={() => resolveFollowupRequest(n.followup_request_id, 'approve')}
+                            onClick={() => resolveFollowupRequest(
+                              n.followup_request_id,
+                              'approve',
+                              approvalDates[n.followup_request_id] ?? n.followup_requested_date
+                            )}
                           >
                             Approve
                           </Button>
@@ -152,11 +180,14 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                           )}
                         </div>
                       ) : (
-                        <div style={{ marginTop: spacing.sm }}>
+                        <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', gap: spacing.sm }}>
                           <StatusBadge
                             label={FOLLOWUP_STATUS_LABEL[n.followup_status] || n.followup_status}
                             tone={n.followup_status === 'approved' ? 'success' : 'danger'}
                           />
+                          {n.followup_status === 'approved' && n.followup_approved_date && (
+                            <span style={styles.followupApprovedDate}>for {n.followup_approved_date}</span>
+                          )}
                         </div>
                       )
                     )}
@@ -186,4 +217,7 @@ const styles = {
   followupActions: { display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' },
   followupBtn: { height: 32, padding: '0 12px', fontSize: 12 },
   followupError: { ...typography.caption, color: colors.danger },
+  followupDateLabel: { display: 'flex', flexDirection: 'column', gap: 2, ...typography.caption, color: colors.textSecondary, fontWeight: 600 },
+  followupDateInput: { height: 32, padding: '0 8px', fontSize: 12, width: 140 },
+  followupApprovedDate: { ...typography.caption, color: colors.textMuted },
 };

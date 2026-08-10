@@ -19,6 +19,8 @@ const FOLLOWUP_NOTIFICATION = {
   created_at: '2026-08-10T05:00:00Z',
   followup_request_id: 10,
   followup_status: 'pending',
+  followup_requested_date: '2099-01-01',
+  followup_approved_date: null,
 };
 
 describe('NotificationsPage', () => {
@@ -35,17 +37,37 @@ describe('NotificationsPage', () => {
     expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
   });
 
-  test('approving calls the backend and swaps the buttons for an Approved badge', async () => {
+  test('approving defaults to the rep\'s requested date and swaps the buttons for an Approved badge', async () => {
     apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
-    apiClient.patch.mockResolvedValue({ data: { request: { id: 10, status: 'approved' } } });
+    apiClient.patch.mockResolvedValue({ data: { request: { id: 10, status: 'approved', approved_date: '2099-01-01' } } });
     render(<NotificationsPage />);
 
     const approveBtn = await screen.findByRole('button', { name: /approve/i });
     fireEvent.click(approveBtn);
 
-    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledWith('/followup-requests/10/approve'));
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledWith(
+      '/followup-requests/10/approve',
+      { approved_date: '2099-01-01' }
+    ));
     expect(await screen.findByText('Approved')).toBeInTheDocument();
+    expect(screen.getByText('for 2099-01-01')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  test('a manager can edit the date before approving, and that date is sent instead', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    apiClient.patch.mockResolvedValue({ data: { request: { id: 10, status: 'approved', approved_date: '2099-02-15' } } });
+    render(<NotificationsPage />);
+
+    const dateInput = await screen.findByLabelText('Approval date');
+    fireEvent.change(dateInput, { target: { value: '2099-02-15' } });
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledWith(
+      '/followup-requests/10/approve',
+      { approved_date: '2099-02-15' }
+    ));
+    expect(await screen.findByText('for 2099-02-15')).toBeInTheDocument();
   });
 
   test('rejecting calls the backend and swaps the buttons for a Rejected badge', async () => {

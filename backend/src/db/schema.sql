@@ -523,10 +523,19 @@ CREATE TABLE IF NOT EXISTS dealer_followup_requests (
   requested_date    DATE NOT NULL,
   reason            TEXT NOT NULL CHECK (char_length(TRIM(reason)) >= 10),
   status            VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  -- The date actually assigned on approval — usually requested_date, but a
+  -- manager can adjust it when approving (e.g. that day already has a full
+  -- plan). NULL until resolved; requested_date itself is never overwritten,
+  -- so what the rep originally asked for stays visible either way.
+  approved_date     DATE,
   resolved_by       INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   resolved_at       TIMESTAMPTZ,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Safety net for a database where this table was already created by an
+-- earlier run of this file, before approved_date existed.
+ALTER TABLE dealer_followup_requests ADD COLUMN IF NOT EXISTS approved_date DATE;
 
 CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_status ON dealer_followup_requests (status);
 CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_employee ON dealer_followup_requests (employee_id);
