@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, History, NotebookPen, BellRing,
+  Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, NotebookPen, BellRing,
 } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
-import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal, AssignedDealerCard } from '../src/components';
+import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
 function formatTime(isoString) {
@@ -45,9 +45,7 @@ export default function HomeScreen({ navigation }) {
     onOpenLocationSettings,
     fetchTodayState,
     onSelectDealer,
-    assignedDealers,
     fetchAssignedDealers,
-    onSelectAssignment,
   } = useAppState();
 
   // Refresh the assigned-dealer list (and any in-progress navigation
@@ -197,19 +195,6 @@ export default function HomeScreen({ navigation }) {
           </FadeSlideIn>
         )}
 
-        {assignedDealers.length > 0 && (
-          <FadeSlideIn delay={100}>
-            <Text style={styles.sectionLabel}>Today's Assigned Dealers</Text>
-            {assignedDealers.map((assignment) => (
-              <AssignedDealerCard
-                key={assignment.id}
-                assignment={assignment}
-                onNavigate={(a) => onSelectAssignment(a, navigation)}
-              />
-            ))}
-          </FadeSlideIn>
-        )}
-
         <FadeSlideIn delay={120}>
           <Text style={styles.sectionLabel}>Today's summary</Text>
           <View style={styles.summaryGrid}>
@@ -218,6 +203,7 @@ export default function HomeScreen({ navigation }) {
               value={visitsCount}
               label="Visits today"
               tone="primary"
+              onPress={() => navigation.navigate('TodaysVisits')}
             />
             <View style={{ width: spacing.md }} />
             <SummaryCard
@@ -225,6 +211,7 @@ export default function HomeScreen({ navigation }) {
               value={distanceTravelled}
               label="Distance travelled"
               tone="warning"
+              onPress={() => navigation.navigate('History')}
             />
           </View>
           <View style={[styles.summaryGrid, { marginTop: spacing.md }]}>
@@ -233,6 +220,7 @@ export default function HomeScreen({ navigation }) {
               value={formatDuration(workingMinutes)}
               label="Working hours"
               tone="success"
+              onPress={() => navigation.navigate('History')}
             />
             <View style={{ width: spacing.md }} />
             <SummaryCard
@@ -240,6 +228,7 @@ export default function HomeScreen({ navigation }) {
               value={uniqueDealersVisited}
               label="Dealers visited"
               tone="primary"
+              onPress={() => navigation.navigate('History')}
             />
           </View>
         </FadeSlideIn>
@@ -268,28 +257,6 @@ export default function HomeScreen({ navigation }) {
 
         <FadeSlideIn delay={200} style={{ marginTop: spacing.xxl }}>
           <Text style={styles.sectionLabel}>Quick actions</Text>
-          <Pressable
-            style={styles.quickAction}
-            onPress={() => navigation.navigate('Dealers')}
-            accessibilityRole="button"
-          >
-            <View style={styles.quickActionIcon}>
-              <Store size={18} color={colors.primary} />
-            </View>
-            <Text style={styles.quickActionText}>Dealer Login</Text>
-            <ChevronRight size={18} color={colors.textMuted} />
-          </Pressable>
-          <Pressable
-            style={styles.quickAction}
-            onPress={() => navigation.navigate('History')}
-            accessibilityRole="button"
-          >
-            <View style={styles.quickActionIcon}>
-              <History size={18} color={colors.primary} />
-            </View>
-            <Text style={styles.quickActionText}>View visit history</Text>
-            <ChevronRight size={18} color={colors.textMuted} />
-          </Pressable>
           <Pressable
             style={styles.quickAction}
             onPress={() => navigation.navigate('Notes')}

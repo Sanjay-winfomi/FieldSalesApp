@@ -140,7 +140,7 @@ export default function AssignmentsTab() {
       setSavedDealerIds(rows.map((r) => r.dealer_id));
     } catch (err) {
       if (requestId !== loadRequestIdRef.current) return;
-      setError(err.response?.data?.error || 'Failed to load assignment.');
+      setError(err.response?.data?.error || 'Failed to load visit plan.');
     } finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
     }
@@ -212,9 +212,9 @@ export default function AssignmentsTab() {
         status: r.status,
       })));
       setSavedDealerIds(rows.map((r) => r.dealer_id));
-      setSuccessMessage('Assignment saved.');
+      setSuccessMessage('Visit plan saved.');
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save assignment.');
+      setError(err.response?.data?.error || 'Failed to save visit plan.');
     } finally {
       setSaving(false);
     }
@@ -223,7 +223,7 @@ export default function AssignmentsTab() {
   return (
     <div>
       <SectionHeader
-        title="Dealer Assignments"
+        title="Dealer Visit Plan"
         subtitle="Plan a representative's ordered dealer visit sequence for a day — the order set here is never auto-reordered."
         action={
           <Button icon={<Route size={15} />} onClick={handleSave} loading={saving} disabled={!selectedRepId || !isDirty} fullWidthMobile>
@@ -243,12 +243,12 @@ export default function AssignmentsTab() {
           value={date}
           onChange={(e) => setDate(e.target.value)}
           style={{ maxWidth: 200 }}
-          aria-label="Assignment date"
+          aria-label="Visit plan date"
         />
       </div>
 
       {!selectedRepId ? (
-        <EmptyState title="Select a representative" subtitle="Choose a rep and date above to view or build their dealer assignment." />
+        <EmptyState title="Select a representative" subtitle="Choose a rep and date above to view or build their dealer visit plan." />
       ) : (
         <div style={styles.splitGrid}>
           <div className="ft-card" style={styles.panel}>

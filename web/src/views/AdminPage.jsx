@@ -8,7 +8,7 @@ import { colors, spacing } from '../theme';
 const TABS = [
   { key: 'employees', label: 'Employees', icon: Users },
   { key: 'dealers', label: 'Dealers', icon: Store },
-  { key: 'assignments', label: 'Assignments', icon: Route },
+  { key: 'assignments', label: 'Visit Plan', icon: Route },
 ];
 
 export default function AdminPage({ currentEmployeeId }) {

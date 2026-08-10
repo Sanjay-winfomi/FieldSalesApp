@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { colors, typography, radius, spacing } from '../../theme';
 
 const TONES = {
@@ -10,12 +10,19 @@ const TONES = {
 
 /**
  * A single stat tile (e.g. "12 visits", "8.4 km") — used in a row on the
- * Home dashboard summary section.
+ * Home dashboard summary section. Optionally pressable (e.g. "Visits today"
+ * drills into the day's assigned-dealer list), same onPress-makes-it-a-
+ * Pressable pattern as StatusCard.
  */
-export default function SummaryCard({ icon, value, label, tone = 'primary' }) {
+export default function SummaryCard({ icon, value, label, tone = 'primary', onPress }) {
   const t = TONES[tone] || TONES.primary;
+  const Wrapper = onPress ? Pressable : View;
   return (
-    <View style={[styles.card, { backgroundColor: t.bg, borderColor: t.border }]}>
+    <Wrapper
+      style={[styles.card, { backgroundColor: t.bg, borderColor: t.border }]}
+      onPress={onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+    >
       {icon}
       <Text style={[typography.sectionTitle, { color: t.text, marginTop: spacing.xs, fontSize: 20 }]} numberOfLines={1}>
         {value}
@@ -23,7 +30,7 @@ export default function SummaryCard({ icon, value, label, tone = 'primary' }) {
       <Text style={[typography.caption, styles.label]} numberOfLines={1}>
         {label}
       </Text>
-    </View>
+    </Wrapper>
   );
 }
 
