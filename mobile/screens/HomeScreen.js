@@ -211,7 +211,7 @@ export default function HomeScreen({ navigation }) {
               value={distanceTravelled}
               label="Distance travelled"
               tone="warning"
-              onPress={() => navigation.navigate('History')}
+              onPress={() => navigation.navigate('DistanceHistory')}
             />
           </View>
           <View style={[styles.summaryGrid, { marginTop: spacing.md }]}>
@@ -220,7 +220,7 @@ export default function HomeScreen({ navigation }) {
               value={formatDuration(workingMinutes)}
               label="Working hours"
               tone="success"
-              onPress={() => navigation.navigate('History')}
+              onPress={() => navigation.navigate('WorkingHours')}
             />
             <View style={{ width: spacing.md }} />
             <SummaryCard

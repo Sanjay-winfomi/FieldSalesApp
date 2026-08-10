@@ -30,6 +30,8 @@ import DayLogoutScreen from './screens/DayLogoutScreen';
 import DealerNavigationScreen from './screens/DealerNavigationScreen';
 import TodaysVisitsScreen from './screens/TodaysVisitsScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import DistanceHistoryScreen from './screens/DistanceHistoryScreen';
+import WorkingHoursScreen from './screens/WorkingHoursScreen';
 import NotesScreen from './screens/NotesScreen';
 import NoteEditorScreen from './screens/NoteEditorScreen';
 import RemindersScreen from './screens/RemindersScreen';
@@ -561,6 +563,8 @@ export default function App() {
 
               <Stack.Screen name="TodaysVisits" component={TodaysVisitsScreen} />
               <Stack.Screen name="History" component={HistoryScreen} />
+              <Stack.Screen name="DistanceHistory" component={DistanceHistoryScreen} />
+              <Stack.Screen name="WorkingHours" component={WorkingHoursScreen} />
 
               <Stack.Screen name="Notes" component={NotesScreen} />
               <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />

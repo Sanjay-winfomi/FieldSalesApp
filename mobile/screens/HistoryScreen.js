@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Clock, CheckCircle2, History as HistoryIcon, Store, TrendingUp, Timer } from 'lucide-react-native';
-import { api } from '../src/services/api';
+import { fetchActivityData, groupActivityByDay, formatDuration } from '../src/utils/activityHistory';
 import { AppHeader, SearchBar, EmptyState, LoadingCard, FadeSlideIn, Card } from '../src/components';
 import { colors, typography, spacing, radius } from '../src/theme';
 
@@ -17,36 +16,16 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function formatDateHeading(iso) {
-  const d = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  const sameDay = (a, b) => a.toDateString() === b.toDateString();
-  if (sameDay(d, today)) return 'Today';
-  if (sameDay(d, yesterday)) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-}
-
-function formatDuration(minutes) {
-  if (!minutes || minutes < 1) return '0h 0m';
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  return `${h}h ${m}m`;
-}
-
 /**
- * Day-wise activity history — reached from Home's "Dealers visited",
- * "Distance travelled", and "Working hours" tiles (all three land here,
- * since a single day-grouped timeline already covers all three metrics
- * together) rather than a bottom tab. Combines two backend lists:
- * GET /api/attendance (one row per day: total_distance_km,
- * total_duration_minutes, login/logout time) for the day-level totals, and
- * GET /api/visits (one row per dealer visit) for the per-visit timeline —
- * grouped and matched by calendar date.
+ * Day-wise activity history, emphasizing dealers visited — reached from
+ * Home's "Dealers visited" tile. "Distance travelled" and "Working hours"
+ * have their own dedicated screens (DistanceHistoryScreen,
+ * WorkingHoursScreen) built on the same shared fetch/grouping
+ * (src/utils/activityHistory.js), since a manager or rep drilling into
+ * distance specifically doesn't want to wade through visit search/filters
+ * meant for finding a particular dealer visit.
  */
 export default function HistoryScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [attendanceDays, setAttendanceDays] = useState([]);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,12 +36,9 @@ export default function HistoryScreen({ navigation }) {
 
   const fetchHistory = useCallback(async () => {
     try {
-      const [attendanceRes, visitsRes] = await Promise.all([
-        api.get('/attendance'),
-        api.get('/visits'),
-      ]);
-      setAttendanceDays(attendanceRes.data.attendance || []);
-      setVisits(visitsRes.data.visits || []);
+      const { attendanceDays: days, visits: v } = await fetchActivityData();
+      setAttendanceDays(days);
+      setVisits(v);
       setError('');
     } catch (err) {
       console.error('Failed to fetch history:', err);
@@ -85,62 +61,22 @@ export default function HistoryScreen({ navigation }) {
   };
 
   const sections = useMemo(() => {
-    const filteredVisits = visits.filter((v) => {
-      if (statusFilter === 'completed' && !v.logout_time) return false;
-      if (statusFilter === 'in_progress' && v.logout_time) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (!(v.dealer_name || '').toLowerCase().includes(q)) return false;
-      }
-      return true;
-    });
-
-    // Keyed by calendar date so an attendance day and its visits line up
-    // even though they come from two separate endpoints.
-    const byDate = new Map();
-
-    const dayKey = (iso) => (iso ? new Date(iso).toDateString() : 'Unknown');
-
-    attendanceDays.forEach((a) => {
-      const key = dayKey(a.login_time);
-      byDate.set(key, {
-        heading: formatDateHeading(a.login_time),
-        attendance: a,
-        allVisits: [],
-        filteredVisits: [],
-      });
-    });
-
-    // Every visit that day, regardless of the search/status filter — used
-    // for the "N dealers visited" count, which should reflect what
-    // actually happened that day, not what the current filter shows.
-    visits.forEach((v) => {
-      const key = dayKey(v.login_time);
-      if (!byDate.has(key)) {
-        byDate.set(key, { heading: formatDateHeading(v.login_time), attendance: null, allVisits: [], filteredVisits: [] });
-      }
-      byDate.get(key).allVisits.push(v);
-    });
-
-    filteredVisits.forEach((v) => {
-      const key = dayKey(v.login_time);
-      byDate.get(key)?.filteredVisits.push(v);
-    });
-
-    return Array.from(byDate.entries())
-      .sort(([a], [b]) => new Date(b) - new Date(a))
-      .map(([, section]) => {
-        const dealersVisitedCount = new Set(section.allVisits.map((v) => v.dealer_id)).size;
-        // Falls back to summing visit-to-visit distance when there's no
-        // attendance row for the day (shouldn't normally happen, but a visit
-        // record without a matching attendance row is still worth showing).
-        const distanceKm = section.attendance
-          ? parseFloat(section.attendance.total_distance_km || 0)
-          : section.allVisits.reduce((sum, v) => sum + parseFloat(v.distance_from_previous_km || 0), 0);
-        const durationMinutes = section.attendance?.total_duration_minutes || 0;
-
-        return { ...section, dealersVisitedCount, distanceKm, durationMinutes };
-      });
+    const daySections = groupActivityByDay(attendanceDays, visits);
+    return daySections.map((section) => ({
+      ...section,
+      // "N dealers visited" always reflects the whole day, but the
+      // timeline below is filtered — searching for a dealer or filtering
+      // by status narrows what's listed without changing that count.
+      filteredVisits: section.visits.filter((v) => {
+        if (statusFilter === 'completed' && !v.logout_time) return false;
+        if (statusFilter === 'in_progress' && v.logout_time) return false;
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          if (!(v.dealer_name || '').toLowerCase().includes(q)) return false;
+        }
+        return true;
+      }),
+    }));
   }, [attendanceDays, visits, searchQuery, statusFilter]);
 
   return (
