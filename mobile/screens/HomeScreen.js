@@ -42,6 +42,7 @@ export default function HomeScreen({ navigation }) {
     pendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
+    backgroundLocationDenied,
     onOpenLocationSettings,
     fetchTodayState,
     onSelectDealer,
@@ -108,6 +109,22 @@ export default function HomeScreen({ navigation }) {
                     <Text style={styles.warningBannerLink}>Open Settings to re-enable</Text>
                   </Pressable>
                 )}
+              </View>
+            </View>
+          </FadeSlideIn>
+        )}
+
+        {!locationPermissionDenied && backgroundLocationDenied && (
+          <FadeSlideIn>
+            <View style={styles.warningBanner}>
+              <AlertTriangle size={16} color={colors.dangerDark} style={styles.bannerIcon} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.warningBannerText}>
+                  Background location is off — you won't get a "You've arrived" alert for assigned dealers unless the app is open.
+                </Text>
+                <Pressable onPress={onOpenLocationSettings} accessibilityRole="button">
+                  <Text style={styles.warningBannerLink}>Open Settings to allow "All the time"</Text>
+                </Pressable>
               </View>
             </View>
           </FadeSlideIn>

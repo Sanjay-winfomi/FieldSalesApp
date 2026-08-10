@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission } from './src/services/location';
@@ -11,8 +12,9 @@ import { api, setAuthInvalidatedHandler } from './src/services/api';
 import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, setConflictHandler } from './src/services/syncManager';
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
 import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
+import { startAssignedDealersGeofence, stopAssignedDealersGeofence } from './src/services/assignedDealerGeofence';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
-import { configureGeofenceNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
+import { configureGeofenceNotificationChannel, configureArrivalNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
 import { AppStateContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
@@ -89,6 +91,7 @@ export default function App() {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
   const [locationPermissionCanAskAgain, setLocationPermissionCanAskAgain] = useState(true);
+  const [backgroundLocationDenied, setBackgroundLocationDenied] = useState(false);
   const navigationRef = useNavigationContainerRef();
   // fetchTodayState is triggered from several independent, possibly-overlapping
   // sources (pull-to-refresh, sync-conflict reconciliation, post-logout
@@ -112,6 +115,46 @@ export default function App() {
   useEffect(() => {
     configureNotificationHandler();
     configureGeofenceNotificationChannel();
+    configureArrivalNotificationChannel();
+  }, []);
+
+  // Tapping a "You've arrived at X — tap to log in" notification (sent by
+  // assignedDealerGeofence.js's background task, possibly while the app was
+  // fully closed) should jump straight into the existing, unmodified
+  // Check-In flow — the same handoff DealerNavigationScreen's own
+  // foreground arrival detection already uses, just triggered from a
+  // notification tap instead of an in-app button. The listener itself is
+  // only ever attached once (mount), so it goes through a ref rather than
+  // closing directly over handleSelectDealer — that closure would otherwise
+  // keep referencing whatever dayStatus/visits were at mount time forever,
+  // silently misrouting a tap that lands after the rep's day/visit state
+  // has since changed.
+  const handleSelectDealerRef = useRef(null);
+  useEffect(() => {
+    const handleArrivalTap = (response) => {
+      const dataPayload = response?.notification?.request?.content?.data;
+      if (dataPayload?.type !== 'assignment_arrival') return;
+      const dealer = {
+        id: dataPayload.dealerId,
+        name: dataPayload.dealerName,
+        address: dataPayload.dealerAddress,
+        latitude: dataPayload.dealerLat,
+        longitude: dataPayload.dealerLng,
+        radius_meters: dataPayload.radiusMeters,
+      };
+      handleSelectDealerRef.current?.(dealer, true, navigationRef.current);
+    };
+
+    // Covers the app already running (foreground/background) when tapped...
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleArrivalTap);
+    // ...and a cold start where tapping the notification is what launched
+    // the app in the first place, so there's no live listener yet to catch it.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) handleArrivalTap(response);
+    });
+
+    return () => subscription.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-sync any queued offline actions whenever a session is active, and
@@ -150,6 +193,29 @@ export default function App() {
     if (!employee) return;
     fetchAssignedDealers();
   }, [employee]);
+
+  // Proactive arrival detection for TODAY's assigned dealers — not just
+  // whichever one visit happens to be open. Registers a background geofence
+  // per pending assignment (see assignedDealerGeofence.js) so the OS itself
+  // notifies the rep on arrival even if DealerNavigationScreen was never
+  // opened, or the app is backgrounded/closed. Re-registers whenever the
+  // pending list changes (a check-in drops a dealer off it, a fresh fetch
+  // adds/removes one).
+  useEffect(() => {
+    if (!employee) return;
+    const pending = assignedDealers.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+
+    if (pending.length === 0) {
+      stopAssignedDealersGeofence();
+      setBackgroundLocationDenied(false);
+      return;
+    }
+
+    requestBackgroundLocationPermission().then((granted) => {
+      setBackgroundLocationDenied(!granted);
+      if (granted) startAssignedDealersGeofence(pending);
+    });
+  }, [employee, assignedDealers]);
 
   // Random Location Verification: while there's an open dealer visit, ping
   // the backend with the rep's location every 10 minutes while the app is
@@ -252,7 +318,9 @@ export default function App() {
       setVisits([]);
       setPendingSyncCount(0);
       setSelectedDealer(null);
+      setAssignedDealers([]);
       clearQueue();
+      stopAssignedDealersGeofence();
       navigationRef.current?.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
     });
     return () => setAuthInvalidatedHandler(null);
@@ -339,6 +407,12 @@ export default function App() {
     }
   };
 
+  // Keeps handleSelectDealerRef (used by the arrival-notification-tap
+  // listener above) pointed at the current closure every render.
+  useEffect(() => {
+    handleSelectDealerRef.current = handleSelectDealer;
+  });
+
   // A tap on "Navigate" from Home's "Today's Assigned Dealers" card — opens
   // the in-app route preview for that assignment. Distinct from
   // handleSelectDealer's directory-tap flow above (which it hands off into
@@ -369,6 +443,9 @@ export default function App() {
       // next person who logs in on this device would have it flushed under
       // their own account instead.
       await clearQueue();
+      // Otherwise the next person to log in on this device would keep
+      // getting arrival notifications for the previous rep's assignments.
+      await stopAssignedDealersGeofence();
 
       await SecureStore.deleteItemAsync('accessToken');
       await SecureStore.deleteItemAsync('refreshToken');
@@ -378,6 +455,7 @@ export default function App() {
       setVisits([]);
       setPendingSyncCount(0);
       setSelectedDealer(null);
+      setAssignedDealers([]);
       // Logout is dispatched from a screen nested inside MainTabs (the tab
       // navigator), which has no meaningful "replace" of its own — reach the
       // parent root Stack explicitly so the whole app resets to Login.
@@ -429,6 +507,7 @@ export default function App() {
     pendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
+    backgroundLocationDenied,
     onOpenLocationSettings: openLocationSettings,
     fetchTodayState,
     onSelectDealer: handleSelectDealer,
