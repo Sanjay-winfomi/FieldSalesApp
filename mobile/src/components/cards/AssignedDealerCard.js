@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { MapPin, Navigation, Clock } from 'lucide-react-native';
+import { MapPin, Navigation, Clock, CalendarClock } from 'lucide-react-native';
 import Card from './Card';
 import { colors, typography, spacing, radius } from '../../theme';
 
@@ -26,8 +26,12 @@ function formatEta(isoString) {
  * number, dealer name/address, current navigation status, distance/ETA once
  * computed, and a Navigate action. The order number is exactly whatever
  * sequence_order the manager saved; this component never reorders anything.
+ *
+ * onRequestFollowup is optional — when provided, shows a "Request
+ * follow-up" link (e.g. the dealer couldn't be visited today, or asked to
+ * be seen again on a specific future day) that opens FollowupRequestModal.
  */
-export default function AssignedDealerCard({ assignment, onNavigate }) {
+export default function AssignedDealerCard({ assignment, onNavigate, onRequestFollowup }) {
   const tone = STATUS_TONES[assignment.status] || STATUS_TONES.pending;
   const isDone = assignment.status === 'completed' || assignment.status === 'cancelled';
   const distanceKm = assignment.distance_meters != null ? assignment.distance_meters / 1000 : null;
@@ -80,6 +84,18 @@ export default function AssignedDealerCard({ assignment, onNavigate }) {
           </Pressable>
         )}
       </View>
+
+      {!!onRequestFollowup && (
+        <Pressable
+          style={styles.followupLink}
+          onPress={() => onRequestFollowup(assignment)}
+          accessibilityRole="button"
+          accessibilityLabel={`Request follow-up for ${assignment.dealer_name}`}
+        >
+          <CalendarClock size={13} color={colors.primary} />
+          <Text style={styles.followupLinkText}>Request follow-up</Text>
+        </Pressable>
+      )}
     </Card>
   );
 }
@@ -122,4 +138,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  followupLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  followupLinkText: { fontSize: 12, fontWeight: '600', color: colors.primary },
 });

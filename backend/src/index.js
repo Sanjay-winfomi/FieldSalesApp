@@ -46,6 +46,7 @@ const notificationsRouter = require('./routes/notifications.routes');
 const syncFailuresRouter = require('./routes/syncFailures.routes');
 const assignmentsRouter  = require('./routes/assignments.routes');
 const navigationRouter   = require('./routes/navigation.routes');
+const followupRequestsRouter = require('./routes/followupRequests.routes');
 
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
@@ -205,6 +206,7 @@ app.use('/api/sync-failures', requireAuth, syncFailuresRouter);
 // individual route level (manager-only assignment editing, rep-only "today").
 app.use('/api/assignments', requireAuth, assignmentsRouter);
 app.use('/api/navigation',  requireAuth, navigationRouter);
+app.use('/api/followup-requests', requireAuth, followupRequestsRouter);
 
 // Exposes the actual configured login tolerance radius so the UI never
 // has to hardcode a value that could drift from what .env really says.

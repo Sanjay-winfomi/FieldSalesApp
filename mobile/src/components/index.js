@@ -22,5 +22,6 @@ export { SkeletonBlock, SkeletonCard } from './loaders/Skeleton';
 export { default as EmptyState } from './EmptyState';
 export { default as FadeSlideIn } from './FadeSlideIn';
 export { default as DealerPickerModal } from './DealerPickerModal';
+export { default as FollowupRequestModal } from './FollowupRequestModal';
 export { default as SyncQueueModal } from './SyncQueueModal';
 export { default as ThemedAlertHost } from './ThemedAlertHost';

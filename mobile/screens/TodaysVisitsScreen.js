@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, ScrollView, RefreshControl } from 'react-native';
 import { MapPin } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
-import { AppHeader, EmptyState, FadeSlideIn, AssignedDealerCard } from '../src/components';
+import { AppHeader, EmptyState, FadeSlideIn, AssignedDealerCard, FollowupRequestModal } from '../src/components';
 import { colors, spacing } from '../src/theme';
 
 /**
@@ -14,6 +14,7 @@ import { colors, spacing } from '../src/theme';
  */
 export default function TodaysVisitsScreen({ navigation }) {
   const { assignedDealers, fetchAssignedDealers, onSelectAssignment } = useAppState();
+  const [followupAssignment, setFollowupAssignment] = useState(null);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', fetchAssignedDealers);
@@ -42,11 +43,19 @@ export default function TodaysVisitsScreen({ navigation }) {
                 key={assignment.id}
                 assignment={assignment}
                 onNavigate={(a) => onSelectAssignment(a, navigation)}
+                onRequestFollowup={setFollowupAssignment}
               />
             ))}
           </FadeSlideIn>
         )}
       </ScrollView>
+
+      <FollowupRequestModal
+        visible={!!followupAssignment}
+        assignment={followupAssignment}
+        onClose={() => setFollowupAssignment(null)}
+        onSubmitted={() => setFollowupAssignment(null)}
+      />
     </View>
   );
 }

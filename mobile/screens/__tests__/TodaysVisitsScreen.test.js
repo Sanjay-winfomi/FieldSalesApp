@@ -48,6 +48,19 @@ describe('TodaysVisitsScreen', () => {
     expect(value.onSelectAssignment).toHaveBeenCalledWith(ASSIGNMENT_A, navigation);
   });
 
+  test('tapping "Request follow-up" opens the modal for that assignment', async () => {
+    const { findByLabelText, findByText, queryByText } = await renderScreen({ assignedDealers: [ASSIGNMENT_A] });
+
+    // Modal-only content ("Send request" submit button) isn't present
+    // until a card's follow-up link is tapped.
+    expect(queryByText('Send request')).toBeNull();
+
+    fireEvent.press(await findByLabelText('Request follow-up for Dealer A'));
+
+    expect(await findByText('Send request')).toBeTruthy();
+    expect(await findByText('Follow-up date')).toBeTruthy();
+  });
+
   test('refreshes the assigned-dealer list when the screen gains focus', async () => {
     const fetchAssignedDealers = jest.fn();
     let focusHandler;

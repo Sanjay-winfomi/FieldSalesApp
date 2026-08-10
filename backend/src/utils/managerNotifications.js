@@ -20,13 +20,15 @@ const pool = require('../db/pool');
  * @param {number} [opts.employeeId] - the rep the notification is about
  * @param {number} [opts.dealerId]
  * @param {number} [opts.visitId]
+ * @param {number} [opts.followupRequestId] - lets the notification feed
+ *   render Approve/Reject actions inline (see dealer_followup_requests)
  */
-async function createManagerNotification({ type, title, body, severity = 'info', employeeId = null, dealerId = null, visitId = null }) {
+async function createManagerNotification({ type, title, body, severity = 'info', employeeId = null, dealerId = null, visitId = null, followupRequestId = null }) {
   try {
     await pool.query(
-      `INSERT INTO manager_notifications (type, title, body, severity, employee_id, dealer_id, visit_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [type, title, body, severity, employeeId, dealerId, visitId]
+      `INSERT INTO manager_notifications (type, title, body, severity, employee_id, dealer_id, visit_id, followup_request_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [type, title, body, severity, employeeId, dealerId, visitId, followupRequestId]
     );
   } catch (err) {
     // A notification failing to write should never take down the request

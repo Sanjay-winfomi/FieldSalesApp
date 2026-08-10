@@ -500,3 +500,39 @@ CREATE TABLE IF NOT EXISTS dealer_navigations (
 
 CREATE INDEX IF NOT EXISTS idx_dealer_navigations_employee_started ON dealer_navigations (employee_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_dealer_navigations_assignment ON dealer_navigations (assignment_id);
+
+-- ============================================================
+-- 15. dealer_followup_requests
+-- ============================================================
+-- A rep's ask for a dealer to be (re-)assigned on a future date — e.g. an
+-- assigned dealer that couldn't be visited today, or one that was visited
+-- but asked to be seen again on a specific day. Sits in a manager's
+-- notification feed with Approve/Reject actions (see
+-- manager_notifications.followup_request_id below); approving one creates
+-- the actual dealer_assignments row for the date the rep asked for — this
+-- table is just the request/approval record, never the assignment itself.
+CREATE TABLE IF NOT EXISTS dealer_followup_requests (
+  id                SERIAL PRIMARY KEY,
+  employee_id       INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  dealer_id         INTEGER NOT NULL REFERENCES dealers(id) ON DELETE CASCADE,
+  -- The assignment (if any) this follow-up relates to — e.g. "couldn't
+  -- visit this one today". SET NULL rather than CASCADE: the original
+  -- assignment being edited/removed later shouldn't retroactively delete a
+  -- request that's already pending/resolved.
+  assignment_id     INTEGER REFERENCES dealer_assignments(id) ON DELETE SET NULL,
+  requested_date    DATE NOT NULL,
+  reason            TEXT NOT NULL CHECK (char_length(TRIM(reason)) >= 10),
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  resolved_by       INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  resolved_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_status ON dealer_followup_requests (status);
+CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_employee ON dealer_followup_requests (employee_id);
+
+-- Lets a manager_notifications row for a followup_request carry Approve/
+-- Reject actions directly in the feed instead of just being informational.
+-- SET NULL, not CASCADE: deleting/resolving the request shouldn't delete
+-- the notification history of it having happened.
+ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS followup_request_id INTEGER REFERENCES dealer_followup_requests(id) ON DELETE SET NULL;

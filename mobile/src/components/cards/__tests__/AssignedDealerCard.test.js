@@ -43,4 +43,18 @@ describe('AssignedDealerCard', () => {
     const { queryByLabelText } = await render(<AssignedDealerCard assignment={assignment} onNavigate={() => {}} />);
     expect(queryByLabelText('Navigate to Dealer A')).toBeNull();
   });
+
+  test('does not render a "Request follow-up" link when onRequestFollowup is not provided', async () => {
+    const { queryByLabelText } = await render(<AssignedDealerCard assignment={BASE_ASSIGNMENT} onNavigate={() => {}} />);
+    expect(queryByLabelText('Request follow-up for Dealer A')).toBeNull();
+  });
+
+  test('calls onRequestFollowup with the assignment when the follow-up link is pressed', async () => {
+    const onRequestFollowup = jest.fn();
+    const { getByLabelText } = await render(
+      <AssignedDealerCard assignment={BASE_ASSIGNMENT} onNavigate={() => {}} onRequestFollowup={onRequestFollowup} />
+    );
+    fireEvent.press(getByLabelText('Request follow-up for Dealer A'));
+    expect(onRequestFollowup).toHaveBeenCalledWith(BASE_ASSIGNMENT);
+  });
 });

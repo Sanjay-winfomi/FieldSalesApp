@@ -20,10 +20,12 @@ router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT n.id, n.type, n.title, n.body, n.severity, n.employee_id, e.name AS employee_name,
-              n.dealer_id, d.name AS dealer_name, n.visit_id, n.read_at, n.created_at
+              n.dealer_id, d.name AS dealer_name, n.visit_id, n.read_at, n.created_at,
+              n.followup_request_id, r.status AS followup_status, r.requested_date AS followup_requested_date
        FROM manager_notifications n
        LEFT JOIN employees e ON e.id = n.employee_id
        LEFT JOIN dealers d    ON d.id = n.dealer_id
+       LEFT JOIN dealer_followup_requests r ON r.id = n.followup_request_id
        ORDER BY n.created_at DESC
        LIMIT 200`
     );

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, Check, X } from 'lucide-react';
 import { apiClient } from '../api';
-import { SectionHeader, Card, EmptyState, StatusBadge, IconButton } from '../components';
+import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button } from '../components';
 import { colors, typography, spacing } from '../theme';
 
 // Maps a notification's `type` to an icon + StatusBadge tone — mirrors the
@@ -14,7 +14,10 @@ const TYPE_META = {
   logout_exception:    { icon: LogOut,        tone: 'warning' },
   needs_verification:  { icon: ShieldAlert,   tone: 'warning' },
   sync_failure:        { icon: WifiOff,       tone: 'danger' },
+  followup_request:    { icon: CalendarClock, tone: 'info' },
 };
+
+const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
 
 function formatTime(value) {
   return new Date(value).toLocaleString('en-IN', {
@@ -32,6 +35,11 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Keyed by followup_request_id — tracks in-flight approve/reject calls
+  // and any per-row error, so one request's failure doesn't disturb the
+  // rest of the list.
+  const [resolvingIds, setResolvingIds] = useState({});
+  const [resolveErrors, setResolveErrors] = useState({});
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -49,6 +57,29 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  // Approve/reject a follow-up request directly from its notification card.
+  // Updates just that row's followup_status locally on success rather than
+  // refetching the whole list, so the rest of the feed doesn't jump/reload.
+  const resolveFollowupRequest = async (requestId, action) => {
+    setResolvingIds((prev) => ({ ...prev, [requestId]: true }));
+    setResolveErrors((prev) => ({ ...prev, [requestId]: '' }));
+    try {
+      await apiClient.patch(`/followup-requests/${requestId}/${action}`);
+      setNotifications((prev) => prev.map((n) => (
+        n.followup_request_id === requestId
+          ? { ...n, followup_status: action === 'approve' ? 'approved' : 'rejected' }
+          : n
+      )));
+    } catch (err) {
+      setResolveErrors((prev) => ({
+        ...prev,
+        [requestId]: err.response?.data?.error || `Failed to ${action} this request.`,
+      }));
+    } finally {
+      setResolvingIds((prev) => ({ ...prev, [requestId]: false }));
+    }
+  };
 
   // Mark everything read on open, then reflect the now-zero count back up to
   // the header's bell badge immediately rather than waiting on its own poll.
@@ -94,6 +125,41 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                       {n.dealer_name && <span>· {n.dealer_name}</span>}
                       <span>· {formatTime(n.created_at)}</span>
                     </div>
+
+                    {n.followup_request_id && (
+                      n.followup_status === 'pending' ? (
+                        <div style={styles.followupActions}>
+                          <Button
+                            variant="success"
+                            style={styles.followupBtn}
+                            icon={<Check size={14} />}
+                            loading={!!resolvingIds[n.followup_request_id]}
+                            onClick={() => resolveFollowupRequest(n.followup_request_id, 'approve')}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="danger"
+                            style={styles.followupBtn}
+                            icon={<X size={14} />}
+                            loading={!!resolvingIds[n.followup_request_id]}
+                            onClick={() => resolveFollowupRequest(n.followup_request_id, 'reject')}
+                          >
+                            Reject
+                          </Button>
+                          {resolveErrors[n.followup_request_id] && (
+                            <span style={styles.followupError}>{resolveErrors[n.followup_request_id]}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: spacing.sm }}>
+                          <StatusBadge
+                            label={FOLLOWUP_STATUS_LABEL[n.followup_status] || n.followup_status}
+                            tone={n.followup_status === 'approved' ? 'success' : 'danger'}
+                          />
+                        </div>
+                      )
+                    )}
                   </div>
                 </div>
               );
@@ -117,4 +183,7 @@ const styles = {
   rowTitle: { ...typography.bodyMedium, color: colors.text },
   rowText: { ...typography.body, color: colors.textSecondary, marginTop: 4 },
   rowMeta: { display: 'flex', gap: 4, ...typography.caption, color: colors.textMuted, marginTop: 6 },
+  followupActions: { display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' },
+  followupBtn: { height: 32, padding: '0 12px', fontSize: 12 },
+  followupError: { ...typography.caption, color: colors.danger },
 };
