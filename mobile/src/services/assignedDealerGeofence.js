@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendArrivalNotification } from './geofenceNotifications';
+import { haversineMeters } from './location';
 
 /**
  * assignedDealerGeofence.js — proactive background arrival detection for
@@ -21,9 +22,34 @@ import { sendArrivalNotification } from './geofenceNotifications';
  * all) — it can't read live component state, so the assignment details it
  * needs to build the notification are cached to AsyncStorage by
  * startAssignedDealersGeofence() and read back here on each Enter event.
+ *
+ * The OS geofence alone is NOT enough on its own: Android/iOS deliberately
+ * throttle background region-monitoring to save battery, so "arrived" can
+ * take anywhere from ~30s to several minutes to actually fire — worse if
+ * the rep tapped "Start Navigation" and left our app for the native Maps
+ * app the whole drive, since our own foreground poll (DealerNavigationScreen)
+ * stops running the moment the app backgrounds. checkArrivalNow() is the
+ * fallback for that gap: App.js calls it the instant the app returns to the
+ * foreground, doing one immediate GPS check against every still-pending
+ * dealer instead of passively waiting on the OS to get around to it.
  */
 export const ASSIGNED_DEALER_ARRIVAL_TASK = 'assigned-dealer-arrival-task';
 const CACHE_KEY = '@assigned_dealers_geofence_cache';
+// Assignment regionIds already notified — shared between the background
+// task and checkArrivalNow() so whichever fires first "wins" and the rep
+// isn't notified twice for the same arrival.
+const NOTIFIED_KEY = '@assigned_dealers_geofence_notified';
+
+async function getNotifiedIds() {
+  const json = await AsyncStorage.getItem(NOTIFIED_KEY);
+  return new Set(json ? JSON.parse(json) : []);
+}
+
+async function markNotified(regionId) {
+  const ids = await getNotifiedIds();
+  ids.add(regionId);
+  await AsyncStorage.setItem(NOTIFIED_KEY, JSON.stringify([...ids]));
+}
 
 TaskManager.defineTask(ASSIGNED_DEALER_ARRIVAL_TASK, async ({ data, error }) => {
   if (error) {
@@ -48,7 +74,11 @@ TaskManager.defineTask(ASSIGNED_DEALER_ARRIVAL_TASK, async ({ data, error }) => 
     // region right as it's being torn down.
     if (!assignment) return;
 
+    const notified = await getNotifiedIds();
+    if (notified.has(regionId)) return; // checkArrivalNow() already caught this one
+
     await sendArrivalNotification(assignment);
+    await markNotified(regionId);
   } catch (err) {
     console.warn('Assigned dealer arrival task failed:', err.message);
   }
@@ -87,6 +117,15 @@ export async function startAssignedDealersGeofence(assignments) {
   }));
   await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cache));
 
+  // Prune the notified-set down to only regions still pending — keeps it
+  // from growing forever, while still remembering "already notified" for
+  // anything that's still on today's list (so a re-registration triggered
+  // by an unrelated status change elsewhere doesn't cause a duplicate ping).
+  const currentRegionIds = new Set(cache.map((a) => a.regionId));
+  const notified = await getNotifiedIds();
+  const prunedNotified = [...notified].filter((id) => currentRegionIds.has(id));
+  await AsyncStorage.setItem(NOTIFIED_KEY, JSON.stringify(prunedNotified));
+
   await Location.startGeofencingAsync(
     ASSIGNED_DEALER_ARRIVAL_TASK,
     cache.map((a) => ({
@@ -107,4 +146,38 @@ export async function stopAssignedDealersGeofence() {
     await Location.stopGeofencingAsync(ASSIGNED_DEALER_ARRIVAL_TASK);
   }
   await AsyncStorage.removeItem(CACHE_KEY);
+  await AsyncStorage.removeItem(NOTIFIED_KEY);
+}
+
+/**
+ * Immediate foreground fallback for the OS geofence's inherent detection
+ * lag — checks the given GPS reading against every still-pending assigned
+ * dealer right now, instead of waiting for a background Enter event that
+ * may not fire for minutes. Intended to be called from App.js's AppState
+ * 'active' listener (app just came back to the foreground), which is
+ * exactly the moment a rep who drove via the native Maps app would next be
+ * looking at our app again.
+ * @param {number} lat
+ * @param {number} lng
+ */
+export async function checkArrivalNow(lat, lng) {
+  if (lat == null || lng == null) return;
+  try {
+    const cacheJson = await AsyncStorage.getItem(CACHE_KEY);
+    const cached = cacheJson ? JSON.parse(cacheJson) : [];
+    if (cached.length === 0) return;
+
+    const notified = await getNotifiedIds();
+
+    for (const assignment of cached) {
+      if (notified.has(assignment.regionId)) continue;
+      const distanceMeters = haversineMeters(lat, lng, assignment.dealerLat, assignment.dealerLng);
+      if (distanceMeters <= assignment.radiusMeters) {
+        await sendArrivalNotification(assignment);
+        await markNotified(assignment.regionId);
+      }
+    }
+  } catch (err) {
+    console.warn('Foreground arrival check failed:', err.message);
+  }
 }

@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission } from './src/services/location';
+import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission, getCurrentLocation } from './src/services/location';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import { api, setAuthInvalidatedHandler } from './src/services/api';
 import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, setConflictHandler } from './src/services/syncManager';
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
 import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
-import { startAssignedDealersGeofence, stopAssignedDealersGeofence } from './src/services/assignedDealerGeofence';
+import { startAssignedDealersGeofence, stopAssignedDealersGeofence, checkArrivalNow } from './src/services/assignedDealerGeofence';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
 import { configureGeofenceNotificationChannel, configureArrivalNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
 import { AppStateContext } from './src/context/AppStateContext';
@@ -302,6 +302,33 @@ export default function App() {
     checkPermission();
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') checkPermission();
+    });
+    return () => subscription.remove();
+  }, [employee]);
+
+  // The background geofence (assignedDealerGeofence.js) alone isn't fast
+  // enough to rely on — Android/iOS deliberately throttle background region
+  // monitoring, so "arrived" can take minutes to fire, and if the rep
+  // tapped "Start Navigation" and spent the whole drive in the native Maps
+  // app, our own foreground poll (DealerNavigationScreen) never ran at all
+  // in the meantime. The moment the app comes back to the foreground —
+  // exactly when a rep who just finished driving would be looking at it
+  // again — do one immediate GPS check against every still-pending
+  // assigned dealer instead of passively waiting on the OS.
+  const assignedDealersRef = useRef([]);
+  useEffect(() => {
+    assignedDealersRef.current = assignedDealers;
+  });
+
+  useEffect(() => {
+    if (!employee) return;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      const pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+      if (pending.length === 0) return;
+      getCurrentLocation().then((loc) => {
+        if (loc) checkArrivalNow(loc.lat, loc.lng);
+      });
     });
     return () => subscription.remove();
   }, [employee]);

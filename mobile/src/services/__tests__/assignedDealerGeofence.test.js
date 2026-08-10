@@ -22,6 +22,7 @@ import {
   ASSIGNED_DEALER_ARRIVAL_TASK,
   startAssignedDealersGeofence,
   stopAssignedDealersGeofence,
+  checkArrivalNow,
 } from '../assignedDealerGeofence';
 
 const ASSIGNMENT_A = { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0, dealer_lng: 77.0, radius_meters: 150 };
@@ -129,6 +130,62 @@ describe('assignedDealerGeofence', () => {
       await expect(
         TaskManager.__definedTasks[ASSIGNED_DEALER_ARRIVAL_TASK]({ data: null, error: { message: 'geofencing failed' } })
       ).resolves.toBeUndefined();
+      expect(sendArrivalNotification).not.toHaveBeenCalled();
+    });
+
+    test('does not notify twice if checkArrivalNow already caught this arrival', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      // ~111m from Dealer A (11.0, 77.0) — inside its 150m radius.
+      await checkArrivalNow(11.0010, 77.0);
+      expect(sendArrivalNotification).toHaveBeenCalledTimes(1);
+
+      // The OS geofence fires afterwards for the same region — already
+      // notified, so this must not fire a second alert.
+      await fireGeofenceEvent(Location.GeofencingEventType.Enter, 'assignment-1');
+      expect(sendArrivalNotification).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('checkArrivalNow', () => {
+    test('notifies for a pending dealer whose radius contains the given position', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      await checkArrivalNow(11.0010, 77.0); // ~111m away, inside the 150m radius
+
+      expect(sendArrivalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ regionId: 'assignment-1', dealerName: 'Dealer A' })
+      );
+    });
+
+    test('does not notify for a dealer still outside its radius', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      await checkArrivalNow(11.01, 77.0); // ~1.1km away, well outside 150m
+
+      expect(sendArrivalNotification).not.toHaveBeenCalled();
+    });
+
+    test('does not notify again for a dealer already notified', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      await checkArrivalNow(11.0010, 77.0);
+      await checkArrivalNow(11.0010, 77.0);
+
+      expect(sendArrivalNotification).toHaveBeenCalledTimes(1);
+    });
+
+    test('does nothing when nothing is currently being watched', async () => {
+      await checkArrivalNow(11.0, 77.0);
+      expect(sendArrivalNotification).not.toHaveBeenCalled();
+    });
+
+    test('never throws on a missing/invalid position', async () => {
+      await expect(checkArrivalNow(null, null)).resolves.toBeUndefined();
       expect(sendArrivalNotification).not.toHaveBeenCalled();
     });
   });
