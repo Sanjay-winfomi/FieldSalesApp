@@ -4,7 +4,7 @@ import { apiClient } from '../api';
 import {
   MetricCard, EmployeeCard, EmptyState, SkeletonCard, SearchBar,
 } from '../components';
-import { colors, typography, spacing } from '../theme';
+import { colors, typography, spacing, radius, shadows } from '../theme';
 
 function formatTimestamp(iso) {
   if (!iso) return '—';
@@ -63,8 +63,9 @@ export default function DashboardPage({
 
   return (
     <div style={styles.page} className="ft-page">
-      <div style={styles.headerRow}>
-        <div>
+      <div style={styles.hero}>
+        <div style={styles.heroGlow} aria-hidden="true" />
+        <div style={styles.heroContent}>
           <h1 style={styles.title}>Field team — today</h1>
           <p style={styles.subtitle}>
             {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -141,12 +142,19 @@ export default function DashboardPage({
 
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 1920, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
-  headerRow: {
-    marginBottom: spacing.xl, display: 'flex', alignItems: 'flex-start',
-    justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.md,
+  hero: {
+    position: 'relative', overflow: 'hidden', background: colors.gradientHero,
+    borderRadius: radius.card, padding: `${spacing.xxl}px ${spacing.xxl}px`,
+    marginBottom: spacing.xl, boxShadow: shadows.raised,
   },
-  title: { ...typography.dashboardTitle, color: colors.text },
-  subtitle: { ...typography.body, color: colors.textSecondary, marginTop: 4 },
+  heroGlow: {
+    position: 'absolute', top: -60, right: -40, width: 220, height: 220, borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 70%)',
+    pointerEvents: 'none',
+  },
+  heroContent: { position: 'relative' },
+  title: { ...typography.dashboardTitle, color: '#FFFFFF' },
+  subtitle: { ...typography.body, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
   metricsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',

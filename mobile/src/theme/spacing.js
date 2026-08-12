@@ -17,7 +17,7 @@ export const spacing = {
 };
 
 export const radius = {
-  card: 18,
+  card: 20,
   button: 14,
   input: 14,
   pill: 999,

@@ -6,7 +6,7 @@ import { LogOut, Info, Clock, ChevronRight } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { showAlert } from '../src/services/themedAlert';
 import { ProfileCard, ProfileRow, SecondaryButton, Card, FadeSlideIn } from '../src/components';
-import { colors, typography, spacing } from '../src/theme';
+import { colors, typography, spacing, shadows, radius } from '../src/theme';
 import appJson from '../app.json';
 
 function formatDuration(minutes) {
@@ -39,6 +39,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerGlow} pointerEvents="none" />
         <Text style={styles.title}>Profile</Text>
       </View>
 
@@ -97,13 +98,20 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.primaryDeep,
     paddingHorizontal: spacing.screenHorizontal,
-    paddingBottom: spacing.lg,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
+    paddingBottom: spacing.xl,
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    overflow: 'hidden',
+    position: 'relative',
+    ...shadows.raised,
   },
-  title: { ...typography.sectionTitle, color: colors.text, fontSize: 22 },
+  headerGlow: {
+    position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  title: { ...typography.sectionTitle, color: '#FFFFFF', fontSize: 22 },
   content: { padding: spacing.screenHorizontal, paddingBottom: spacing.xxxl },
 
   statusCard: { marginBottom: spacing.cardGap },

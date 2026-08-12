@@ -7,8 +7,13 @@
 
 :root {
   --color-primary: #1B7F5A;
+  --color-primary-mid: #22946A;
   --color-primary-dark: #146449;
+  --color-primary-deep: #0F4E39;
   --color-primary-light: #EEF8F2;
+  --color-primary-tint: #DCF2E7;
+  --gradient-primary: linear-gradient(135deg, #22946A 0%, #146449 100%);
+  --gradient-hero: linear-gradient(135deg, #1B7F5A 0%, #0F4E39 100%);
 
   --color-success: #22C55E;
   --color-success-light: #F0FDF4;
@@ -34,16 +39,18 @@
   --color-hover: #F4FBF7;
   --color-overlay: rgba(15, 23, 42, 0.5);
 
-  --radius-card: 16px;
-  --radius-button: 10px;
-  --radius-input: 10px;
+  --radius-card: 20px;
+  --radius-button: 12px;
+  --radius-input: 12px;
   --radius-pill: 999px;
 
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.06);
-  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-dropdown: 0 10px 32px rgba(0, 0, 0, 0.1);
-  --shadow-button: 0 2px 6px rgba(27, 127, 90, 0.25);
+  --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 10px 26px rgba(15, 23, 42, 0.10);
+  --shadow-raised: 0 14px 34px rgba(15, 23, 42, 0.14);
+  --shadow-dropdown: 0 16px 40px rgba(15, 23, 42, 0.16);
+  --shadow-button: 0 6px 16px rgba(20, 100, 73, 0.32);
+  --shadow-button-hover: 0 8px 22px rgba(20, 100, 73, 0.38);
+  --shadow-focus-ring: 0 0 0 3px rgba(27, 127, 90, 0.18);
 
   --transition-fast: 120ms ease;
   --transition-base: 180ms ease;
@@ -153,8 +160,8 @@ select:focus-visible,
 .ft-btn:active:not(:disabled) { transform: scale(0.98); }
 .ft-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 
-.ft-btn-primary { background-color: var(--color-primary); color: #FFFFFF; box-shadow: var(--shadow-button); }
-.ft-btn-primary:hover:not(:disabled) { background-color: var(--color-primary-dark); }
+.ft-btn-primary { background: var(--gradient-primary); color: #FFFFFF; box-shadow: var(--shadow-button); }
+.ft-btn-primary:hover:not(:disabled) { box-shadow: var(--shadow-button-hover); transform: translateY(-1px); }
 
 .ft-btn-secondary { background-color: #FFFFFF; color: var(--color-primary); border-color: var(--color-primary); }
 .ft-btn-secondary:hover:not(:disabled) { background-color: var(--color-primary-light); }
@@ -195,7 +202,7 @@ select:focus-visible,
 .ft-card-selectable { cursor: pointer; }
 .ft-card-selected {
   border-color: var(--color-primary) !important;
-  box-shadow: 0 0 0 3px var(--color-primary-light), var(--shadow-card);
+  box-shadow: var(--shadow-focus-ring), var(--shadow-card);
 }
 
 .ft-input {
@@ -211,7 +218,7 @@ select:focus-visible,
 }
 .ft-input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-light);
+  box-shadow: var(--shadow-focus-ring);
   outline: none;
 }
 .ft-input-error {
@@ -279,7 +286,7 @@ select:focus-visible,
   right: 12px;
   bottom: -1px;
   height: 2px;
-  background-color: var(--color-primary);
+  background: var(--gradient-primary);
   border-radius: 2px;
 }
 

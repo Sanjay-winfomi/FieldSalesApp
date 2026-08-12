@@ -1,8 +1,11 @@
 // Centralized color palette — do not hardcode hex values in screens/components.
 export const colors = {
   primary: '#1B7F5A',
+  primaryMid: '#22946A',
   primaryDark: '#146449',
+  primaryDeep: '#0F4E39',
   primaryLight: '#EEF8F2',
+  primaryTint: '#DCF2E7',
 
   secondary: '#5C6B63',
 

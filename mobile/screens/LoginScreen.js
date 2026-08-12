@@ -7,7 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import { api } from '../src/services/api';
 import { showAlert } from '../src/services/themedAlert';
 import { PrimaryButton, TextField, FadeSlideIn } from '../src/components';
-import { colors, spacing, typography } from '../src/theme';
+import { colors, spacing, typography, radius } from '../src/theme';
 
 const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 
@@ -63,12 +63,16 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <View style={styles.blobOne} pointerEvents="none" />
+      <View style={styles.blobTwo} pointerEvents="none" />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + spacing.xxl, paddingBottom: insets.bottom + spacing.xxl }]}
         keyboardShouldPersistTaps="handled"
       >
         <FadeSlideIn>
-          <Image source={winfomiLogo} style={styles.logoImg} resizeMode="contain" />
+          <View style={styles.logoPlate}>
+            <Image source={winfomiLogo} style={styles.logoImg} resizeMode="contain" />
+          </View>
 
           <View style={styles.card}>
             <Text style={styles.heading}>Log in</Text>
@@ -142,30 +146,42 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.primaryDeep,
+  },
+  blobOne: {
+    position: 'absolute', top: -60, left: -50, width: 220, height: 220, borderRadius: 110,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  blobTwo: {
+    position: 'absolute', bottom: -80, right: -60, width: 260, height: 260, borderRadius: 130,
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: spacing.screenHorizontal,
   },
+  logoPlate: {
+    alignSelf: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.card,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    marginBottom: spacing.xxl,
+  },
   logoImg: {
     width: 140,
     height: 40,
-    alignSelf: 'center',
-    marginBottom: spacing.xxl,
   },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 18,
+    borderRadius: radius.card,
     padding: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.20,
+    shadowRadius: 24,
+    elevation: 8,
   },
   heading: {
     ...typography.pageTitle,

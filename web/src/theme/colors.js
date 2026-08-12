@@ -1,8 +1,14 @@
 // Centralized color palette — do not hardcode hex values in pages/components.
 export const colors = {
   primary: '#1B7F5A',
+  primaryMid: '#22946A',
   primaryDark: '#146449',
+  primaryDeep: '#0F4E39',
   primaryLight: '#EEF8F2',
+  primaryTint: '#DCF2E7',
+
+  gradientPrimary: 'linear-gradient(135deg, #22946A 0%, #146449 100%)',
+  gradientHero: 'linear-gradient(135deg, #1B7F5A 0%, #0F4E39 100%)',
 
   secondary: '#5C6B63',
 

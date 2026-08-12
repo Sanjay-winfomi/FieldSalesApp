@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Card from './Card';
-import { colors, typography, spacing } from '../../theme';
+import { colors, typography, spacing, radius } from '../../theme';
 
 const TONES = {
   primary: { bg: colors.primaryLight, iconColor: colors.primary },
@@ -23,6 +23,7 @@ export default function MetricCard({ icon, value, label, subtitle, tone = 'prima
 
   return (
     <Card hoverable onClick={onClick} style={{ ...styles.card, ...(onClick ? { cursor: 'pointer' } : {}) }}>
+      <div style={{ ...styles.glow, background: t.iconColor }} aria-hidden="true" />
       <div style={styles.row}>
         <div style={{ ...styles.iconWrap, backgroundColor: t.bg }}>
           {icon && React.cloneElement(icon, { size: 20, color: t.iconColor })}
@@ -42,13 +43,17 @@ export default function MetricCard({ icon, value, label, subtitle, tone = 'prima
 }
 
 const styles = {
-  card: { minWidth: 0 },
-  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  card: { minWidth: 0, position: 'relative', overflow: 'hidden' },
+  glow: {
+    position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%',
+    opacity: 0.10, pointerEvents: 'none',
+  },
+  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.lg },
   iconWrap: {
-    width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: 44, height: 44, borderRadius: radius.pill, display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   trend: { display: 'flex', alignItems: 'center', gap: 2, fontSize: 12, fontWeight: 700 },
-  value: { ...typography.sectionTitle, fontSize: 26, color: colors.text, lineHeight: 1.2 },
+  value: { ...typography.sectionTitle, fontSize: 28, color: colors.text, lineHeight: 1.15, letterSpacing: '-0.02em' },
   label: { ...typography.body, color: colors.textSecondary, marginTop: 4 },
   subtitle: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
 };

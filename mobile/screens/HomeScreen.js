@@ -6,7 +6,7 @@ import {
 } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal } from '../src/components';
-import { colors, typography, spacing } from '../src/theme';
+import { colors, typography, spacing, shadows, radius } from '../src/theme';
 
 function formatTime(isoString) {
   if (!isoString) return '';
@@ -82,6 +82,7 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerGlow} pointerEvents="none" />
         <Text style={styles.greeting}>{getGreeting()}</Text>
         <Text style={styles.userName} numberOfLines={1}>{employee?.name || 'User'}</Text>
         <View style={styles.metaRow}>
@@ -310,24 +311,31 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.primaryDeep,
     paddingHorizontal: spacing.screenHorizontal,
-    paddingBottom: spacing.lg,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
+    paddingBottom: spacing.xl,
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    overflow: 'hidden',
+    position: 'relative',
+    ...shadows.raised,
   },
-  greeting: { ...typography.caption, color: colors.textSecondary },
-  userName: { ...typography.sectionTitle, color: colors.text, marginTop: 2, fontSize: 22 },
+  headerGlow: {
+    position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  greeting: { ...typography.caption, color: 'rgba(255,255,255,0.75)' },
+  userName: { ...typography.sectionTitle, color: '#FFFFFF', marginTop: 2, fontSize: 22 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
   rolePill: {
-    backgroundColor: colors.primaryLight,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
     marginRight: spacing.sm,
   },
-  rolePillText: { fontSize: 11, fontWeight: '700', color: colors.primary },
-  dateText: { ...typography.caption, color: colors.textMuted },
+  rolePillText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+  dateText: { ...typography.caption, color: 'rgba(255,255,255,0.75)' },
 
   scrollContent: {
     padding: spacing.screenHorizontal,

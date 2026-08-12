@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Text, Animated, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
-import { colors, radius, typography, spacing, durations, pressScale } from '../../theme';
+import { colors, radius, typography, spacing, shadows, durations, pressScale } from '../../theme';
 
 /**
  * The single primary call-to-action button used across the app — full width,
@@ -40,6 +40,7 @@ export default function PrimaryButton({
         style={[
           styles.base,
           { backgroundColor: isInactive ? colors.disabled : bg },
+          isInactive ? null : shadows.buttonPrimary,
         ]}
       >
         {loading ? (

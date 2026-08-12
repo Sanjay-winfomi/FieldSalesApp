@@ -11,12 +11,12 @@ export const spacing = {
 };
 
 export const radius = {
-  card: 16,
-  button: 10,
-  input: 10,
+  card: 20,
+  button: 12,
+  input: 12,
   pill: 999,
-  sm: 6,
-  md: 8,
+  sm: 8,
+  md: 10,
 };
 
 export const breakpoints = {

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft } from 'lucide-react-native';
-import { colors, typography, spacing } from '../../theme';
+import { colors, typography, spacing, shadows } from '../../theme';
 
 /**
  * Consistent app bar for every screen — pads for the real device status bar
@@ -22,6 +22,7 @@ export default function AppHeader({ title, subtitle, onBack, rightAction, transp
           backgroundColor: transparent ? 'transparent' : colors.card,
           borderBottomWidth: transparent ? 0 : StyleSheet.hairlineWidth,
         },
+        transparent ? null : shadows.card,
       ]}
     >
       <View style={styles.row}>

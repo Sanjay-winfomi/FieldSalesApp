@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Lock } from 'lucide-react';
 import { apiClient } from '../api';
 import { Button, TextField } from '../components';
-import { colors, typography, spacing, shadows } from '../theme';
+import { colors, typography, spacing, shadows, radius } from '../theme';
 
 // Served from web/public/winfomi-logo.png — Next.js wraps module-imported
 // images in a StaticImageData object (for next/image), so a plain <img src>
@@ -36,6 +36,8 @@ export default function LoginPage({ onLoginSuccess, onForgotPassword }) {
 
   return (
     <div style={styles.page}>
+      <div style={styles.blobOne} aria-hidden="true" />
+      <div style={styles.blobTwo} aria-hidden="true" />
       <div style={styles.card} className="ft-fade-in">
         <div style={styles.logoWrap}>
           <img src={winfomiLogo} alt="Winfomi" style={styles.logoImg} />
@@ -80,12 +82,20 @@ export default function LoginPage({ onLoginSuccess, onForgotPassword }) {
 
 const styles = {
   page: {
-    display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh',
-    backgroundColor: colors.background, padding: spacing.xl, boxSizing: 'border-box',
+    position: 'relative', overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center',
+    minHeight: '100vh', background: colors.gradientHero, padding: spacing.xl, boxSizing: 'border-box',
+  },
+  blobOne: {
+    position: 'absolute', top: '-15%', left: '-10%', width: 420, height: 420, borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 70%)', pointerEvents: 'none',
+  },
+  blobTwo: {
+    position: 'absolute', bottom: '-20%', right: '-10%', width: 480, height: 480, borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%)', pointerEvents: 'none',
   },
   card: {
-    backgroundColor: colors.card, borderRadius: 18, boxShadow: shadows.raised, width: '100%', maxWidth: 400,
-    padding: '40px 32px', boxSizing: 'border-box', border: `1px solid ${colors.border}`,
+    position: 'relative', backgroundColor: colors.card, borderRadius: radius.card, boxShadow: shadows.dropdown,
+    width: '100%', maxWidth: 400, padding: '40px 32px', boxSizing: 'border-box',
   },
   logoWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: spacing.xl },
   logoImg: { height: 40, width: 'auto' },
