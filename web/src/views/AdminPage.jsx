@@ -11,13 +11,22 @@ const TABS = [
   { key: 'assignments', label: 'Visit Plan', icon: Route },
 ];
 
-export default function AdminPage({ currentEmployeeId }) {
+// Hides the Visit Plan tab for the demo account used in live demos — the
+// Dealer Assignment feature itself is untouched (AssignmentsTab, its route,
+// and every other manager's access all work exactly as before); only this
+// one account's tab list is filtered.
+const HIDE_VISIT_PLAN_FOR_USERNAMES = ['demo.manager'];
+
+export default function AdminPage({ currentEmployeeId, currentUsername }) {
   const [activeTab, setActiveTab] = useState('employees');
+  const visibleTabs = HIDE_VISIT_PLAN_FOR_USERNAMES.includes(currentUsername)
+    ? TABS.filter((t) => t.key !== 'assignments')
+    : TABS;
 
   return (
     <div style={styles.page} className="ft-page">
       <div style={styles.tabRow} className="ft-admin-tabs">
-        {TABS.map((t) => {
+        {visibleTabs.map((t) => {
           const Icon = t.icon;
           const active = activeTab === t.key;
           return (
@@ -37,7 +46,7 @@ export default function AdminPage({ currentEmployeeId }) {
 
       {activeTab === 'employees' && <EmployeesTab currentEmployeeId={currentEmployeeId} />}
       {activeTab === 'dealers' && <DealersTab />}
-      {activeTab === 'assignments' && <AssignmentsTab />}
+      {activeTab === 'assignments' && visibleTabs.some((t) => t.key === 'assignments') && <AssignmentsTab />}
     </div>
   );
 }

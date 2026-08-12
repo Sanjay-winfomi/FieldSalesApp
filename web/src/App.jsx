@@ -161,7 +161,7 @@ export default function App() {
       )}
 
       {activeView === 'reports' && <ReportsPage />}
-      {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} />}
+      {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} currentUsername={manager?.username} />}
       {activeView === 'notifications' && (
         <NotificationsPage onUnreadCountChange={setUnreadNotifications} onBack={() => setActiveView('dashboard')} />
       )}
