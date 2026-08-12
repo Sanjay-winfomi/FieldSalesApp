@@ -232,6 +232,35 @@ describe('AssignmentsTab', () => {
     expect(resolveDivya).toBeUndefined();
   });
 
+  test('shows the straight-line distance between consecutive dealers once both have coordinates', async () => {
+    mockInitialLoad([
+      { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0098, dealer_lng: 76.9558, status: 'pending' },
+      { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+    ]);
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+
+    expect(await screen.findByText(/km from previous stop/)).toBeInTheDocument();
+    expect(screen.getByText(/km total/)).toBeInTheDocument();
+  });
+
+  test('does not show a distance for the first dealer, or when coordinates are missing', async () => {
+    mockInitialLoad([
+      { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: null, dealer_lng: null, status: 'pending' },
+      { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+    ]);
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText('Dealer B');
+
+    // Dealer A has no coordinates, so Dealer B (right after it) can't get a
+    // distance either — neither row nor the panel title show one.
+    expect(screen.queryByText(/km from previous stop/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/km total/)).not.toBeInTheDocument();
+  });
+
   test('shows an error banner when saving fails', async () => {
     mockInitialLoad([{ id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', status: 'pending' }]);
     apiClient.put.mockRejectedValue({ response: { data: { error: 'boom' } } });

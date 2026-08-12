@@ -38,6 +38,22 @@ describe('AssignedDealerCard', () => {
     expect(getByText('Navigating')).toBeTruthy();
   });
 
+  test('shows an estimated (straight-line) distance before Navigate has been tapped', async () => {
+    const { getByText } = await render(
+      <AssignedDealerCard assignment={BASE_ASSIGNMENT} estimatedDistanceKm={3.2} onNavigate={() => {}} />
+    );
+    expect(getByText('~3.2 km')).toBeTruthy();
+  });
+
+  test('prefers the real routed distance over the estimate once both are available', async () => {
+    const assignment = { ...BASE_ASSIGNMENT, status: 'navigating', distance_meters: 4200 };
+    const { getByText, queryByText } = await render(
+      <AssignedDealerCard assignment={assignment} estimatedDistanceKm={3.2} onNavigate={() => {}} />
+    );
+    expect(getByText('4.2 km')).toBeTruthy();
+    expect(queryByText('~3.2 km')).toBeNull();
+  });
+
   test('hides the Navigate button once completed', async () => {
     const assignment = { ...BASE_ASSIGNMENT, status: 'completed' };
     const { queryByLabelText } = await render(<AssignedDealerCard assignment={assignment} onNavigate={() => {}} />);

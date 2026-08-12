@@ -115,7 +115,8 @@ router.put('/', requireRole('manager'), async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT ${ASSIGNMENT_FIELDS}, d.name AS dealer_name, d.address AS dealer_address
+      `SELECT ${ASSIGNMENT_FIELDS}, d.name AS dealer_name, d.address AS dealer_address,
+              d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters
        FROM dealer_assignments da
        JOIN dealers d ON d.id = da.dealer_id
        WHERE da.employee_id = $1 AND da.assignment_date = $2::date

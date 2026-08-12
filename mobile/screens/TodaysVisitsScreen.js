@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, ScrollView, RefreshControl } from 'react-native';
 import { MapPin } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
+import { getCurrentLocation, haversineMeters } from '../src/services/location';
 import { AppHeader, EmptyState, FadeSlideIn, AssignedDealerCard, FollowupRequestModal } from '../src/components';
 import { colors, spacing } from '../src/theme';
 
@@ -15,11 +16,33 @@ import { colors, spacing } from '../src/theme';
 export default function TodaysVisitsScreen({ navigation }) {
   const { assignedDealers, fetchAssignedDealers, onSelectAssignment } = useAppState();
   const [followupAssignment, setFollowupAssignment] = useState(null);
+  // One-shot GPS fix used only to show a rough "how far is each dealer"
+  // estimate before the rep taps Navigate (which computes the real driving
+  // distance via the Google Routes API). Best-effort: if it fails/denies,
+  // cards just fall back to showing no distance, same as they always did.
+  const [coords, setCoords] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', fetchAssignedDealers);
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchAssignedDealers();
+      getCurrentLocation().then(setCoords);
+    });
     return unsubscribe;
   }, [navigation, fetchAssignedDealers]);
+
+  // dealer_id -> straight-line distance in km from the rep's last known
+  // position — only used as a fallback for a dealer whose real (routed)
+  // distance_meters hasn't been computed yet (i.e. Navigate hasn't been
+  // tapped today).
+  const estimatedDistanceKmByDealerId = useMemo(() => {
+    if (!coords) return {};
+    const map = {};
+    for (const a of assignedDealers) {
+      if (a.distance_meters != null || a.dealer_lat == null || a.dealer_lng == null) continue;
+      map[a.dealer_id] = haversineMeters(coords.lat, coords.lng, a.dealer_lat, a.dealer_lng) / 1000;
+    }
+    return map;
+  }, [coords, assignedDealers]);
 
   return (
     <View style={styles.screen}>
@@ -42,6 +65,7 @@ export default function TodaysVisitsScreen({ navigation }) {
               <AssignedDealerCard
                 key={assignment.id}
                 assignment={assignment}
+                estimatedDistanceKm={estimatedDistanceKmByDealerId[assignment.dealer_id] ?? null}
                 onNavigate={(a) => onSelectAssignment(a, navigation)}
                 onRequestFollowup={setFollowupAssignment}
               />

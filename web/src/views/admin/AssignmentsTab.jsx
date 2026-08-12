@@ -6,6 +6,7 @@ import { GripVertical, ChevronUp, ChevronDown, X, Plus, MapPin, Route } from 'lu
 import { apiClient } from '../../api';
 import { SectionHeader, SearchBar, EmptyState, Button, RepSelect, ConfirmationModal } from '../../components';
 import { colors, spacing, typography } from '../../theme';
+import { haversineKm } from '../../utils/geo';
 
 const STATUS_LABELS = {
   pending: 'Pending',
@@ -20,7 +21,7 @@ function todayDateString() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function SortableRow({ item, index, total, onMoveUp, onMoveDown, onRemove }) {
+function SortableRow({ item, index, total, distanceFromPrevKm, onMoveUp, onMoveDown, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.dealer_id });
 
   return (
@@ -50,6 +51,11 @@ function SortableRow({ item, index, total, onMoveUp, onMoveDown, onRemove }) {
       <div style={styles.rowText}>
         <div style={{ fontWeight: 600, color: colors.text, fontSize: 14 }}>{item.dealer_name}</div>
         {!!item.dealer_address && <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{item.dealer_address}</div>}
+        {distanceFromPrevKm != null && (
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+            ↳ {distanceFromPrevKm.toFixed(1)} km from previous stop (straight-line)
+          </div>
+        )}
       </div>
 
       {item.status && item.status !== 'pending' && (
@@ -148,6 +154,8 @@ export default function AssignmentsTab() {
         dealer_id: r.dealer_id,
         dealer_name: r.dealer_name,
         dealer_address: r.dealer_address,
+        dealer_lat: r.dealer_lat,
+        dealer_lng: r.dealer_lng,
         status: r.status,
       })));
       setSavedDealerIds(rows.map((r) => r.dealer_id));
@@ -166,6 +174,28 @@ export default function AssignmentsTab() {
     return current.length !== savedDealerIds.length || current.some((id, i) => id !== savedDealerIds[i]);
   }, [assignedList, savedDealerIds]);
 
+  // Straight-line (haversine) distance from each dealer to the one before
+  // it in the plan — a quick "how spread out is this route" estimate for
+  // the manager while building the plan. Not the real driving distance
+  // (that's the Google Routes API's job, computed per-navigation on the
+  // rep's device) — null for a dealer missing coordinates, or the first
+  // stop (nothing before it to measure from).
+  const distancesFromPrevKm = useMemo(() => {
+    return assignedList.map((item, i) => {
+      if (i === 0) return null;
+      const prev = assignedList[i - 1];
+      if (item.dealer_lat == null || item.dealer_lng == null || prev.dealer_lat == null || prev.dealer_lng == null) {
+        return null;
+      }
+      return haversineKm(prev.dealer_lat, prev.dealer_lng, item.dealer_lat, item.dealer_lng);
+    });
+  }, [assignedList]);
+
+  const totalDistanceKm = useMemo(
+    () => distancesFromPrevKm.reduce((sum, km) => sum + (km ?? 0), 0),
+    [distancesFromPrevKm]
+  );
+
   const availableDealers = useMemo(() => {
     const assignedIds = new Set(assignedList.map((a) => a.dealer_id));
     const q = dealerSearch.trim().toLowerCase();
@@ -177,7 +207,10 @@ export default function AssignmentsTab() {
   }, [allDealers, assignedList, dealerSearch]);
 
   const handleAddDealer = (dealer) => {
-    setAssignedList((prev) => [...prev, { id: null, dealer_id: dealer.id, dealer_name: dealer.name, dealer_address: dealer.address, status: 'pending' }]);
+    setAssignedList((prev) => [...prev, {
+      id: null, dealer_id: dealer.id, dealer_name: dealer.name, dealer_address: dealer.address,
+      dealer_lat: dealer.latitude, dealer_lng: dealer.longitude, status: 'pending',
+    }]);
   };
 
   const requestRemove = (dealerId) => setRemoveConfirmDealerId(dealerId);
@@ -251,6 +284,8 @@ export default function AssignmentsTab() {
         dealer_id: r.dealer_id,
         dealer_name: r.dealer_name,
         dealer_address: r.dealer_address,
+        dealer_lat: r.dealer_lat,
+        dealer_lng: r.dealer_lng,
         status: r.status,
       })));
       setSavedDealerIds(rows.map((r) => r.dealer_id));
@@ -294,7 +329,14 @@ export default function AssignmentsTab() {
       ) : (
         <div style={styles.splitGrid}>
           <div className="ft-card" style={styles.panel}>
-            <h3 style={styles.panelTitle}>Assigned order ({assignedList.length})</h3>
+            <h3 style={styles.panelTitle}>
+              Assigned order ({assignedList.length})
+              {totalDistanceKm > 0 && (
+                <span style={{ fontSize: 12, fontWeight: 500, color: colors.textMuted, marginLeft: 8 }}>
+                  · ~{totalDistanceKm.toFixed(1)} km total (straight-line)
+                </span>
+              )}
+            </h3>
             {loading ? (
               <p style={{ fontSize: 13, color: colors.textMuted }}>Loading...</p>
             ) : assignedList.length === 0 ? (
@@ -313,6 +355,7 @@ export default function AssignmentsTab() {
                         item={item}
                         index={index}
                         total={assignedList.length}
+                        distanceFromPrevKm={distancesFromPrevKm[index]}
                         onMoveUp={handleMoveUp}
                         onMoveDown={handleMoveDown}
                         onRemove={requestRemove}

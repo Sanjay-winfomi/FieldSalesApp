@@ -1,7 +1,13 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { AppStateContext } from '../../src/context/AppStateContext';
+import { getCurrentLocation } from '../../src/services/location';
 import TodaysVisitsScreen from '../TodaysVisitsScreen';
+
+jest.mock('../../src/services/location', () => ({
+  getCurrentLocation: jest.fn(() => Promise.resolve(null)),
+  haversineMeters: jest.requireActual('../../src/services/location').haversineMeters,
+}));
 
 // First render in this file pays a one-time cold-start cost for the
 // icon/SVG transform pipeline, same as DealerNavigationScreen.test.js.
@@ -59,6 +65,30 @@ describe('TodaysVisitsScreen', () => {
 
     expect(await findByText('Send request')).toBeTruthy();
     expect(await findByText('Follow-up date')).toBeTruthy();
+  });
+
+  test('shows an estimated distance once a GPS fix arrives, for a dealer with no routed distance yet', async () => {
+    getCurrentLocation.mockResolvedValueOnce({ lat: 11.0098, lng: 76.9558, accuracyMeters: 10 });
+    const assignmentWithCoords = { ...ASSIGNMENT_A, dealer_lat: 11.0234, dealer_lng: 77.0012 };
+    let focusHandler;
+    const navigation = {
+      goBack: jest.fn(),
+      addListener: jest.fn((event, handler) => {
+        if (event === 'focus') focusHandler = handler;
+        return jest.fn();
+      }),
+    };
+    const { findByText } = await render(
+      <AppStateContext.Provider value={{
+        assignedDealers: [assignmentWithCoords], fetchAssignedDealers: jest.fn(), onSelectAssignment: jest.fn(),
+      }}>
+        <TodaysVisitsScreen navigation={navigation} />
+      </AppStateContext.Provider>
+    );
+
+    focusHandler();
+
+    expect(await findByText(/~5\.\d km/)).toBeTruthy();
   });
 
   test('refreshes the assigned-dealer list when the screen gains focus', async () => {

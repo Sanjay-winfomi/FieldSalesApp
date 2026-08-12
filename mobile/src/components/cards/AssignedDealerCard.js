@@ -30,11 +30,18 @@ function formatEta(isoString) {
  * onRequestFollowup is optional — when provided, shows a "Request
  * follow-up" link (e.g. the dealer couldn't be visited today, or asked to
  * be seen again on a specific future day) that opens FollowupRequestModal.
+ *
+ * estimatedDistanceKm is optional — a straight-line (haversine) fallback
+ * distance from the rep's current position, shown only until the real
+ * routed distance_meters exists (i.e. before Navigate has been tapped for
+ * this dealer today). Once a real route is computed, that always wins.
  */
-export default function AssignedDealerCard({ assignment, onNavigate, onRequestFollowup }) {
+export default function AssignedDealerCard({ assignment, estimatedDistanceKm, onNavigate, onRequestFollowup }) {
   const tone = STATUS_TONES[assignment.status] || STATUS_TONES.pending;
   const isDone = assignment.status === 'completed' || assignment.status === 'cancelled';
-  const distanceKm = assignment.distance_meters != null ? assignment.distance_meters / 1000 : null;
+  const routedDistanceKm = assignment.distance_meters != null ? assignment.distance_meters / 1000 : null;
+  const distanceKm = routedDistanceKm ?? estimatedDistanceKm ?? null;
+  const isEstimate = routedDistanceKm == null && estimatedDistanceKm != null;
   const eta = formatEta(assignment.expected_arrival_time);
 
   return (
@@ -61,7 +68,7 @@ export default function AssignedDealerCard({ assignment, onNavigate, onRequestFo
             {distanceKm != null && (
               <View style={styles.metaItem}>
                 <MapPin size={12} color={colors.textMuted} />
-                <Text style={styles.metaText}>{distanceKm.toFixed(1)} km</Text>
+                <Text style={styles.metaText}>{isEstimate ? '~' : ''}{distanceKm.toFixed(1)} km</Text>
               </View>
             )}
             {eta && (
