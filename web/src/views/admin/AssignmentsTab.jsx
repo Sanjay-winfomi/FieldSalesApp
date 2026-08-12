@@ -21,7 +21,7 @@ function todayDateString() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function SortableRow({ item, index, total, distanceFromPrevKm, onMoveUp, onMoveDown, onRemove }) {
+function SortableRow({ item, index, total, distanceFromPrevKm, drivingDistance, onMoveUp, onMoveDown, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.dealer_id });
 
   return (
@@ -51,9 +51,17 @@ function SortableRow({ item, index, total, distanceFromPrevKm, onMoveUp, onMoveD
       <div style={styles.rowText}>
         <div style={{ fontWeight: 600, color: colors.text, fontSize: 14 }}>{item.dealer_name}</div>
         {!!item.dealer_address && <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{item.dealer_address}</div>}
-        {distanceFromPrevKm != null && (
+        {drivingDistance?.km != null ? (
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-            ↳ {distanceFromPrevKm.toFixed(1)} km from previous stop (straight-line)
+            ↳ {drivingDistance.km.toFixed(1)} km from previous stop (driving, via Google Maps)
+          </div>
+        ) : drivingDistance?.loading ? (
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+            ↳ Getting driving distance…
+          </div>
+        ) : distanceFromPrevKm != null && (
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+            ↳ {distanceFromPrevKm.toFixed(1)} km from previous stop (straight-line{drivingDistance?.error ? ' — driving distance unavailable' : ''})
           </div>
         )}
       </div>
@@ -105,6 +113,14 @@ export default function AssignmentsTab() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [dealerSearch, setDealerSearch] = useState('');
+  // { signature, byDealerId } — byDealerId keys by dealer_id (the row AFTER
+  // the leg, i.e. the one showing "↳ from previous stop") to { km, loading,
+  // error }. signature is the dealer_id order it was computed for
+  // (`assignedList.map(a => a.dealer_id).join(',')`) — rendering only ever
+  // trusts byDealerId when it matches the CURRENT order, so a stale driving
+  // distance from before a reorder/add/remove is automatically ignored
+  // rather than needing to be explicitly cleared on every mutator.
+  const [drivingDistances, setDrivingDistances] = useState({ signature: '', byDealerId: {} });
   // Set to { type: 'rep'|'date', value } when the rep/date selector is
   // changed while there are unsaved edits — loadAssignment's effect would
   // otherwise silently overwrite assignedList with the newly-selected
@@ -196,6 +212,46 @@ export default function AssignmentsTab() {
     [distancesFromPrevKm]
   );
 
+  const currentOrderSignature = useMemo(() => assignedList.map((a) => a.dealer_id).join(','), [assignedList]);
+  const currentDrivingDistances = drivingDistances.signature === currentOrderSignature ? drivingDistances.byDealerId : {};
+
+  // Real Google Maps driving distance for each consecutive leg in the
+  // just-saved order — fetched one leg at a time (not in parallel) so this
+  // doesn't fire a burst of simultaneous Routes API calls for a long plan;
+  // each leg's row shows its own "Getting driving distance…" state
+  // independently while it's still in flight.
+  const fetchDrivingDistances = useCallback(async (rows) => {
+    const signature = rows.map((r) => r.dealer_id).join(',');
+    setDrivingDistances({ signature, byDealerId: {} });
+
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const curr = rows[i];
+      if (prev.dealer_lat == null || prev.dealer_lng == null || curr.dealer_lat == null || curr.dealer_lng == null) {
+        continue;
+      }
+      setDrivingDistances((state) => (
+        state.signature !== signature ? state : { ...state, byDealerId: { ...state.byDealerId, [curr.dealer_id]: { loading: true } } }
+      ));
+      try {
+        const res = await apiClient.post('/navigation/distance-preview', {
+          origin_lat: prev.dealer_lat, origin_lng: prev.dealer_lng,
+          dest_lat: curr.dealer_lat, dest_lng: curr.dealer_lng,
+        });
+        setDrivingDistances((state) => (
+          state.signature !== signature ? state : {
+            ...state,
+            byDealerId: { ...state.byDealerId, [curr.dealer_id]: { km: res.data.distanceMeters / 1000 } },
+          }
+        ));
+      } catch {
+        setDrivingDistances((state) => (
+          state.signature !== signature ? state : { ...state, byDealerId: { ...state.byDealerId, [curr.dealer_id]: { error: true } } }
+        ));
+      }
+    }
+  }, []);
+
   const availableDealers = useMemo(() => {
     const assignedIds = new Set(assignedList.map((a) => a.dealer_id));
     const q = dealerSearch.trim().toLowerCase();
@@ -279,7 +335,7 @@ export default function AssignmentsTab() {
         dealer_ids: assignedList.map((a) => a.dealer_id),
       });
       const rows = res.data.assignments || [];
-      setAssignedList(rows.map((r) => ({
+      const mappedRows = rows.map((r) => ({
         id: r.id,
         dealer_id: r.dealer_id,
         dealer_name: r.dealer_name,
@@ -287,9 +343,14 @@ export default function AssignmentsTab() {
         dealer_lat: r.dealer_lat,
         dealer_lng: r.dealer_lng,
         status: r.status,
-      })));
+      }));
+      setAssignedList(mappedRows);
       setSavedDealerIds(rows.map((r) => r.dealer_id));
       setSuccessMessage('Visit plan saved.');
+      // Best-effort, not awaited — Save's own success/loading state doesn't
+      // depend on Google Maps actually responding; rows just show their
+      // straight-line estimate until each leg's real distance arrives.
+      fetchDrivingDistances(mappedRows);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save visit plan.');
     } finally {
@@ -356,6 +417,7 @@ export default function AssignmentsTab() {
                         index={index}
                         total={assignedList.length}
                         distanceFromPrevKm={distancesFromPrevKm[index]}
+                        drivingDistance={currentDrivingDistances[item.dealer_id]}
                         onMoveUp={handleMoveUp}
                         onMoveDown={handleMoveDown}
                         onRemove={requestRemove}

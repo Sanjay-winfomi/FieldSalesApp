@@ -4,7 +4,7 @@ import { apiClient } from '../../../api';
 import AssignmentsTab from '../AssignmentsTab';
 
 vi.mock('../../../api', () => ({
-  apiClient: { get: vi.fn(), put: vi.fn() },
+  apiClient: { get: vi.fn(), put: vi.fn(), post: vi.fn() },
 }));
 
 const REPS = [{ id: 1, name: 'Arun' }, { id: 2, name: 'Divya' }];
@@ -259,6 +259,67 @@ describe('AssignmentsTab', () => {
     // distance either — neither row nor the panel title show one.
     expect(screen.queryByText(/km from previous stop/)).not.toBeInTheDocument();
     expect(screen.queryByText(/km total/)).not.toBeInTheDocument();
+  });
+
+  test('fetches the real Google Maps driving distance for each leg after Save, replacing the straight-line estimate', async () => {
+    mockInitialLoad([
+      { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0098, dealer_lng: 76.9558, status: 'pending' },
+      { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+    ]);
+    apiClient.put.mockResolvedValue({
+      data: {
+        assignments: [
+          { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0098, dealer_lng: 76.9558, status: 'pending' },
+          { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+        ],
+      },
+    });
+    apiClient.post.mockResolvedValue({ data: { distanceMeters: 6500, durationSeconds: 700, durationInTrafficSeconds: 780 } });
+
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText(/km from previous stop \(straight-line\)/);
+
+    // Save is disabled until the plan is dirty — swap the order once so
+    // there's something to save (the mocked PUT response below always
+    // returns the fixed A-then-B order regardless of what was sent).
+    fireEvent.click(screen.getByLabelText('Move Dealer B up'));
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/navigation/distance-preview', {
+      origin_lat: 11.0098, origin_lng: 76.9558, dest_lat: 11.0234, dest_lng: 77.0012,
+    }));
+    expect(await screen.findByText(/6\.5 km from previous stop \(driving, via Google Maps\)/)).toBeInTheDocument();
+  });
+
+  test('falls back to the straight-line estimate (flagged as unavailable) if the driving-distance call fails', async () => {
+    mockInitialLoad([
+      { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0098, dealer_lng: 76.9558, status: 'pending' },
+      { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+    ]);
+    apiClient.put.mockResolvedValue({
+      data: {
+        assignments: [
+          { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0098, dealer_lng: 76.9558, status: 'pending' },
+          { id: 2, dealer_id: 11, dealer_name: 'Dealer B', dealer_address: 'Addr B', dealer_lat: 11.0234, dealer_lng: 77.0012, status: 'pending' },
+        ],
+      },
+    });
+    apiClient.post.mockRejectedValue(new Error('upstream failed'));
+
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText(/km from previous stop \(straight-line\)/);
+
+    // Save is disabled until the plan is dirty — swap the order once so
+    // there's something to save (the mocked PUT response below always
+    // returns the fixed A-then-B order regardless of what was sent).
+    fireEvent.click(screen.getByLabelText('Move Dealer B up'));
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(await screen.findByText(/straight-line — driving distance unavailable/)).toBeInTheDocument();
   });
 
   test('shows an error banner when saving fails', async () => {

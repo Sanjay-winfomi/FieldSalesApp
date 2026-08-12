@@ -62,6 +62,48 @@ describe('POST /api/x/compute', () => {
   });
 });
 
+describe('POST /api/x/distance-preview', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('400 when coordinates are missing/invalid', async () => {
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/distance-preview').send({ origin_lat: 1, origin_lng: 2 });
+    expect(res.status).toBe(400);
+  });
+
+  test('200 returns distance/duration with no DB writes at all', async () => {
+    computeRoute.mockResolvedValueOnce({
+      distanceMeters: 5200, durationSeconds: 600, durationInTrafficSeconds: 720, encodedPolyline: 'xyz',
+    });
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/distance-preview')
+      .send({ origin_lat: 11, origin_lng: 77, dest_lat: 11.02, dest_lng: 77.01 });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ distanceMeters: 5200, durationSeconds: 600, durationInTrafficSeconds: 720 });
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test('a manager can also call this (unlike /compute, which is rep-only in practice via assignment ownership)', async () => {
+    computeRoute.mockResolvedValueOnce({ distanceMeters: 100, durationSeconds: 60, durationInTrafficSeconds: 60 });
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app)
+      .post('/api/x/distance-preview')
+      .send({ origin_lat: 11, origin_lng: 77, dest_lat: 11.001, dest_lng: 77.001 });
+    expect(res.status).toBe(200);
+  });
+
+  test('502 when the Routes API call fails', async () => {
+    computeRoute.mockRejectedValueOnce(new Error('upstream failed'));
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/distance-preview')
+      .send({ origin_lat: 11, origin_lng: 77, dest_lat: 11.02, dest_lng: 77.01 });
+    expect(res.status).toBe(502);
+  });
+});
+
 describe('PATCH /api/x/:id/status', () => {
   afterEach(() => jest.clearAllMocks());
 

@@ -2,7 +2,17 @@
  * navigation.routes.js — Google Routes API (Compute Routes Pro)-backed
  * "Tap Navigate" flow, plus the resulting navigation lifecycle/history.
  *
- * POST  /api/navigation/compute       — rep: fetch a route to a dealer
+ * POST  /api/navigation/compute          — rep: fetch a route to a dealer,
+ *                                            persists a dealer_navigations row
+ *                                            and advances the assignment's status
+ * POST  /api/navigation/distance-preview — any authenticated employee: a
+ *                                            read-only driving distance/duration
+ *                                            between two points, no DB writes at
+ *                                            all — for showing a real distance
+ *                                            estimate (Visit Plan builder, an
+ *                                            assigned-dealer card) WITHOUT
+ *                                            implying an actual navigation
+ *                                            attempt started
  * PATCH /api/navigation/:id/status    — rep: update the navigation's lifecycle status
  * GET   /api/navigation/history       — manager-only: paginated navigation history
  * GET   /api/navigation/summary/today — rep: today's Daily Travel Summary
@@ -105,6 +115,36 @@ router.post('/compute', async (req, res) => {
   } catch (err) {
     logger.error('POST /api/navigation/compute error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/navigation/distance-preview  { origin_lat, origin_lng, dest_lat, dest_lng }
+// Read-only: a real Google-Maps driving distance/duration between two
+// points, with NOTHING persisted — no dealer_navigations row, no
+// assignment status change. Distinct from /compute (which IS "the rep
+// tapped Navigate" and behaves accordingly) — this is just "show me a real
+// number," usable from a manager's Visit Plan builder (dealer-to-dealer) or
+// a rep's assigned-dealer card (rep's current GPS-to-dealer) without either
+// implying a navigation attempt actually started.
+router.post('/distance-preview', async (req, res) => {
+  const originLat = parseCoord(req.body.origin_lat, -90, 90);
+  const originLng = parseCoord(req.body.origin_lng, -180, 180);
+  const destLat = parseCoord(req.body.dest_lat, -90, 90);
+  const destLng = parseCoord(req.body.dest_lng, -180, 180);
+  if (originLat === null || originLng === null || destLat === null || destLng === null) {
+    return res.status(400).json({ error: 'origin_lat, origin_lng, dest_lat, and dest_lng must be valid numbers' });
+  }
+
+  try {
+    const route = await computeRoute({ originLat, originLng, destLat, destLng });
+    return res.json({
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      durationInTrafficSeconds: route.durationInTrafficSeconds,
+    });
+  } catch (err) {
+    logger.error('POST /api/navigation/distance-preview error', { error: err.message });
+    return res.status(502).json({ error: 'Could not compute a distance right now — please retry.' });
   }
 });
 

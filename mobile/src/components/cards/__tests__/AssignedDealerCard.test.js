@@ -54,6 +54,48 @@ describe('AssignedDealerCard', () => {
     expect(queryByText('~3.2 km')).toBeNull();
   });
 
+  test('shows a "Get accurate distance" link when an estimate exists and onFetchAccurateDistance is provided', async () => {
+    const onFetchAccurateDistance = jest.fn();
+    const { getByLabelText } = await render(
+      <AssignedDealerCard
+        assignment={BASE_ASSIGNMENT}
+        estimatedDistanceKm={3.2}
+        onNavigate={() => {}}
+        onFetchAccurateDistance={onFetchAccurateDistance}
+      />
+    );
+    fireEvent.press(getByLabelText('Get accurate distance to Dealer A'));
+    expect(onFetchAccurateDistance).toHaveBeenCalledWith(BASE_ASSIGNMENT);
+  });
+
+  test('prefers a fetched precise distance over the straight-line estimate, and hides the link once it has one', async () => {
+    const { getByText, queryByLabelText } = await render(
+      <AssignedDealerCard
+        assignment={BASE_ASSIGNMENT}
+        estimatedDistanceKm={3.2}
+        preciseDistanceKm={2.8}
+        onNavigate={() => {}}
+        onFetchAccurateDistance={() => {}}
+      />
+    );
+    expect(getByText('2.8 km')).toBeTruthy();
+    expect(queryByLabelText('Get accurate distance to Dealer A')).toBeNull();
+  });
+
+  test('shows a loading state while fetching the precise distance', async () => {
+    const { getByText, getByLabelText } = await render(
+      <AssignedDealerCard
+        assignment={BASE_ASSIGNMENT}
+        estimatedDistanceKm={3.2}
+        fetchingPreciseDistance
+        onNavigate={() => {}}
+        onFetchAccurateDistance={() => {}}
+      />
+    );
+    expect(getByText('Getting distance…')).toBeTruthy();
+    expect(getByLabelText('Get accurate distance to Dealer A')).toBeDisabled();
+  });
+
   test('hides the Navigate button once completed', async () => {
     const assignment = { ...BASE_ASSIGNMENT, status: 'completed' };
     const { queryByLabelText } = await render(<AssignedDealerCard assignment={assignment} onNavigate={() => {}} />);

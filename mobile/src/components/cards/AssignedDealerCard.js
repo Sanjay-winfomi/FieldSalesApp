@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { MapPin, Navigation, Clock, CalendarClock } from 'lucide-react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { MapPin, Navigation, Clock, CalendarClock, Route } from 'lucide-react-native';
 import Card from './Card';
 import { colors, typography, spacing, radius } from '../../theme';
 
@@ -32,16 +32,28 @@ function formatEta(isoString) {
  * be seen again on a specific future day) that opens FollowupRequestModal.
  *
  * estimatedDistanceKm is optional — a straight-line (haversine) fallback
- * distance from the rep's current position, shown only until the real
- * routed distance_meters exists (i.e. before Navigate has been tapped for
- * this dealer today). Once a real route is computed, that always wins.
+ * distance from the rep's current position, shown only until a real
+ * driving distance exists for this dealer (either the routed
+ * distance_meters from an actual Navigate attempt, or preciseDistanceKm
+ * from a manual "Get accurate distance" tap below). Priority, highest
+ * first: routed distance_meters > preciseDistanceKm > estimatedDistanceKm.
+ *
+ * onFetchAccurateDistance is optional — when provided (and no real
+ * distance exists yet), shows a "Get accurate distance" link that calls it
+ * with the assignment, for a real Google Maps distance without implying a
+ * navigation attempt started (unlike tapping Navigate itself).
  */
-export default function AssignedDealerCard({ assignment, estimatedDistanceKm, onNavigate, onRequestFollowup }) {
+export default function AssignedDealerCard({
+  assignment, estimatedDistanceKm, preciseDistanceKm, fetchingPreciseDistance,
+  onNavigate, onRequestFollowup, onFetchAccurateDistance,
+}) {
   const tone = STATUS_TONES[assignment.status] || STATUS_TONES.pending;
   const isDone = assignment.status === 'completed' || assignment.status === 'cancelled';
   const routedDistanceKm = assignment.distance_meters != null ? assignment.distance_meters / 1000 : null;
-  const distanceKm = routedDistanceKm ?? estimatedDistanceKm ?? null;
-  const isEstimate = routedDistanceKm == null && estimatedDistanceKm != null;
+  const distanceKm = routedDistanceKm ?? preciseDistanceKm ?? estimatedDistanceKm ?? null;
+  const isEstimate = routedDistanceKm == null && preciseDistanceKm == null && estimatedDistanceKm != null;
+  const showAccurateDistanceLink = !isDone && !!onFetchAccurateDistance
+    && routedDistanceKm == null && preciseDistanceKm == null && estimatedDistanceKm != null;
   const eta = formatEta(assignment.expected_arrival_time);
 
   return (
@@ -91,6 +103,25 @@ export default function AssignedDealerCard({ assignment, estimatedDistanceKm, on
           </Pressable>
         )}
       </View>
+
+      {showAccurateDistanceLink && (
+        <Pressable
+          style={styles.followupLink}
+          onPress={() => onFetchAccurateDistance(assignment)}
+          disabled={fetchingPreciseDistance}
+          accessibilityRole="button"
+          accessibilityLabel={`Get accurate distance to ${assignment.dealer_name}`}
+        >
+          {fetchingPreciseDistance ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Route size={13} color={colors.primary} />
+          )}
+          <Text style={styles.followupLinkText}>
+            {fetchingPreciseDistance ? 'Getting distance…' : 'Get accurate distance'}
+          </Text>
+        </Pressable>
+      )}
 
       {!!onRequestFollowup && (
         <Pressable
