@@ -4,7 +4,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, ChevronUp, ChevronDown, X, Plus, MapPin, Route } from 'lucide-react';
 import { apiClient } from '../../api';
-import { SectionHeader, SearchBar, EmptyState, Button, RepSelect } from '../../components';
+import { SectionHeader, SearchBar, EmptyState, Button, RepSelect, ConfirmationModal } from '../../components';
 import { colors, spacing, typography } from '../../theme';
 
 const STATUS_LABELS = {
@@ -65,7 +65,7 @@ function SortableRow({ item, index, total, onMoveUp, onMoveDown, onRemove }) {
         <button type="button" className="ft-icon-btn" style={styles.moveBtn} aria-label={`Move ${item.dealer_name} down`} disabled={index === total - 1} onClick={() => onMoveDown(index)}>
           <ChevronDown size={14} />
         </button>
-        <button type="button" className="ft-icon-btn" style={styles.moveBtn} aria-label={`Remove ${item.dealer_name}`} onClick={() => onRemove(index)}>
+        <button type="button" className="ft-icon-btn" style={styles.moveBtn} aria-label={`Remove ${item.dealer_name}`} onClick={() => onRemove(item.dealer_id)}>
           <X size={14} color={colors.danger} />
         </button>
       </div>
@@ -99,6 +99,19 @@ export default function AssignmentsTab() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [dealerSearch, setDealerSearch] = useState('');
+  // Set to { type: 'rep'|'date', value } when the rep/date selector is
+  // changed while there are unsaved edits — loadAssignment's effect would
+  // otherwise silently overwrite assignedList with the newly-selected
+  // rep/date's rows the instant selectedRepId/date changes, discarding
+  // whatever reordering/add/remove hadn't been saved yet.
+  const [discardConfirm, setDiscardConfirm] = useState(null);
+  // dealer_id of the row pending removal (NOT its array index — an index
+  // would silently point at the wrong row if assignedList reordered or
+  // changed while the confirm dialog was open) — confirmed before actually
+  // dropping it, consistent with how every other destructive-feeling action
+  // in this app is confirmed (nothing persists until Save either way, but a
+  // one-click, no-confirm removal was still the odd one out here).
+  const [removeConfirmDealerId, setRemoveConfirmDealerId] = useState(null);
   // Guards against a slower request for a previously-selected rep/date
   // resolving after a newer one was already kicked off (e.g. clicking
   // through reps quickly) and clobbering the view with stale data.
@@ -167,8 +180,33 @@ export default function AssignmentsTab() {
     setAssignedList((prev) => [...prev, { id: null, dealer_id: dealer.id, dealer_name: dealer.name, dealer_address: dealer.address, status: 'pending' }]);
   };
 
-  const handleRemove = (index) => {
-    setAssignedList((prev) => prev.filter((_, i) => i !== index));
+  const requestRemove = (dealerId) => setRemoveConfirmDealerId(dealerId);
+
+  const confirmRemove = () => {
+    if (removeConfirmDealerId == null) return;
+    setAssignedList((prev) => prev.filter((a) => a.dealer_id !== removeConfirmDealerId));
+    setRemoveConfirmDealerId(null);
+  };
+
+  const removeConfirmDealer = useMemo(
+    () => assignedList.find((a) => a.dealer_id === removeConfirmDealerId) || null,
+    [assignedList, removeConfirmDealerId]
+  );
+
+  const requestRepChange = (id) => {
+    if (isDirty) { setDiscardConfirm({ type: 'rep', value: id }); return; }
+    setSelectedRepId(id);
+  };
+
+  const requestDateChange = (newDate) => {
+    if (isDirty) { setDiscardConfirm({ type: 'date', value: newDate }); return; }
+    setDate(newDate);
+  };
+
+  const confirmDiscard = () => {
+    if (discardConfirm.type === 'rep') setSelectedRepId(discardConfirm.value);
+    else setDate(discardConfirm.value);
+    setDiscardConfirm(null);
   };
 
   const handleMoveUp = (index) => {
@@ -194,7 +232,11 @@ export default function AssignmentsTab() {
   };
 
   const handleSave = async () => {
-    if (!selectedRepId) return;
+    // `loading` guards against saving while a rep/date switch's fetch is
+    // still in flight — assignedList would still be the previous
+    // rep/date's rows at that point, and PUT-ing them against the
+    // newly-selected employee_id/date would silently misattribute them.
+    if (!selectedRepId || loading) return;
     setSaving(true);
     setError('');
     try {
@@ -226,7 +268,7 @@ export default function AssignmentsTab() {
         title="Dealer Visit Plan"
         subtitle="Plan a representative's ordered dealer visit sequence for a day — the order set here is never auto-reordered."
         action={
-          <Button icon={<Route size={15} />} onClick={handleSave} loading={saving} disabled={!selectedRepId || !isDirty} fullWidthMobile>
+          <Button icon={<Route size={15} />} onClick={handleSave} loading={saving} disabled={!selectedRepId || !isDirty || loading} fullWidthMobile>
             {isDirty ? 'Save changes' : 'Saved'}
           </Button>
         }
@@ -236,12 +278,12 @@ export default function AssignmentsTab() {
       {successMessage && <div style={styles.successBanner} role="status">{successMessage}</div>}
 
       <div style={styles.filterRow}>
-        <RepSelect employees={employees} selectedId={selectedRepId} onChange={setSelectedRepId} style={{ minWidth: 260 }} />
+        <RepSelect employees={employees} selectedId={selectedRepId} onChange={requestRepChange} style={{ minWidth: 260 }} />
         <input
           type="date"
           className="ft-input"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={(e) => requestDateChange(e.target.value)}
           style={{ maxWidth: 200 }}
           aria-label="Visit plan date"
         />
@@ -273,7 +315,7 @@ export default function AssignmentsTab() {
                         total={assignedList.length}
                         onMoveUp={handleMoveUp}
                         onMoveDown={handleMoveDown}
-                        onRemove={handleRemove}
+                        onRemove={requestRemove}
                       />
                     ))}
                   </div>
@@ -307,6 +349,26 @@ export default function AssignmentsTab() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        open={!!discardConfirm}
+        title="Discard unsaved changes?"
+        message="This visit plan has unsaved reordering/add/remove edits. Switching now will discard them."
+        confirmLabel="Discard changes"
+        danger
+        onConfirm={confirmDiscard}
+        onCancel={() => setDiscardConfirm(null)}
+      />
+
+      <ConfirmationModal
+        open={removeConfirmDealerId != null}
+        title="Remove this dealer from the plan?"
+        message={removeConfirmDealer ? `${removeConfirmDealer.dealer_name} will be removed from this rep's visit plan. This isn't saved until you click "Save changes".` : ''}
+        confirmLabel="Remove"
+        danger
+        onConfirm={confirmRemove}
+        onCancel={() => setRemoveConfirmDealerId(null)}
+      />
     </div>
   );
 }

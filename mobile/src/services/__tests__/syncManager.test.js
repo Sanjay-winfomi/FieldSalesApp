@@ -61,6 +61,50 @@ describe('syncManager', () => {
     expect(await getPendingCount()).toBe(0);
   });
 
+  test('resolves a temp offline id embedded in a queued action URL, not just the body', async () => {
+    const localId = 'offline-123';
+    await enqueueAction('post', '/visits/login', { attendance_id: 1, dealer_id: 5 }, { localId, resolves: 'visit' });
+    await enqueueAction('post', `/visits/${localId}/location-check`, { lat: 1, lng: 2 });
+
+    api.request
+      .mockResolvedValueOnce({ data: { visit: { id: 300 } } })
+      .mockResolvedValueOnce({ data: {} });
+
+    await flushQueue();
+
+    expect(api.request.mock.calls[1][0].url).toBe('/visits/300/location-check');
+    expect(await getPendingCount()).toBe(0);
+  });
+
+  test('leaves a URL-embedded temp id queued (not sent) until its dependency resolves', async () => {
+    const localId = 'offline-456';
+    // Only the dependent action is queued this pass — the action that would
+    // resolve localId hasn't synced (e.g. it's still backed off from an
+    // earlier failure), so this one must stay blocked rather than firing
+    // against a URL that still contains a fake id.
+    await enqueueAction('post', `/visits/${localId}/location-check`, { lat: 1, lng: 2 });
+
+    await flushQueue();
+
+    expect(api.request).not.toHaveBeenCalled();
+    expect(await getPendingCount()).toBe(1);
+  });
+
+  test('reuses the same Idempotency-Key header across retries of the same queued action', async () => {
+    await enqueueAction('post', '/attendance/login', { lat: 1, lng: 2 });
+
+    api.request.mockRejectedValueOnce({ code: 'ERR_NETWORK', message: 'Network Error' });
+    await flushQueue();
+    const firstKey = api.request.mock.calls[0][0].headers['Idempotency-Key'];
+    expect(firstKey).toBeTruthy();
+
+    api.request.mockResolvedValueOnce({ data: { attendance: { id: 1 } } });
+    await flushQueue();
+    const secondKey = api.request.mock.calls[1][0].headers['Idempotency-Key'];
+
+    expect(secondKey).toBe(firstKey);
+  });
+
   test('keeps a network-failed action queued for retry', async () => {
     await enqueueAction('post', '/attendance/login', { lat: 1, lng: 2 });
     api.request.mockRejectedValueOnce({ code: 'ERR_NETWORK', message: 'Network Error' });
@@ -101,6 +145,38 @@ describe('syncManager', () => {
     expect(api.post).toHaveBeenCalledWith(
       '/sync-failures',
       expect.objectContaining({ method: 'post', url: '/visits/login' })
+    );
+  });
+
+  test('discards a dependent action once the parent action it depends on is permanently discarded', async () => {
+    const localId = 'offline-789';
+    const queue = [
+      // Parent: already at max retries — this attempt discards it for good.
+      {
+        id: 'parent1', method: 'post', url: '/reminders', data: { note: 'x' },
+        localId, resolves: 'reminder', retryCount: 8, timestamp: new Date().toISOString(),
+      },
+      // Dependent: references the parent's localId in its body — can never
+      // resolve once the parent above is discarded.
+      {
+        id: 'dependent1', method: 'patch', url: `/reminders/${localId}/notifications`, data: {},
+        localId: null, resolves: null, retryCount: 0, timestamp: new Date().toISOString(),
+      },
+    ];
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    api.request.mockRejectedValueOnce({ response: { status: 400, data: { error: 'bad request' } } });
+
+    await flushQueue();
+
+    // Both the parent (discarded via MAX_RETRIES) and the dependent
+    // (discarded via the failed-dependency path) are gone — neither is left
+    // stuck in the queue forever, and api.request was only ever called for
+    // the parent (the dependent never reaches a real request attempt).
+    expect(await getPendingCount()).toBe(0);
+    expect(api.request).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith(
+      '/sync-failures',
+      expect.objectContaining({ error: 'dependency failed permanently' })
     );
   });
 

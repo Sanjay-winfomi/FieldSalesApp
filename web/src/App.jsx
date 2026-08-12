@@ -32,8 +32,9 @@ export default function App() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 
-  // Keep the shared apiClient's auth header in sync so ReportsPage/AdminPage
-  // (which rely solely on the interceptor, not manual headers) work correctly.
+  // Keep the shared apiClient's auth header in sync — every page's request
+  // goes through apiClient's own interceptor, which always wins over any
+  // manually-set Authorization header on an individual call.
   useEffect(() => {
     setAuthToken(token || null);
   }, [token]);
@@ -43,9 +44,7 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      const res = await apiClient.get('/dashboard/today', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiClient.get('/dashboard/today');
       setReps(res.data.reps || []);
       setLastUpdated(new Date());
     } catch (err) {
@@ -70,9 +69,7 @@ export default function App() {
   const fetchUnreadNotifications = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await apiClient.get('/notifications/unread-count', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiClient.get('/notifications/unread-count');
       setUnreadNotifications(res.data.count || 0);
     } catch {
       // Non-fatal — the bell just won't show a fresh count until the next poll.
@@ -133,7 +130,6 @@ export default function App() {
           onOpenNotifications={() => { setActiveView('notifications'); setSelectedRepId(null); }}
         />
         <RepDetailsPage
-          token={token}
           repId={selectedRepId}
           onBack={() => setSelectedRepId(null)}
         />

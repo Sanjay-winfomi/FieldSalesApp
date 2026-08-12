@@ -34,7 +34,8 @@ describe('googleRoutesService.computeRoute', () => {
     const result = await computeRoute(ROUTE_ARGS);
 
     expect(result.distanceMeters).toBe(5200);
-    expect(result.durationSeconds).toBe(620);
+    expect(result.durationSeconds).toBe(580);
+    expect(result.durationInTrafficSeconds).toBe(620);
     expect(result.staticDurationSeconds).toBe(580);
     expect(result.encodedPolyline).toBe('abc123');
     expect(global.fetch).toHaveBeenCalledTimes(1);

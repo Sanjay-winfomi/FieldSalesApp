@@ -149,6 +149,11 @@ export default function EmployeesTab({ currentEmployeeId }) {
   };
 
   const confirmDeactivate = async () => {
+    // Defense-in-depth alongside the disabled button above.
+    if (deactivateTarget?.id === currentEmployeeId) {
+      setDeactivateTarget(null);
+      return;
+    }
     setDeactivateSubmitting(true);
     try {
       await apiClient.put(`/employees/${deactivateTarget.id}`, { is_active: false });
@@ -226,8 +231,13 @@ export default function EmployeesTab({ currentEmployeeId }) {
           <button
             className="ft-icon-btn"
             style={styles.actionBtn}
-            title={emp.is_active ? 'Deactivate' : 'Activate'}
+            // Deactivating your own account would lock you out immediately
+            // (is_active is re-checked every request, per auth.middleware.js)
+            // with no way to undo it yourself — only Delete had this guard
+            // before, Deactivate needs it just as much.
+            title={emp.id === currentEmployeeId ? "You can't deactivate your own account" : (emp.is_active ? 'Deactivate' : 'Activate')}
             aria-label={`${emp.is_active ? 'Deactivate' : 'Activate'} ${emp.name}`}
+            disabled={emp.id === currentEmployeeId && emp.is_active}
             onClick={() => (emp.is_active ? setDeactivateTarget(emp) : activateDirectly(emp))}
           >
             <Power size={14} color={emp.is_active ? colors.danger : colors.success} />

@@ -20,6 +20,24 @@ const TYPE_META = {
 
 const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
 
+// Maps the backend's machine-readable follow-up-request error codes to
+// manager-facing copy — mirrors mobile's FollowupRequestModal, which does
+// the same translation for the codes a rep can hit when submitting one.
+const FOLLOWUP_ERROR_MESSAGES = {
+  approved_date_in_past: 'That date has already passed — pick today or a future date and try again.',
+  request_already_resolved: 'This request was already resolved (possibly by another manager) — refresh to see its status.',
+};
+
+function followupErrorMessage(err, action) {
+  const code = err.response?.data?.error;
+  return FOLLOWUP_ERROR_MESSAGES[code] || code || `Failed to ${action} this request.`;
+}
+
+function todayDateString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function formatTime(value) {
   return new Date(value).toLocaleString('en-IN', {
     day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true,
@@ -36,9 +54,11 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  // Keyed by followup_request_id — tracks in-flight approve/reject calls
-  // and any per-row error, so one request's failure doesn't disturb the
-  // rest of the list.
+  // Keyed by `${followup_request_id}:${action}` (NOT just followup_request_id
+  // — Approve and Reject each need their own in-flight flag, otherwise
+  // clicking one shows the other as loading/disabled too even though only
+  // one request is actually in flight) — plus any per-row error, so one
+  // request's failure doesn't disturb the rest of the list.
   const [resolvingIds, setResolvingIds] = useState({});
   const [resolveErrors, setResolveErrors] = useState({});
   // Keyed by followup_request_id — the date a manager has edited the
@@ -66,11 +86,17 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // Approve/reject a follow-up request directly from its notification card.
   // Updates just that row's followup_status locally on success rather than
   // refetching the whole list, so the rest of the feed doesn't jump/reload.
+  // `approvedDate` is REQUIRED for 'approve' (see the Approve button's
+  // disabled check below) and always sent explicitly — never omitted — so
+  // the backend's past-date guard runs every time, instead of a
+  // manager-blanked date silently falling back to the rep's original
+  // (possibly stale) requested_date with no guard applied at all.
   const resolveFollowupRequest = async (requestId, action, approvedDate) => {
-    setResolvingIds((prev) => ({ ...prev, [requestId]: true }));
+    const resolveKey = `${requestId}:${action}`;
+    setResolvingIds((prev) => ({ ...prev, [resolveKey]: true }));
     setResolveErrors((prev) => ({ ...prev, [requestId]: '' }));
     try {
-      if (action === 'approve' && approvedDate) {
+      if (action === 'approve') {
         await apiClient.patch(`/followup-requests/${requestId}/${action}`, { approved_date: approvedDate });
       } else {
         await apiClient.patch(`/followup-requests/${requestId}/${action}`);
@@ -87,10 +113,10 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
     } catch (err) {
       setResolveErrors((prev) => ({
         ...prev,
-        [requestId]: err.response?.data?.error || `Failed to ${action} this request.`,
+        [requestId]: followupErrorMessage(err, action),
       }));
     } finally {
-      setResolvingIds((prev) => ({ ...prev, [requestId]: false }));
+      setResolvingIds((prev) => ({ ...prev, [resolveKey]: false }));
     }
   };
 
@@ -140,7 +166,9 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                     </div>
 
                     {n.followup_request_id && (
-                      n.followup_status === 'pending' ? (
+                      n.followup_status === 'pending' ? (() => {
+                        const effectiveDate = approvalDates[n.followup_request_id] ?? n.followup_requested_date ?? '';
+                        return (
                         <div style={styles.followupActions}>
                           <label style={styles.followupDateLabel}>
                             Visit date
@@ -148,7 +176,8 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                               type="date"
                               className="ft-input"
                               style={styles.followupDateInput}
-                              value={approvalDates[n.followup_request_id] ?? n.followup_requested_date ?? ''}
+                              min={todayDateString()}
+                              value={effectiveDate}
                               onChange={(e) => setApprovalDates((prev) => ({ ...prev, [n.followup_request_id]: e.target.value }))}
                               aria-label="Approval date"
                             />
@@ -157,12 +186,9 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                             variant="success"
                             style={styles.followupBtn}
                             icon={<Check size={14} />}
-                            loading={!!resolvingIds[n.followup_request_id]}
-                            onClick={() => resolveFollowupRequest(
-                              n.followup_request_id,
-                              'approve',
-                              approvalDates[n.followup_request_id] ?? n.followup_requested_date
-                            )}
+                            loading={!!resolvingIds[`${n.followup_request_id}:approve`]}
+                            disabled={!effectiveDate}
+                            onClick={() => resolveFollowupRequest(n.followup_request_id, 'approve', effectiveDate)}
                           >
                             Approve
                           </Button>
@@ -170,7 +196,7 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                             variant="danger"
                             style={styles.followupBtn}
                             icon={<X size={14} />}
-                            loading={!!resolvingIds[n.followup_request_id]}
+                            loading={!!resolvingIds[`${n.followup_request_id}:reject`]}
                             onClick={() => resolveFollowupRequest(n.followup_request_id, 'reject')}
                           >
                             Reject
@@ -179,7 +205,8 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                             <span style={styles.followupError}>{resolveErrors[n.followup_request_id]}</span>
                           )}
                         </div>
-                      ) : (
+                        );
+                      })() : (
                         <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', gap: spacing.sm }}>
                           <StatusBadge
                             label={FOLLOWUP_STATUS_LABEL[n.followup_status] || n.followup_status}

@@ -532,6 +532,10 @@ export default function App() {
     distanceTravelled,
     refreshing,
     pendingSyncCount,
+    // Lets SyncQueueModal push a fresh count the instant a retry/discard
+    // resolves something, instead of the Home banner sitting stale until
+    // the next 10s poll above picks it up.
+    setPendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
     backgroundLocationDenied,

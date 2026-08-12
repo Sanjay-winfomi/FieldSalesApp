@@ -41,10 +41,21 @@ async function markAssignmentVisited({ employeeId, dealerId }) {
     );
     const assignmentId = result.rows[0]?.id;
     if (assignmentId != null) {
+      // Only the single most recent open row — a rep can rack up more than
+      // one stale 'navigating'/'arrived' row per assignment (e.g. tapping
+      // Navigate again after abandoning an earlier attempt without
+      // cancelling it). Closing every open row instead of just the latest
+      // one would mark all of them 'completed' and double-count each one's
+      // distance/duration in GET /api/navigation/summary/today's totals.
       await pool.query(
         `UPDATE dealer_navigations
          SET status = 'completed', ended_at = NOW()
-         WHERE assignment_id = $1 AND status IN ('navigating', 'arrived')`,
+         WHERE id = (
+           SELECT id FROM dealer_navigations
+           WHERE assignment_id = $1 AND status IN ('navigating', 'arrived')
+           ORDER BY started_at DESC
+           LIMIT 1
+         )`,
         [assignmentId]
       );
     }

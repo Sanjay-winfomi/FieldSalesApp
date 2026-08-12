@@ -208,10 +208,11 @@ app.use('/api/assignments', requireAuth, assignmentsRouter);
 app.use('/api/navigation',  requireAuth, navigationRouter);
 app.use('/api/followup-requests', requireAuth, followupRequestsRouter);
 
-// Exposes the actual configured login tolerance radius so the UI never
-// has to hardcode a value that could drift from what .env really says.
+// Exposes the default dealer geofence radius (used by the web dealer-editor
+// as the suggested value for a new dealer) so the UI never has to hardcode a
+// number that could drift from dealers.radius_meters' own schema default.
 app.get('/api/config', requireAuth, (req, res) => {
-  res.json({ loginRadiusMeters: parseInt(process.env.LOGIN_RADIUS_METERS || '100') });
+  res.json({ loginRadiusMeters: parseInt(process.env.LOGIN_RADIUS_METERS || '200') });
 });
 
 // ── Manager-only routes ───────────────────────────────────────────────────────

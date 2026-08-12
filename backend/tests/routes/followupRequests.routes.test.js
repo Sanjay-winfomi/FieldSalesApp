@@ -22,6 +22,14 @@ describe('POST /api/x/', () => {
     expect(res.status).toBe(400);
   });
 
+  test('403 when a manager tries to create a follow-up request', async () => {
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app)
+      .post('/api/x/')
+      .send({ dealer_id: 5, requested_date: FUTURE_DATE, reason: LONG_REASON });
+    expect(res.status).toBe(403);
+  });
+
   test('422 when requested_date is in the past', async () => {
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/').send({ dealer_id: 5, requested_date: '2020-01-01', reason: LONG_REASON });
@@ -124,9 +132,9 @@ describe('PATCH /api/x/:id/approve', () => {
   test('200 creates the assignment at the next sequence position and marks the request approved', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] }) // existing
+      .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved' }] }) // atomic claim: update request status
       .mockResolvedValueOnce({ rows: [{ next_seq: 3 }] }) // next sequence
-      .mockResolvedValueOnce({ rows: [{ id: 555 }] }) // insert assignment
-      .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved' }] }); // update request
+      .mockResolvedValueOnce({ rows: [{ id: 555 }] }); // insert assignment
 
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve');
@@ -134,7 +142,21 @@ describe('PATCH /api/x/:id/approve', () => {
     expect(res.status).toBe(200);
     expect(res.body.assignment_id).toBe(555);
     expect(res.body.request.status).toBe('approved');
-    expect(pool.query.mock.calls[2][1]).toEqual([REP.id, 5, FUTURE_DATE, 3, MANAGER.id]);
+    expect(pool.query.mock.calls[3][1]).toEqual([REP.id, 5, FUTURE_DATE, 3, MANAGER.id]);
+  });
+
+  test('409 when an approve/reject race already resolved the request between the check and the atomic claim', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] }) // existing (still pending at read time)
+      .mockResolvedValueOnce({ rows: [] }); // atomic claim finds 0 rows — a concurrent request already resolved it
+
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).patch('/api/x/20/approve');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('request_already_resolved');
+    // No assignment side effect — only 2 pool.query calls, not 4.
+    expect(pool.query).toHaveBeenCalledTimes(2);
   });
 
   const OVERRIDE_DATE = '2099-02-02';
@@ -142,19 +164,19 @@ describe('PATCH /api/x/:id/approve', () => {
   test('a manager-supplied approved_date is used for the assignment instead of the rep\'s requested_date', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved', approved_date: OVERRIDE_DATE }] })
       .mockResolvedValueOnce({ rows: [{ next_seq: 1 }] })
-      .mockResolvedValueOnce({ rows: [{ id: 555 }] })
-      .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved', approved_date: OVERRIDE_DATE }] });
+      .mockResolvedValueOnce({ rows: [{ id: 555 }] });
 
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve').send({ approved_date: OVERRIDE_DATE });
 
     expect(res.status).toBe(200);
     expect(res.body.request.approved_date).toBe(OVERRIDE_DATE);
+    expect(pool.query.mock.calls[1][1]).toEqual([OVERRIDE_DATE, MANAGER.id, 20]);
     // next-sequence lookup and the assignment insert both use the override date.
-    expect(pool.query.mock.calls[1][1]).toEqual([REP.id, OVERRIDE_DATE]);
-    expect(pool.query.mock.calls[2][1]).toEqual([REP.id, 5, OVERRIDE_DATE, 1, MANAGER.id]);
-    expect(pool.query.mock.calls[3][1]).toEqual([OVERRIDE_DATE, MANAGER.id, 20]);
+    expect(pool.query.mock.calls[2][1]).toEqual([REP.id, OVERRIDE_DATE]);
+    expect(pool.query.mock.calls[3][1]).toEqual([REP.id, 5, OVERRIDE_DATE, 1, MANAGER.id]);
   });
 
   test('400 when approved_date is not a valid date', async () => {
@@ -199,5 +221,17 @@ describe('PATCH /api/x/:id/reject', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.request.status).toBe('rejected');
+  });
+
+  test('409 when an approve/reject race already resolved the request between the check and the atomic claim', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ status: 'pending' }] }) // still pending at read time
+      .mockResolvedValueOnce({ rows: [] }); // atomic claim finds 0 rows — a concurrent approve already resolved it
+
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).patch('/api/x/20/reject');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('request_already_resolved');
   });
 });

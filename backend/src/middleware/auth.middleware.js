@@ -10,20 +10,28 @@ const pool = require('../db/pool');
 // A deactivated employee's still-valid access token (up to JWT_EXPIRES_IN,
 // default 8h) would otherwise keep working until it naturally expires — a
 // manager deactivating a terminated/compromised account expects it to stop
-// working immediately, not hours later. Cached briefly per-token to avoid a
-// DB round trip on every single request.
-const activeStatusCache = new Map();
+// working immediately, not hours later. Also re-checks role for the same
+// reason: req.employee.role otherwise came straight from the JWT payload
+// signed at login, so a manager demoted to rep (or promoted) would keep
+// their OLD role's access for up to JWT_EXPIRES_IN — the exact class of
+// stale-privilege bug the is_active check exists to prevent. Cached briefly
+// per-token to avoid a DB round trip on every single request.
+const employeeStateCache = new Map();
 const ACTIVE_STATUS_CACHE_TTL_MS = 30 * 1000;
 
-async function isEmployeeActive(employeeId) {
-  const cached = activeStatusCache.get(employeeId);
+async function getEmployeeState(employeeId) {
+  const cached = employeeStateCache.get(employeeId);
   if (cached && Date.now() - cached.time < ACTIVE_STATUS_CACHE_TTL_MS) {
-    return cached.isActive;
+    return cached;
   }
-  const result = await pool.query('SELECT is_active FROM employees WHERE id = $1', [employeeId]);
-  const isActive = result.rows.length > 0 && result.rows[0].is_active === true;
-  activeStatusCache.set(employeeId, { isActive, time: Date.now() });
-  return isActive;
+  const result = await pool.query('SELECT is_active, role FROM employees WHERE id = $1', [employeeId]);
+  const state = {
+    isActive: result.rows.length > 0 && result.rows[0].is_active === true,
+    role: result.rows[0]?.role ?? null,
+    time: Date.now(),
+  };
+  employeeStateCache.set(employeeId, state);
+  return state;
 }
 
 // Entries are only ever overwritten on the next request from the same
@@ -33,9 +41,9 @@ async function isEmployeeActive(employeeId) {
 // process alive on its own (relevant for tests and clean shutdowns).
 const sweepInterval = setInterval(() => {
   const now = Date.now();
-  for (const [employeeId, entry] of activeStatusCache) {
+  for (const [employeeId, entry] of employeeStateCache) {
     if (now - entry.time >= ACTIVE_STATUS_CACHE_TTL_MS) {
-      activeStatusCache.delete(employeeId);
+      employeeStateCache.delete(employeeId);
     }
   }
 }, ACTIVE_STATUS_CACHE_TTL_MS);
@@ -51,14 +59,17 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    const active = await isEmployeeActive(payload.sub);
-    if (!active) {
+    const state = await getEmployeeState(payload.sub);
+    if (!state.isActive) {
       return res.status(401).json({ error: 'Account is deactivated' });
     }
 
     req.employee = {
       id:       payload.sub,
-      role:     payload.role,
+      // Fresh from the DB, not the JWT payload — a role change must take
+      // effect within ACTIVE_STATUS_CACHE_TTL_MS, not wait for the token
+      // to expire and be refreshed.
+      role:     state.role ?? payload.role,
       username: payload.username,
     };
     next();

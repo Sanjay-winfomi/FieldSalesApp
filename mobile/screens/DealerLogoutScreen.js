@@ -11,10 +11,9 @@ import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, GPSStatusCard, PrimaryButton, TextField, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
-// Task 5 Case 2/3 — a visit whose LOGIN already used an exception always
-// requires a written logout reason, bounded 50-500 chars. Distinct from
-// (and stricter than) the old MIN_REASON_LENGTH=20 escape hatch, which no
-// longer applies to logout at all — see backend/src/routes/visits.routes.js.
+// Bounds for the logout reason box, required whenever the login already
+// used an exception OR the rep is currently outside the dealer radius (and
+// not drift-matched to the login spot) — see backend/src/routes/visits.routes.js.
 const LOGOUT_EXCEPTION_REASON_MIN = 50;
 const LOGOUT_EXCEPTION_REASON_MAX = 500;
 // A dealer with no registered coordinates can't be geofenced — mirrors the
@@ -52,14 +51,14 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
     }
   };
 
-  // Case 2/3 — the login already used an exception, so logout always needs
-  // a written reason regardless of current distance.
+  // Login already used an exception, so logout always needs a written
+  // reason regardless of current distance.
   const loginWasException = activeVisit?.login_inside_radius === false;
 
-  // Case 1 — a normal login: computed fully client-side from the freshly
-  // acquired GPS fix, dealer coordinates, and the visit's own login
-  // coordinates, so the button reflects reality without waiting on a
-  // server round-trip. The server independently re-validates on submit.
+  // Computed fully client-side from the freshly acquired GPS fix, dealer
+  // coordinates, and the visit's own login coordinates, so the UI reflects
+  // reality without waiting on a server round-trip. The server independently
+  // re-validates on submit.
   let insideDealerRadius = true;
   let matchedLoginSpot = false;
   if (coords && dealer?.latitude != null && dealer?.longitude != null) {
@@ -70,7 +69,12 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
     const driftFromLogin = haversineMeters(activeVisit.login_lat, activeVisit.login_lng, coords.lat, coords.lng);
     matchedLoginSpot = driftFromLogin <= LOGIN_MATCH_TOLERANCE_METERS;
   }
-  const case1CanLogout = insideDealerRadius || matchedLoginSpot;
+  // A reason is needed whenever EITHER is true: the login itself already
+  // used an exception, or the rep is currently outside the dealer radius
+  // and not drift-matched to the login spot. Inside radius (or
+  // drift-matched) with a normal login needs no reason at all.
+  const outsideNow = !!coords && !insideDealerRadius && !matchedLoginSpot;
+  const needsReason = loginWasException || outsideNow;
 
   const handleLogout = async () => {
     if (!coords) {
@@ -106,15 +110,6 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
             id: activeVisit.id,
             logout_time: new Date().toISOString(),
           };
-        } else if (error.response.data?.error === 'must_return_to_radius') {
-          // Case 1 has no reason override — the button should already be
-          // disabled for this, but the server is the final word. Shown as a
-          // one-time alert (not blockedMessage) since the live Case 1 banner
-          // below already reactively shows this exact message whenever the
-          // button is actually disabled for this reason — a persistent
-          // second banner here would just duplicate it and go stale.
-          showAlert('Outside Dealer Premises', 'You must return inside dealer premises before logging out.');
-          return;
         } else if (error.response.data?.error === 'reason_required') {
           setBlockedMessage(
             `Enter a reason (${error.response.data.minLength}-${error.response.data.maxLength || LOGOUT_EXCEPTION_REASON_MAX} characters) to continue.`
@@ -145,7 +140,7 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
     : locationStatus;
   const reasonOk = reason.trim().length >= LOGOUT_EXCEPTION_REASON_MIN && reason.trim().length <= LOGOUT_EXCEPTION_REASON_MAX;
 
-  const canSubmit = !!coords && accuracyOk && (loginWasException ? reasonOk : case1CanLogout);
+  const canSubmit = !!coords && accuracyOk && (needsReason ? reasonOk : true);
 
   // Calculate elapsed time if activeVisit has a login_time
   const getElapsedMinutes = () => {
@@ -184,11 +179,13 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
 
           <GPSStatusCard address={address} coords={coords} statusMessage={accuracyMessage} accuracyMeters={coords?.accuracyMeters} />
 
-          {loginWasException ? (
-            // Case 2/3 — login used an exception: always require a written
-            // reason, regardless of current distance.
+          {needsReason && (
             <TextField
-              label={`This visit's login used an exception — enter a reason for this logout (${LOGOUT_EXCEPTION_REASON_MIN}-${LOGOUT_EXCEPTION_REASON_MAX} characters).`}
+              label={
+                loginWasException
+                  ? `This visit's login used an exception — enter a reason for this logout (${LOGOUT_EXCEPTION_REASON_MIN}-${LOGOUT_EXCEPTION_REASON_MAX} characters).`
+                  : `You're outside the dealer's location — enter a reason for this logout (${LOGOUT_EXCEPTION_REASON_MIN}-${LOGOUT_EXCEPTION_REASON_MAX} characters).`
+              }
               value={reason}
               // Clears a stale "enter a reason..." banner from a previous
               // failed attempt as soon as the rep starts fixing it — without
@@ -198,15 +195,6 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
               multiline
               style={styles.reasonField}
             />
-          ) : (
-            // Case 1 — normal login: no reason field at all, just a
-            // proactive block until back inside radius (or drift-matched).
-            !!coords && !case1CanLogout && (
-              <View style={styles.blockedBanner}>
-                <AlertTriangle size={14} color={colors.dangerDark || colors.danger} style={{ marginRight: 8 }} />
-                <Text style={styles.blockedText}>You must return inside dealer premises before logging out.</Text>
-              </View>
-            )
           )}
 
           {!!blockedMessage && (
@@ -217,7 +205,7 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
           )}
 
           <PrimaryButton
-            title={loginWasException ? 'Submit reason & logout' : 'Dealer Logout'}
+            title={needsReason ? 'Submit reason & logout' : 'Dealer Logout'}
             onPress={handleLogout}
             disabled={!canSubmit}
             loading={loading}

@@ -78,13 +78,23 @@ export default function ReminderEditorScreen({ navigation }) {
     } catch (err) {
       if (isNetworkError(err)) {
         // Offline — queue the create so the note/dealer/date the user
-        // entered isn't lost. Still schedule the local device notifications
-        // now (they don't need a server id), but there's no reminder id yet
-        // to attach them to server-side — that PATCH is skipped; the
-        // notifications will just fire without a synced notif_id_* on the
-        // record until the next time this reminder is edited, if ever.
-        await enqueueAction('post', '/reminders', { dealer_id: dealer.id, reminder_date: reminderDate, note });
-        await scheduleReminderNotifications({ dealerName: dealer.name, reminderDate });
+        // entered isn't lost, and still schedule the local device
+        // notifications now (they don't need a server id yet). The create
+        // gets a localId so the queued notifications PATCH below can be
+        // rewritten to the real reminder id once the create itself syncs
+        // (see syncManager.js's URL-id rewrite) — without this, the
+        // notification ids are never persisted server-side, so deleting
+        // this reminder later can never cancel the two already-scheduled
+        // OS notifications.
+        const localId = 'offline-' + Date.now();
+        await enqueueAction('post', '/reminders', { dealer_id: dealer.id, reminder_date: reminderDate, note }, { localId, resolves: 'reminder' });
+        const { notifIdDayBefore, notifIdDayOf } = await scheduleReminderNotifications({ dealerName: dealer.name, reminderDate });
+        if (notifIdDayBefore || notifIdDayOf) {
+          await enqueueAction('patch', `/reminders/${localId}/notifications`, {
+            notif_id_day_before: notifIdDayBefore,
+            notif_id_day_of: notifIdDayOf,
+          });
+        }
         showAlert('Offline Mode', 'Reminder saved locally and will sync when online.');
         navigation.goBack();
         return;

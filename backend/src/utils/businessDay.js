@@ -28,4 +28,24 @@ function isCurrentBusinessDay(timestampExpr) {
   return `${businessDateExpr(timestampExpr)} = ${businessDateExpr('NOW()')}`;
 }
 
-module.exports = { DAY_BOUNDARY_HOUR, businessDateExpr, isCurrentBusinessDay };
+/**
+ * JS-side equivalent of businessDateExpr('NOW()') — today's business date as
+ * a 'YYYY-MM-DD' string, for routes that validate a caller-supplied date
+ * against "today" without a DB round trip (e.g. rejecting a past date).
+ * Using the plain UTC calendar date instead (e.g.
+ * `new Date().toISOString().slice(0, 10)`) drifts from the real business
+ * date for up to DAY_BOUNDARY_HOUR's worth of minutes once per day — right
+ * after the boundary rolls over in IST but before the UTC calendar date has
+ * also rolled over (the backend's server clock runs in UTC, e.g. on Render).
+ * @param {Date} [now]
+ */
+function getBusinessDateString(now = new Date()) {
+  const shifted = new Date(now.getTime() - DAY_BOUNDARY_HOUR * 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(shifted);
+  const get = (type) => parts.find((p) => p.type === type).value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+module.exports = { DAY_BOUNDARY_HOUR, businessDateExpr, isCurrentBusinessDay, getBusinessDateString };

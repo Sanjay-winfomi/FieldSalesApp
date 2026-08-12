@@ -40,6 +40,7 @@ export default function HomeScreen({ navigation }) {
     visits,
     refreshing,
     pendingSyncCount,
+    setPendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
     backgroundLocationDenied,
@@ -147,7 +148,11 @@ export default function HomeScreen({ navigation }) {
           </FadeSlideIn>
         )}
 
-        <SyncQueueModal visible={syncQueueVisible} onClose={() => setSyncQueueVisible(false)} />
+        <SyncQueueModal
+          visible={syncQueueVisible}
+          onClose={() => setSyncQueueVisible(false)}
+          onQueueChanged={setPendingSyncCount}
+        />
 
         <FadeSlideIn delay={40}>
           {dayStatus === 'not_logged_in' && (

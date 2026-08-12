@@ -72,7 +72,15 @@ export const ID_LIKE_KEYS = ['id', 'employee_id', 'dealer_id', 'attendance_id', 
 // callers that need them (e.g. the exceptions row's own id) still can.
 export function buildDynamicColumns(rows) {
   if (rows.length === 0) return [];
-  return Object.keys(rows[0])
+  // Union of keys across ALL rows, not just rows[0] — a heterogeneous
+  // report (e.g. exceptions/dealer-visits, where later rows can carry a
+  // nullable column the first row happens to lack) would otherwise render
+  // that field for every row as invisible, since a column that isn't in
+  // rows[0] is never generated at all. Insertion order still favors
+  // rows[0]'s own key order, with any keys unique to later rows appended.
+  const allKeys = new Set();
+  rows.forEach((row) => Object.keys(row).forEach((key) => allKeys.add(key)));
+  return Array.from(allKeys)
     .filter((key) => !ID_LIKE_KEYS.includes(key))
     .map((key) => ({
       key,

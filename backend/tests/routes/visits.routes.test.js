@@ -9,7 +9,11 @@ const REP = { id: 1, role: 'rep', username: 'arun' };
 const MANAGER = { id: 2, role: 'manager', username: 'priya' };
 
 describe('POST /api/x/login', () => {
-  afterEach(() => jest.clearAllMocks());
+  // resetAllMocks (not clearAllMocks) — clearAllMocks leaves any UNCONSUMED
+  // mockResolvedValueOnce entries queued, which then leak into the next
+  // test and silently shift its call order. resetAllMocks actually empties
+  // that queue between tests.
+  afterEach(() => jest.resetAllMocks());
 
   test('400 when required fields are missing', async () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
@@ -29,6 +33,7 @@ describe('POST /api/x/login', () => {
   test('422 with reason_required when outside radius and no reason given', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
+      .mockResolvedValueOnce({ rows: [] }) // no open visit
       .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 100 }] }); // dealer
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
@@ -41,6 +46,7 @@ describe('POST /api/x/login', () => {
   test('201 logs in successfully inside the radius', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
+      .mockResolvedValueOnce({ rows: [] }) // no open visit
       .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 200 }] }) // dealer
       .mockResolvedValueOnce({ rows: [] }) // last visit (none)
       .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, login_time: 'now', login_lat: 11, login_lng: 77 }] }) // insert visit
@@ -57,6 +63,7 @@ describe('POST /api/x/login', () => {
   test('404 when the dealer does not exist', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] })
+      .mockResolvedValueOnce({ rows: [] }) // no open visit
       .mockResolvedValueOnce({ rows: [] });
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
@@ -64,10 +71,23 @@ describe('POST /api/x/login', () => {
       .send({ attendance_id: 1, dealer_id: 999, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(404);
   });
+
+  test('409 visit_already_open when the rep already has an open visit for this attendance', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
+      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 2, dealer_name: 'Dealer B' }] }); // open visit found
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/login')
+      .send({ attendance_id: 1, dealer_id: 1, lat: 11, lng: 77, accuracy_meters: 10 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('visit_already_open');
+    expect(res.body.visit).toEqual({ id: 55, dealer_id: 2, dealer_name: 'Dealer B' });
+  });
 });
 
 describe('POST /api/x/logout', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('409 with the authoritative visit record when already logged out', async () => {
     pool.query.mockResolvedValueOnce({
@@ -102,10 +122,10 @@ describe('POST /api/x/logout', () => {
     expect(res.body.visit.needs_verification).toBe(false);
   });
 
-  // Task 5 Case 1 — a normal (non-exception) login now has NO reason
-  // override: outside radius and not drift-matched to the login spot is a
-  // hard reject, replacing the old "accept with a >=20 char reason" path.
-  test('422 must_return_to_radius for a normal-login visit outside radius, even with a reason', async () => {
+  // Task 5 Case 1 — a normal (non-exception) login, logging out from
+  // outside the dealer radius and not drift-matched to the login spot,
+  // requires a written reason (50-500 chars) instead of a hard reject.
+  test('422 reason_required for a normal-login visit outside radius with no reason given', async () => {
     pool.query.mockResolvedValueOnce({
       rows: [{
         id: 55, attendance_id: 1, dealer_id: 1,
@@ -117,9 +137,32 @@ describe('POST /api/x/logout', () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
       .post('/api/x/logout')
-      .send({ visit_id: 55, lat: 12, lng: 78, accuracy_meters: 10, reason: 'A perfectly long, valid-looking reason string here' });
+      .send({ visit_id: 55, lat: 12, lng: 78, accuracy_meters: 10 });
     expect(res.status).toBe(422);
-    expect(res.body.error).toBe('must_return_to_radius');
+    expect(res.body.error).toBe('reason_required');
+    expect(res.body.minLength).toBe(50);
+    expect(res.body.maxLength).toBe(500);
+  });
+
+  test('200 logs out a normal-login visit from outside radius once a valid reason (50-500 chars) is given', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, attendance_id: 1, dealer_id: 1,
+          login_time: '2026-07-27T05:00:00Z', logout_time: null,
+          login_lat: 11, login_lng: 77, login_inside_radius: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, dealer_radius_meters: 100,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, logout_time: 'now', visit_duration_minutes: 30, out_of_radius: true, matched_login: false }] })
+      .mockResolvedValueOnce({ rows: [] }) // exception_log insert
+      .mockResolvedValueOnce({ rows: [] }); // createManagerNotification's insert
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/logout')
+      .send({ visit_id: 55, lat: 12, lng: 78, accuracy_meters: 10, reason: 'A perfectly long, valid-looking reason string here' });
+    expect(res.status).toBe(200);
+    expect(res.body.visit.out_of_radius).toBe(true);
   });
 
   // Task 5 Case 2 — login already used an exception: logout always requires
@@ -169,7 +212,7 @@ describe('POST /api/x/logout', () => {
 });
 
 describe('POST /api/x/:id/location-check', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('400 on invalid lat/lng', async () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
@@ -260,7 +303,7 @@ describe('POST /api/x/:id/location-check', () => {
 });
 
 describe('GET /api/x/exceptions — manager only', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('403 for a rep', async () => {
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });

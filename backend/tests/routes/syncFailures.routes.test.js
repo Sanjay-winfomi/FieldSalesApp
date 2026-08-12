@@ -49,4 +49,19 @@ describe('POST /api/x/', () => {
 
     expect(res.status).toBe(500);
   });
+
+  test('escapes LIKE metacharacters in the url before building the dedup pattern', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [] }) // dedup check: none found
+      .mockResolvedValueOnce({ rows: [] }); // insert
+    const app = makeApp(syncFailuresRouter, { basePath: '/api/x', employee: REP });
+    // A literal "%" or "_" in the url must not act as a LIKE wildcard — it
+    // should be escaped so the dedup pattern matches this exact url only.
+    const res = await request(app).post('/api/x/').send({ method: 'post', url: '/notes?q=100%_off', error: 'timeout' });
+
+    expect(res.status).toBe(201);
+    const dedupCall = pool.query.mock.calls[0];
+    expect(dedupCall[0]).toContain("ESCAPE '\\'");
+    expect(dedupCall[1][1]).toBe('%POST /notes?q=100\\%\\_off%');
+  });
 });

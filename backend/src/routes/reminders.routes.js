@@ -11,6 +11,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
+const { getBusinessDateString } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -24,8 +25,12 @@ function validateNote(note) {
   return trimmed.length >= MIN_NOTE_LENGTH ? trimmed : null;
 }
 
+// "Today" here means the current business day (5am IST rollover, see
+// businessDay.js) — the plain UTC calendar date would drift from it by up
+// to DAY_BOUNDARY_HOUR minutes once a day, right after the boundary rolls
+// over in IST but before the server's UTC calendar date does too.
 function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  return getBusinessDateString();
 }
 
 // POST /api/reminders

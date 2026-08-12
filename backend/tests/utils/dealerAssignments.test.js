@@ -19,6 +19,24 @@ describe('markAssignmentVisited', () => {
     expect(pool.query.mock.calls[1][1]).toEqual([20]);
   });
 
+  test('only closes the single most recent open navigation row, not every open row', async () => {
+    // A rep can leave more than one stale 'navigating'/'arrived' row behind
+    // for the same assignment (retried Tap Navigate without cancelling the
+    // earlier attempt) — closing all of them to 'completed' would double-
+    // count each one's distance/duration in the Daily Travel Summary, so
+    // the UPDATE must target exactly one row (the latest) via a subquery.
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 20 }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await markAssignmentVisited({ employeeId: 1, dealerId: 5 });
+
+    const navUpdateSql = pool.query.mock.calls[1][0];
+    expect(navUpdateSql).toMatch(/WHERE id = \(/);
+    expect(navUpdateSql).toMatch(/ORDER BY started_at DESC/);
+    expect(navUpdateSql).toMatch(/LIMIT 1/);
+  });
+
   test('does nothing further when the dealer has no assignment for today', async () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // no matching assignment row
 

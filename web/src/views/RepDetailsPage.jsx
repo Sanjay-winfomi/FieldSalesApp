@@ -32,7 +32,7 @@ function radiusCompliance(visit) {
   return { inside, distanceM, reason };
 }
 
-export default function RepDetailsPage({ token, repId, onBack }) {
+export default function RepDetailsPage({ repId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,16 +42,14 @@ export default function RepDetailsPage({ token, repId, onBack }) {
     setLoading(true);
     setError('');
     try {
-      const res = await apiClient.get(`/dashboard/rep/${repId}/today`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await apiClient.get(`/dashboard/rep/${repId}/today`);
       setData(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch details.');
     } finally {
       setLoading(false);
     }
-  }, [repId, token]);
+  }, [repId]);
 
   useEffect(() => {
     fetchDetails();
@@ -93,7 +91,7 @@ export default function RepDetailsPage({ token, repId, onBack }) {
       )}
 
       {!loading && data && view === 'report' && (
-        <RepFullReport token={token} repId={repId} employeeName={data.employee.name} />
+        <RepFullReport repId={repId} employeeName={data.employee.name} />
       )}
 
       {!loading && data && view === 'today' && (

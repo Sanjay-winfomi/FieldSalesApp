@@ -5,12 +5,16 @@
  * GET    /api/dealers/not-visited  — manager-only: dealers with no visit in the last N days
  * POST   /api/dealers              — manager-only: create a dealer
  * PUT    /api/dealers/:id          — manager-only: update a dealer
- * DELETE /api/dealers/:id          — manager-only: remove a dealer with no recorded visits
+ * DELETE /api/dealers/:id          — manager-only: remove a dealer (cascades to its visits,
+ *                                      exceptions, assignments, reminders, and notifications —
+ *                                      see schema.sql's dealer-cascade block)
  */
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
 const { requireRole } = require('../middleware/auth.middleware');
+const { createManagerNotification } = require('../utils/managerNotifications');
+const { getBusinessDateString } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -154,7 +158,38 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
     // irreversible.
     const visitCount = await pool.query('SELECT COUNT(*)::int AS count FROM client_visits WHERE dealer_id = $1', [id]);
 
+    // A pending follow-up request or a not-yet-completed future assignment
+    // for this dealer represents an in-flight workflow a rep is actively
+    // waiting on — unlike visit history, silently cascading these away with
+    // no trace would leave the rep never finding out why their request/plan
+    // vanished. Captured up front so the manager can be told what else this
+    // delete took with it.
+    const affectedResult = await pool.query(
+      `SELECT e.id AS employee_id, e.name AS employee_name
+       FROM dealer_followup_requests r
+       JOIN employees e ON e.id = r.employee_id
+       WHERE r.dealer_id = $1 AND r.status = 'pending'
+       UNION
+       SELECT e.id AS employee_id, e.name AS employee_name
+       FROM dealer_assignments a
+       JOIN employees e ON e.id = a.employee_id
+       WHERE a.dealer_id = $1 AND a.status NOT IN ('completed', 'cancelled')
+         AND a.assignment_date >= $2::date`,
+      [id, getBusinessDateString()]
+    );
+
     await pool.query('DELETE FROM dealers WHERE id = $1', [id]);
+
+    if (affectedResult.rows.length > 0) {
+      const names = affectedResult.rows.map((r) => r.employee_name).join(', ');
+      await createManagerNotification({
+        type: 'dealer_deleted_with_pending_work',
+        title: 'Dealer deleted with pending rep work',
+        body: `Deleting this dealer also removed a pending follow-up request or upcoming assignment for: ${names}. Let them know directly, since they won't see any notice of this on their own.`,
+        severity: 'warning',
+      });
+    }
+
     return res.json({ success: true, deletedVisitCount: visitCount.rows[0].count });
   } catch (err) {
     logger.error('DELETE /api/dealers/:id error', { error: err.message, stack: err.stack });

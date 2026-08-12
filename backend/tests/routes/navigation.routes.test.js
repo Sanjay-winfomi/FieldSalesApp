@@ -110,6 +110,38 @@ describe('PATCH /api/x/:id/status', () => {
     expect(res.status).toBe(200);
     expect(pool.query).toHaveBeenCalledTimes(2); // no third call updating dealer_assignments
   });
+
+  test('a late "arrived" from an abandoned navigation attempt cannot regress an already-completed assignment', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 101, employee_id: REP.id, assignment_id: 21 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 101, status: 'arrived', ended_at: null }] })
+      .mockResolvedValueOnce({ rows: [] }); // UPDATE dealer_assignments — WHERE clause excludes the row (rank guard), 0 rows affected
+
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).patch('/api/x/101/status').send({ status: 'arrived' });
+
+    expect(res.status).toBe(200);
+    expect(pool.query).toHaveBeenCalledTimes(3);
+    const assignmentUpdateSql = pool.query.mock.calls[2][0];
+    expect(assignmentUpdateSql).toContain('CASE status');
+    expect(assignmentUpdateSql).toContain('CASE $1');
+  });
+
+  test('a late "arrived" from an abandoned navigation attempt cannot resurrect a cancelled assignment', async () => {
+    // 'cancelled' and 'pending' share rank 0 in the CASE expression — the
+    // explicit `status != 'cancelled'` guard is what actually stops this,
+    // not the rank comparison alone.
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 102, employee_id: REP.id, assignment_id: 22 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 102, status: 'arrived', ended_at: null }] })
+      .mockResolvedValueOnce({ rows: [] }); // UPDATE dealer_assignments — status != 'cancelled' excludes the row, 0 rows affected
+
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).patch('/api/x/102/status').send({ status: 'arrived' });
+
+    expect(res.status).toBe(200);
+    expect(pool.query.mock.calls[2][0]).toContain("status != 'cancelled'");
+  });
 });
 
 describe('GET /api/x/history', () => {

@@ -27,7 +27,7 @@ export default function ProfileScreen() {
     return Math.max(0, Math.round((Date.now() - new Date(attendance.login_time)) / 60000));
   }, [attendance]);
 
-  const statusLabel = dayStatus === 'checked_in' ? 'Logged in' : dayStatus === 'day_ended' ? 'Day ended' : 'Not logged in';
+  const statusLabel = dayStatus === 'logged_in' ? 'Logged in' : dayStatus === 'day_ended' ? 'Day ended' : 'Not logged in';
 
   const handleLogoutPress = () => {
     showAlert('Log out', 'Are you sure you want to log out?', [

@@ -89,9 +89,12 @@ async function computeRouteOnce({ originLat, originLng, destLat, destLng }) {
 
   return {
     distanceMeters: route.distanceMeters ?? null,
-    // route.duration is traffic-aware ("live" ETA); staticDuration ignores
-    // current traffic — together they let the caller show a traffic delay.
-    durationSeconds: parseGoogleDuration(route.duration),
+    // durationSeconds is the no-traffic baseline; durationInTrafficSeconds
+    // is the live, traffic-aware ETA — together they let the caller compute
+    // a traffic delay. staticDurationSeconds is kept as an explicit alias
+    // for callers that want the baseline without reasoning about which of
+    // the other two fields is which.
+    durationSeconds: parseGoogleDuration(route.staticDuration),
     durationInTrafficSeconds: parseGoogleDuration(route.duration),
     staticDurationSeconds: parseGoogleDuration(route.staticDuration),
     encodedPolyline: route.polyline?.encodedPolyline || null,

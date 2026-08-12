@@ -70,6 +70,30 @@ describe('NotificationsPage', () => {
     expect(await screen.findByText('for 2099-02-15')).toBeInTheDocument();
   });
 
+  test('clearing the date disables Approve instead of silently falling back to the requested date with no guard', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    render(<NotificationsPage />);
+
+    const dateInput = await screen.findByLabelText('Approval date');
+    fireEvent.change(dateInput, { target: { value: '' } });
+
+    expect(screen.getByRole('button', { name: /approve/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+    expect(apiClient.patch).not.toHaveBeenCalled();
+  });
+
+  test('clicking Approve does not show Reject as loading too, and vice versa', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    // Never resolves — keeps the button in its loading state so it can be inspected.
+    apiClient.patch.mockReturnValue(new Promise(() => {}));
+    render(<NotificationsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /approve/i })).toBeDisabled());
+    expect(screen.getByRole('button', { name: /reject/i })).not.toBeDisabled();
+  });
+
   test('rejecting calls the backend and swaps the buttons for a Rejected badge', async () => {
     apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
     apiClient.patch.mockResolvedValue({ data: { request: { id: 10, status: 'rejected' } } });
@@ -82,15 +106,37 @@ describe('NotificationsPage', () => {
     expect(await screen.findByText('Rejected')).toBeInTheDocument();
   });
 
-  test('shows a per-row error and keeps the buttons if approving fails', async () => {
+  test('shows a friendly per-row error and keeps the buttons if approving fails', async () => {
     apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
     apiClient.patch.mockRejectedValue({ response: { data: { error: 'request_already_resolved' } } });
     render(<NotificationsPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /approve/i }));
 
-    expect(await screen.findByText('request_already_resolved')).toBeInTheDocument();
+    expect(await screen.findByText(/already resolved/i)).toBeInTheDocument();
+    expect(screen.queryByText('request_already_resolved')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
+  });
+
+  test('shows a friendly error when the approved date has already passed', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    apiClient.patch.mockRejectedValue({ response: { data: { error: 'approved_date_in_past' } } });
+    render(<NotificationsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve/i }));
+
+    expect(await screen.findByText(/already passed/i)).toBeInTheDocument();
+    expect(screen.queryByText('approved_date_in_past')).not.toBeInTheDocument();
+  });
+
+  test('the approval date input cannot be set earlier than today', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    render(<NotificationsPage />);
+
+    const dateInput = await screen.findByLabelText('Approval date');
+    const today = new Date();
+    const expectedMin = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    expect(dateInput).toHaveAttribute('min', expectedMin);
   });
 
   test('an already-resolved follow-up notification shows a status badge, not buttons', async () => {

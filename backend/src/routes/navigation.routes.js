@@ -144,9 +144,24 @@ router.patch('/:id/status', async (req, res) => {
     if (assignmentId != null && status !== 'cancelled') {
       // 'arrived'/'completed' map directly; a cancelled navigation attempt
       // doesn't mean the visit itself is cancelled, so the assignment is
-      // left as-is rather than mirrored to 'cancelled'.
+      // left as-is rather than mirrored to 'cancelled'. The rank comparison
+      // guards against regressing an assignment backward: a rep can have
+      // multiple navigation attempts for one assignment (re-tapping
+      // Navigate creates a new dealer_navigations row each time), so a
+      // late/out-of-order status update from an earlier, abandoned attempt
+      // (e.g. a stale 'arrived' landing after the dealer check-in already
+      // advanced this assignment to 'completed') must not downgrade it.
+      // status != 'cancelled' is its own explicit condition (not folded into
+      // the rank CASE) — 'cancelled' would otherwise share rank 0 with
+      // 'pending' in the ELSE branch, letting this same late/stale update
+      // resurrect an assignment a manager had deliberately cancelled.
       await pool.query(
-        `UPDATE dealer_assignments SET status = $1, updated_at = NOW() WHERE id = $2`,
+        `UPDATE dealer_assignments
+         SET status = $1, updated_at = NOW()
+         WHERE id = $2
+           AND status != 'cancelled'
+           AND (CASE status WHEN 'completed' THEN 3 WHEN 'arrived' THEN 2 WHEN 'navigating' THEN 1 ELSE 0 END)
+             < (CASE $1     WHEN 'completed' THEN 3 WHEN 'arrived' THEN 2 WHEN 'navigating' THEN 1 ELSE 0 END)`,
         [status, assignmentId]
       );
     }

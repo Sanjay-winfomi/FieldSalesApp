@@ -138,6 +138,100 @@ describe('AssignmentsTab', () => {
     expect(screen.queryByTestId('assignment-row-10')).not.toBeInTheDocument();
   });
 
+  test('Save stays disabled while a newly-selected rep\'s plan is still loading, even with unsaved edits pending', async () => {
+    // Arun has unsaved edits (Dealer B just added, never saved). Switching to
+    // Divya kicks off a slow load for her plan. If Save weren't disabled
+    // during that window, clicking it would PUT Arun's edited list against
+    // Divya's employee_id, since her rows haven't arrived yet.
+    let resolveDivya;
+    apiClient.get.mockImplementation((url, config) => {
+      if (url === '/employees?role=rep') return Promise.resolve({ data: { employees: REPS } });
+      if (url === '/dealers') return Promise.resolve({ data: { dealers: DEALERS } });
+      if (url === '/assignments') {
+        if (config.params.employee_id === 1) {
+          return Promise.resolve({
+            data: { assignments: [{ id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', status: 'pending' }] },
+          });
+        }
+        return new Promise((resolve) => { resolveDivya = resolve; });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText('Assigned order (1)');
+
+    fireEvent.click(screen.getByLabelText('Add Dealer B'));
+    expect(await screen.findByRole('button', { name: /save changes/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Arun/i }));
+    fireEvent.click(await screen.findByText('Divya'));
+    // Switching reps while dirty prompts to discard the unsaved edit first.
+    fireEvent.click(await screen.findByRole('button', { name: /discard changes/i }));
+
+    // Divya's load hasn't resolved yet — Save must be disabled ("Saved" or
+    // "Save changes", either way not clickable) so Arun's dirtied list can't
+    // land on Divya's employee_id.
+    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+
+    resolveDivya({ data: { assignments: [] } });
+    await waitFor(() => expect(screen.getByText('Assigned order (0)')).toBeInTheDocument());
+    expect(apiClient.put).not.toHaveBeenCalled();
+  });
+
+  test('removing a dealer from the plan requires confirmation', async () => {
+    mockInitialLoad([
+      { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', status: 'pending' },
+    ]);
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText('Assigned order (1)');
+
+    fireEvent.click(screen.getByLabelText('Remove Dealer A'));
+    // Not removed yet — still showing 1, and the confirm dialog is up.
+    expect(screen.getByText('Assigned order (1)')).toBeInTheDocument();
+    expect(screen.getByText(/will be removed from this rep's visit plan/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^remove$/i }));
+    expect(screen.getByText('Assigned order (0)')).toBeInTheDocument();
+  });
+
+  test('cancelling the discard-changes prompt keeps the current rep selected with edits intact', async () => {
+    let resolveDivya;
+    apiClient.get.mockImplementation((url, config) => {
+      if (url === '/employees?role=rep') return Promise.resolve({ data: { employees: REPS } });
+      if (url === '/dealers') return Promise.resolve({ data: { dealers: DEALERS } });
+      if (url === '/assignments') {
+        if (config.params.employee_id === 1) {
+          return Promise.resolve({
+            data: { assignments: [{ id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', status: 'pending' }] },
+          });
+        }
+        return new Promise((resolve) => { resolveDivya = resolve; });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    render(<AssignmentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /select a representative/i }));
+    fireEvent.click(await screen.findByText('Arun'));
+    await screen.findByText('Assigned order (1)');
+
+    fireEvent.click(screen.getByLabelText('Add Dealer B'));
+    expect(screen.getByText('Assigned order (2)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Arun/i }));
+    fireEvent.click(await screen.findByText('Divya'));
+    fireEvent.click(await screen.findByRole('button', { name: /^cancel$/i }));
+
+    // Still on Arun, with the unsaved add still in place.
+    expect(screen.getByText('Assigned order (2)')).toBeInTheDocument();
+    expect(resolveDivya).toBeUndefined();
+  });
+
   test('shows an error banner when saving fails', async () => {
     mockInitialLoad([{ id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', status: 'pending' }]);
     apiClient.put.mockRejectedValue({ response: { data: { error: 'boom' } } });

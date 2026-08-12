@@ -12,6 +12,7 @@
  * instead of repeating the write.
  */
 const pool = require('../db/pool');
+const logger = require('./logger');
 
 // Scoped by employee_id, not just the key — the key is client-generated
 // (not a server-issued secret), so without this an attacker who observed or
@@ -36,4 +37,28 @@ async function saveIdempotentResponse(key, employeeId, endpoint, status, body) {
   );
 }
 
-module.exports = { getIdempotentResponse, saveIdempotentResponse };
+// Retention: every mutating request with an Idempotency-Key header
+// (mobile's cold-start retry, and every login/logout/location-check) inserts
+// a permanent row here with nothing else ever deleting it — left running,
+// this table grows without bound for the life of the deployment. A key only
+// ever needs to survive long enough for the client's OWN retry window
+// (COLD_START_RETRY_DELAYS_MS tops out well under a minute; the offline
+// sync queue's bounded retries stretch to ~hours at the 30min-capped
+// backoff) — 24h is a generous multiple of that with margin to spare.
+const RETENTION_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+async function cleanupOldIdempotencyKeys() {
+  try {
+    await pool.query(`DELETE FROM idempotency_keys WHERE created_at < NOW() - INTERVAL '${RETENTION_MS} milliseconds'`);
+  } catch (err) {
+    logger.error('Failed to clean up old idempotency keys', { error: err.message });
+  }
+}
+
+// unref() so this timer never keeps the process alive on its own (relevant
+// for tests and clean shutdowns) — mirrors auth.middleware.js's own sweep.
+const cleanupInterval = setInterval(cleanupOldIdempotencyKeys, CLEANUP_INTERVAL_MS);
+cleanupInterval.unref();
+
+module.exports = { getIdempotentResponse, saveIdempotentResponse, cleanupOldIdempotencyKeys };

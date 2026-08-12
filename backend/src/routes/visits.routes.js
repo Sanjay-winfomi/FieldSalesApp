@@ -2,7 +2,7 @@
  * visits.routes.js — Stage 5 + Dealer Geofencing & GPS Validation spec
  *
  * POST /api/visits/login  — log in at a dealer (blocked outside radius w/o justification)
- * POST /api/visits/logout — log out of a dealer (blocked outside radius w/o justification,
+ * POST /api/visits/logout — log out of a dealer (blocked outside radius w/o a written reason,
  *                             unless the logout GPS matches the login GPS within tolerance)
  * GET  /api/visits/exceptions       — manager-only: list out-of-radius events
  * PATCH /api/visits/exceptions/:id  — manager-only: mark an exception reviewed
@@ -25,13 +25,14 @@ const router = express.Router();
 
 const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS || '30');
 const MATCH_TOLERANCE_M         = parseInt(process.env.LOGIN_MATCH_TOLERANCE_METERS || '20');
-const SYSTEM_DEFAULT_RADIUS_M   = parseInt(process.env.LOGIN_RADIUS_METERS || '200');
 const MIN_REASON_LENGTH         = 20;
 
-// Logout-specific reason bounds for a visit whose LOGIN already used an
-// exception (Task 5 Case 2/3) — stricter than MIN_REASON_LENGTH (login's own
-// rule, unchanged) since this is the rep's one chance to explain a logout
-// that a normal visit could never reach this branch for.
+// Logout-specific reason bounds — required whenever the visit's LOGIN
+// already used an exception, or the rep is currently outside the dealer
+// radius at logout time (and not drift-matched to the login spot).
+// Stricter than MIN_REASON_LENGTH (login's own rule, unchanged) since this
+// is the rep's one chance to explain a logout a normal in-radius visit
+// never needs to reach this branch for.
 const LOGOUT_EXCEPTION_REASON_MIN = 50;
 const LOGOUT_EXCEPTION_REASON_MAX = 500;
 
@@ -102,6 +103,27 @@ router.post('/login', async (req, res) => {
     }
     const att = attResult.rows[0];
 
+    // A rep can only have one open visit at a time — logging in at a second
+    // dealer without logging out of the first would corrupt
+    // distance_from_previous_km (computed from the last logout) and break
+    // every downstream assumption of a single "current visit" (dashboard,
+    // radius-alert staging, geofence monitoring).
+    const openVisitResult = await pool.query(
+      `SELECT cv.id, cv.dealer_id, d.name AS dealer_name
+       FROM client_visits cv
+       JOIN dealers d ON d.id = cv.dealer_id
+       WHERE cv.attendance_id = $1 AND cv.logout_time IS NULL
+       LIMIT 1`,
+      [attendance_id]
+    );
+    if (openVisitResult.rows.length > 0) {
+      const open = openVisitResult.rows[0];
+      return res.status(409).json({
+        error: 'visit_already_open',
+        visit: { id: open.id, dealer_id: open.dealer_id, dealer_name: open.dealer_name },
+      });
+    }
+
     // Verify dealer exists
     const dealerResult = await pool.query(
       `SELECT id, name, latitude, longitude, radius_meters FROM dealers WHERE id = $1`,
@@ -117,9 +139,10 @@ router.post('/login', async (req, res) => {
     let distanceM = null;
     let insideRadius = true;
     if (dealer.latitude != null && dealer.longitude != null) {
-      const radiusMeters = dealer.radius_meters ?? SYSTEM_DEFAULT_RADIUS_M;
+      // dealers.radius_meters is NOT NULL DEFAULT 200 (schema.sql) — every
+      // row always has a value, so no further fallback is needed here.
       distanceM = haversineKm(parseFloat(dealer.latitude), parseFloat(dealer.longitude), lat, lng) * 1000;
-      insideRadius = distanceM <= radiusMeters;
+      insideRadius = distanceM <= dealer.radius_meters;
     }
 
     const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
@@ -283,9 +306,8 @@ router.post('/logout', async (req, res) => {
     let distanceM = null;
     let insideRadius = true;
     if (visit.dealer_lat != null && visit.dealer_lng != null) {
-      const radiusMeters = visit.dealer_radius_meters ?? SYSTEM_DEFAULT_RADIUS_M;
       distanceM = haversineKm(parseFloat(visit.dealer_lat), parseFloat(visit.dealer_lng), lat, lng) * 1000;
-      insideRadius = distanceM <= radiusMeters;
+      insideRadius = distanceM <= visit.dealer_radius_meters;
     }
 
     // Outside the dealer radius — but if the logout GPS is within tolerance
@@ -299,12 +321,16 @@ router.post('/logout', async (req, res) => {
 
     const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
     const loginWasException = visit.login_inside_radius === false;
+    const outsideNow = !insideRadius && !matchedLogin;
 
-    if (loginWasException) {
-      // Case 2/3 — the login already used an exception, so logout always
-      // requires a written reason (regardless of current distance), bounded
-      // to 50-500 characters. No inside-radius/drift-match escape hatch here
-      // — the rep already isn't in the "normal visit" path.
+    // A written reason (50-500 chars) is required whenever EITHER is true:
+    // the login itself already used an exception (regardless of current
+    // distance — the rep already isn't in the "normal visit" path), or the
+    // rep is currently outside the dealer radius and not drift-matched to
+    // the login spot (they're physically leaving from outside, not from the
+    // dealer's premises). Inside radius (or drift-matched) with a normal
+    // login needs no reason at all.
+    if (loginWasException || outsideNow) {
       if (trimmedReason.length < LOGOUT_EXCEPTION_REASON_MIN || trimmedReason.length > LOGOUT_EXCEPTION_REASON_MAX) {
         return res.status(422).json({
           error: 'reason_required',
@@ -313,15 +339,6 @@ router.post('/logout', async (req, res) => {
           maxLength: LOGOUT_EXCEPTION_REASON_MAX,
         });
       }
-    } else if (!insideRadius && !matchedLogin) {
-      // Case 1 — a normal login. No reason override: outside radius and not
-      // drift-matched to the login spot is a hard reject, matching "disable
-      // logout, no fallback" rather than the old accept-with-a-reason escape
-      // hatch (that escape hatch now applies only to exception-login visits).
-      return res.status(422).json({
-        error: 'must_return_to_radius',
-        distanceMeters: distanceM,
-      });
     }
 
     const loginTime  = new Date(visit.login_time);
@@ -442,9 +459,8 @@ router.post('/:id/location-check', async (req, res) => {
     let distanceM = null;
     let insideRadius = true;
     if (visit.dealer_lat != null && visit.dealer_lng != null) {
-      const radiusMeters = visit.radius_meters ?? SYSTEM_DEFAULT_RADIUS_M;
       distanceM = haversineKm(parseFloat(visit.dealer_lat), parseFloat(visit.dealer_lng), lat, lng) * 1000;
-      insideRadius = distanceM <= radiusMeters;
+      insideRadius = distanceM <= visit.radius_meters;
     }
 
     const nextOutsideCount = insideRadius ? visit.outside_radius_count : visit.outside_radius_count + 1;

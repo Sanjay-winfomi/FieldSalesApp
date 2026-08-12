@@ -20,15 +20,18 @@ export default function ConfirmationModal({
 }) {
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onCancel?.(); };
+    // Ignored while loading — the confirmed action (delete/deactivate) is
+    // still in flight, and dismissing the dialog would hide that with no
+    // visual sign the mutation is still running.
+    const onKey = (e) => { if (e.key === 'Escape' && !loading) onCancel?.(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onCancel]);
+  }, [open, loading, onCancel]);
 
   if (!open) return null;
 
   return (
-    <div className="ft-modal-backdrop" onClick={onCancel} role="presentation">
+    <div className="ft-modal-backdrop" onClick={loading ? undefined : onCancel} role="presentation">
       <div
         className="ft-modal-card"
         style={{ width: 400, maxWidth: '90vw', padding: spacing.xxl }}

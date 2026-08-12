@@ -15,6 +15,7 @@ const logger = require('../utils/logger');
 const pool = require('../db/pool');
 const { requireRole } = require('../middleware/auth.middleware');
 const { createManagerNotification } = require('../utils/managerNotifications');
+const { getBusinessDateString } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -29,12 +30,19 @@ function validateReason(reason) {
   return trimmed.length >= MIN_REASON_LENGTH ? trimmed : null;
 }
 
+// "Today" here means the current business day (5am IST rollover, see
+// businessDay.js) — the plain UTC calendar date would drift from it by up
+// to DAY_BOUNDARY_HOUR minutes once a day, right after the boundary rolls
+// over in IST but before the server's UTC calendar date does too.
 function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  return getBusinessDateString();
 }
 
 // POST /api/followup-requests  { dealer_id, assignment_id?, requested_date, reason }
-router.post('/', async (req, res) => {
+// rep-only: this is "a rep's ask" for a dealer to be (re-)assigned — a
+// manager doesn't need this route since they can just save an assignment
+// directly via PUT /api/assignments.
+router.post('/', requireRole('rep'), async (req, res) => {
   const dealerId = parseInt(req.body.dealer_id);
   if (!Number.isInteger(dealerId)) {
     return res.status(400).json({ error: 'dealer_id is required' });
@@ -159,6 +167,26 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
       approvedDate = req.body.approved_date;
     }
 
+    // Claims the pending->approved transition atomically BEFORE creating any
+    // assignment — `AND status = 'pending'` means only one of a concurrent
+    // approve/reject race can ever win this UPDATE. Without this, two
+    // requests racing (e.g. a manager double-clicking, or two managers)
+    // could both pass the earlier status check and each proceed with their
+    // own side effect, leaving the request rejected while an assignment
+    // from the "approve" path still got created. Ordering the claim before
+    // the assignment INSERT means the loser returns 409 having created
+    // nothing, rather than leaving a stray assignment behind either way.
+    const updated = await pool.query(
+      `UPDATE dealer_followup_requests
+       SET status = 'approved', approved_date = $1, resolved_by = $2, resolved_at = NOW()
+       WHERE id = $3 AND status = 'pending'
+       RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
+      [approvedDate, req.employee.id, id]
+    );
+    if (updated.rows.length === 0) {
+      return res.status(409).json({ error: 'request_already_resolved' });
+    }
+
     const nextSeqResult = await pool.query(
       `SELECT COALESCE(MAX(sequence_order), 0) + 1 AS next_seq
        FROM dealer_assignments WHERE employee_id = $1 AND assignment_date = $2::date`,
@@ -179,13 +207,6 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
       [request.employee_id, request.dealer_id, approvedDate, nextSeq, req.employee.id]
     );
     const assignmentId = assignmentResult.rows[0].id;
-
-    const updated = await pool.query(
-      `UPDATE dealer_followup_requests
-       SET status = 'approved', approved_date = $1, resolved_by = $2, resolved_at = NOW()
-       WHERE id = $3 RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
-      [approvedDate, req.employee.id, id]
-    );
 
     return res.json({ request: updated.rows[0], assignment_id: assignmentId });
   } catch (err) {
@@ -210,11 +231,20 @@ router.patch('/:id/reject', requireRole('manager'), async (req, res) => {
       return res.status(409).json({ error: 'request_already_resolved', status: existing.rows[0].status });
     }
 
+    // `AND status = 'pending'` makes this the atomic claim on the
+    // transition (see the matching comment in /approve) — if an
+    // approve/reject race already resolved it between the check above and
+    // this UPDATE, rowCount is 0 here instead of silently overwriting
+    // whatever the other request just committed.
     const result = await pool.query(
       `UPDATE dealer_followup_requests SET status = 'rejected', resolved_by = $1, resolved_at = NOW()
-       WHERE id = $2 RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
+       WHERE id = $2 AND status = 'pending'
+       RETURNING ${REQUEST_FIELDS.replace(/r\./g, '')}`,
       [req.employee.id, id]
     );
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: 'request_already_resolved' });
+    }
     return res.json({ request: result.rows[0] });
   } catch (err) {
     logger.error('PATCH /api/followup-requests/:id/reject error', { error: err.message, stack: err.stack });

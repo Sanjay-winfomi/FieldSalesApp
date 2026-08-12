@@ -38,7 +38,7 @@ export const setConflictHandler = (fn) => {
  *   (e.g. the 'offline-<ts>' id assigned to an offline-created attendance/visit).
  *   Later queued actions referencing that same temp id get rewritten to the
  *   real server id once this action syncs successfully.
- * @param {'attendance'|'visit'} [opts.resolves] - which id field the response maps to.
+ * @param {'attendance'|'visit'|'reminder'} [opts.resolves] - which id field the response maps to.
  */
 export const enqueueAction = async (method, url, data, opts = {}) => {
   try {
@@ -53,6 +53,15 @@ export const enqueueAction = async (method, url, data, opts = {}) => {
       resolves: opts.resolves || null,
       retryCount: 0,
       timestamp: new Date().toISOString(),
+      // Generated ONCE here (same format api.js's own interceptor would
+      // otherwise generate per-request) and reused on every retry of this
+      // action — api.js's request interceptor only fills in a key when one
+      // isn't already present on the config, so passing this explicitly
+      // below keeps it stable across retries. Without this, a network drop
+      // after the server already processed a write (exactly the scenario
+      // this queue exists for) is indistinguishable from a fresh request on
+      // retry, and idempotency.js can't catch the resulting duplicate.
+      idempotencyKey: Date.now().toString(36) + Math.random().toString(36).slice(2),
     });
 
     await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
@@ -103,7 +112,16 @@ export const clearQueue = async () => {
 };
 
 // Fields that may hold a temp 'offline-...' id needing rewrite before send.
-const ID_FIELDS = ['attendance_id', 'visit_id'];
+const ID_FIELDS = ['attendance_id', 'visit_id', 'reminder_id'];
+
+// Some queued actions have no id-bearing body field at all — a
+// location-check ping (POST /visits/:id/location-check) or a notification-id
+// patch (PATCH /reminders/:id/notifications) address the record purely via
+// its URL path segment, with the temp id baked directly into that string at
+// enqueue time (e.g. `/visits/offline-1699999999999/location-check`). Those
+// need the exact same localId -> real-id rewrite ID_FIELDS does for body
+// fields, just applied to the URL instead.
+const OFFLINE_ID_IN_URL = /offline-\d+/;
 
 // A real HTTP response (even an error one) means the request reached the
 // server and isn't a connectivity problem — defer to that first. Only when
@@ -145,6 +163,12 @@ export const flushQueue = async () => {
       console.log(`Flushing ${queue.length} offline actions...`);
 
       const idMap = {};       // localId -> real server id
+      // localIds whose owning action was discarded this pass after
+      // exhausting MAX_RETRIES — a dependent action blocked on one of these
+      // can NEVER resolve (the parent it needs is never coming), so it must
+      // be discarded too rather than requeued forever with no user-visible
+      // sign anything is stuck.
+      const failedLocalIds = new Set();
       // Actions not yet processed this pass — persisted to storage after
       // every single action settles (not just once at the end), so that if
       // the app is killed mid-flush, an already-synced action can't still be
@@ -161,17 +185,45 @@ export const flushQueue = async () => {
 
         // Rewrite any temp id references using ids resolved earlier in this pass.
         const data = { ...action.data };
+        let url = action.url;
         let blockedOnDependency = false;
+        let blockedOnFailedDependency = false;
 
         for (const field of ID_FIELDS) {
           const val = data[field];
           if (typeof val === 'string' && val.startsWith('offline-')) {
             if (idMap[val]) {
               data[field] = idMap[val];
+            } else if (failedLocalIds.has(val)) {
+              blockedOnFailedDependency = true;
             } else {
               blockedOnDependency = true;
             }
           }
+        }
+
+        const urlIdMatch = url.match(OFFLINE_ID_IN_URL);
+        if (urlIdMatch) {
+          const tempId = urlIdMatch[0];
+          if (idMap[tempId]) {
+            url = url.replace(tempId, idMap[tempId]);
+          } else if (failedLocalIds.has(tempId)) {
+            blockedOnFailedDependency = true;
+          } else {
+            blockedOnDependency = true;
+          }
+        }
+
+        if (blockedOnFailedDependency) {
+          // The action this depends on was just permanently discarded (see
+          // the MAX_RETRIES branch below) — it will never sync, so this one
+          // never can either. Discard it too instead of leaving it queued
+          // forever with no way for the user to ever notice or clear it.
+          console.error(`Discarding queued action ${action.id}: depends on an action that failed permanently.`);
+          api.post('/sync-failures', { method: action.method, url: action.url, error: 'dependency failed permanently' })
+            .catch(() => {});
+          await persistRemaining();
+          continue;
         }
 
         if (blockedOnDependency) {
@@ -193,12 +245,19 @@ export const flushQueue = async () => {
         }
 
         try {
-          const response = await api.request({ method: action.method, url: action.url, data });
+          const response = await api.request({
+            method: action.method,
+            url,
+            data,
+            headers: action.idempotencyKey ? { 'Idempotency-Key': action.idempotencyKey } : undefined,
+          });
 
           if (action.localId && action.resolves === 'attendance') {
             idMap[action.localId] = response.data.attendance?.id;
           } else if (action.localId && action.resolves === 'visit') {
             idMap[action.localId] = response.data.visit?.id;
+          } else if (action.localId && action.resolves === 'reminder') {
+            idMap[action.localId] = response.data.reminder?.id;
           }
 
           console.log(`Synced queued action: ${action.method} ${action.url}`);
@@ -256,6 +315,9 @@ export const flushQueue = async () => {
               // proceeds (nothing further to retry it against).
               api.post('/sync-failures', { method: action.method, url: action.url, error: error.message })
                 .catch(() => {});
+              // Anything still queued that depends on this action's localId
+              // can never resolve now — see blockedOnFailedDependency above.
+              if (action.localId) failedLocalIds.add(action.localId);
             }
           }
           await persistRemaining();

@@ -8,9 +8,11 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
+const { haversineKm } = require('../utils/haversine');
 const { logDayLogin, logDayLogout } = require('../utils/activityLog');
 const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
+const { createManagerNotification } = require('../utils/managerNotifications');
 const { notifyUnvisitedAssignments } = require('../utils/dealerAssignments');
 
 const router = express.Router();
@@ -137,6 +139,59 @@ router.post('/logout', async (req, res) => {
     const loginTime  = new Date(att.login_time);
     const logoutTime = new Date();
     const durationMins = Math.round((logoutTime - loginTime) / 60000);
+
+    // A dealer visit left open when the day ends would otherwise be
+    // orphaned forever — no duration, no closure, and any later
+    // location-check ping against it keeps running as if the day were
+    // still active. Auto-close it using this same logout's GPS fix, and
+    // flag it for the manager since this is an automatic closure, not the
+    // rep's own dealer-logout action.
+    const openVisitResult = await pool.query(
+      `SELECT cv.id, cv.dealer_id, cv.login_time, d.name AS dealer_name,
+              d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters
+       FROM client_visits cv
+       JOIN dealers d ON d.id = cv.dealer_id
+       WHERE cv.attendance_id = $1 AND cv.logout_time IS NULL
+       LIMIT 1`,
+      [attendance_id]
+    );
+    if (openVisitResult.rows.length > 0) {
+      const openVisit = openVisitResult.rows[0];
+      const visitDurationMins = Math.round((logoutTime - new Date(openVisit.login_time)) / 60000);
+      let visitOutOfRadius = false;
+      if (openVisit.dealer_lat != null && openVisit.dealer_lng != null) {
+        const visitDistanceM = haversineKm(parseFloat(openVisit.dealer_lat), parseFloat(openVisit.dealer_lng), lat, lng) * 1000;
+        visitOutOfRadius = visitDistanceM > openVisit.dealer_radius_meters;
+      }
+      // Re-checks logout_time IS NULL here too (not just in the SELECT
+      // above) — without it, a manual dealer logout (POST /visits/logout)
+      // racing this same request (e.g. an offline queue flushing both close
+      // together) could complete AFTER the SELECT read the visit as open
+      // but BEFORE this UPDATE runs, and this would then silently overwrite
+      // the rep's real GPS/duration/justification with the synthetic
+      // auto-close note. rowCount confirms whether this UPDATE actually won
+      // that race — the notification only fires if it did.
+      const autoCloseResult = await pool.query(
+        `UPDATE client_visits
+         SET logout_time = NOW(), logout_lat = $1, logout_lng = $2,
+             visit_duration_minutes = $3, out_of_radius = $4,
+             logout_justification_note = $5
+         WHERE id = $6 AND logout_time IS NULL`,
+        [lat, lng, visitDurationMins, visitOutOfRadius,
+         'Auto-closed: day ended while still logged in at this dealer', openVisit.id]
+      );
+      if (autoCloseResult.rowCount > 0) {
+        await createManagerNotification({
+          type: 'visit_auto_closed_on_day_logout',
+          title: 'Dealer visit auto-closed at day logout',
+          body: `${req.employee.username} ended their day while still logged in at ${openVisit.dealer_name} — the visit was automatically closed.`,
+          severity: 'warning',
+          employeeId,
+          dealerId: openVisit.dealer_id,
+          visitId: openVisit.id,
+        });
+      }
+    }
 
     const result = await pool.query(
       `UPDATE attendance

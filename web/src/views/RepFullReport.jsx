@@ -20,7 +20,7 @@ const SECTIONS = [
  * reminders section (managers previously had zero visibility into reps'
  * dealer follow-up reminders).
  */
-export default function RepFullReport({ token, repId, employeeName }) {
+export default function RepFullReport({ repId, employeeName }) {
   const [from, setFrom] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -34,18 +34,16 @@ export default function RepFullReport({ token, repId, employeeName }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const authHeader = { headers: { Authorization: `Bearer ${token}` } };
-
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const params = { from, to, employee_id: repId };
       const [attendanceRes, visitsRes, exceptionsRes, rollupRes] = await Promise.all([
-        apiClient.get('/reports/attendance', { params, ...authHeader }),
-        apiClient.get('/reports/dealer-visits', { params, ...authHeader }),
-        apiClient.get('/reports/exceptions', { params, ...authHeader }),
-        apiClient.get('/reports/distance-duration', { params, ...authHeader }),
+        apiClient.get('/reports/attendance', { params }),
+        apiClient.get('/reports/dealer-visits', { params }),
+        apiClient.get('/reports/exceptions', { params }),
+        apiClient.get('/reports/distance-duration', { params }),
       ]);
       setSectionData({
         attendance: attendanceRes.data.rows,
@@ -58,8 +56,7 @@ export default function RepFullReport({ token, repId, employeeName }) {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, repId, token]);
+  }, [from, to, repId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -67,11 +64,10 @@ export default function RepFullReport({ token, repId, employeeName }) {
   // a forward-looking to-do, not a historical activity record, so it's
   // fetched once per rep rather than re-fetched on every date-range change.
   useEffect(() => {
-    apiClient.get('/reminders', { params: { employee_id: repId }, ...authHeader })
+    apiClient.get('/reminders', { params: { employee_id: repId } })
       .then((res) => setReminders(res.data.reminders || []))
       .catch(() => setReminders([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repId, token]);
+  }, [repId]);
 
   const handleExport = (section) => {
     const params = new URLSearchParams({ from, to, employee_id: repId, format: 'csv' });
