@@ -1,7 +1,14 @@
-jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
 const { makeApp } = require('../helpers/testApp');
+
+// PUT /api/x/ runs inside a transaction via pool.connect(), not pool.query()
+// directly — this stub client's own `query` mock is what the route's
+// BEGIN/advisory-lock/DELETE/INSERT/COMMIT calls hit.
+function mockClient() {
+  return { query: jest.fn(), release: jest.fn() };
+}
 
 const assignmentsRouter = require('../../src/routes/assignments.routes');
 
@@ -48,45 +55,63 @@ describe('PUT /api/x/', () => {
   });
 
   test('404 when the representative does not exist', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] }); // employee lookup
+    const client = mockClient();
+    client.query.mockResolvedValueOnce({ rows: [] }); // employee lookup
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(assignmentsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).put('/api/x/').send({ employee_id: REP.id, assignment_date: '2026-08-10', dealer_ids: [1] });
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('404 when one of the dealers does not exist', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: REP.id }] }) // employee exists
       .mockResolvedValueOnce({ rows: [{ id: 1 }] }); // only 1 of 2 dealers found
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(assignmentsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).put('/api/x/').send({ employee_id: REP.id, assignment_date: '2026-08-10', dealer_ids: [1, 2] });
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('200 saves the ordered list — sequence order matches array order', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: REP.id }] }) // employee exists
       .mockResolvedValueOnce({ rows: [{ id: 1 }, { id: 2 }] }) // dealers exist
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // advisory lock
       .mockResolvedValueOnce({ rows: [] }) // delete stale
       .mockResolvedValueOnce({ rows: [] }) // upsert dealer 1
       .mockResolvedValueOnce({ rows: [] }) // upsert dealer 2
-      .mockResolvedValueOnce({ rows: [{ id: 10, dealer_id: 1, sequence_order: 1 }, { id: 11, dealer_id: 2, sequence_order: 2 }] }); // final select
+      .mockResolvedValueOnce({ rows: [{ id: 10, dealer_id: 1, sequence_order: 1 }, { id: 11, dealer_id: 2, sequence_order: 2 }] }) // final select
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
 
     const app = makeApp(assignmentsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).put('/api/x/').send({ employee_id: REP.id, assignment_date: '2026-08-10', dealer_ids: [1, 2] });
 
     expect(res.status).toBe(200);
     expect(res.body.assignments).toHaveLength(2);
-    // Upsert calls (index 3 and 4) carry sequence_order 1 and 2 respectively.
-    expect(pool.query.mock.calls[3][1]).toEqual([REP.id, 1, '2026-08-10', 1, MANAGER.id]);
-    expect(pool.query.mock.calls[4][1]).toEqual([REP.id, 2, '2026-08-10', 2, MANAGER.id]);
+    // Upsert calls (index 5 and 6) carry sequence_order 1 and 2 respectively.
+    expect(client.query.mock.calls[5][1]).toEqual([REP.id, 1, '2026-08-10', 1, MANAGER.id]);
+    expect(client.query.mock.calls[6][1]).toEqual([REP.id, 2, '2026-08-10', 2, MANAGER.id]);
+    expect(client.query.mock.calls[8][0]).toBe('COMMIT');
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('200 clears the whole day when dealer_ids is empty, without inserting anything', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: REP.id }] }) // employee exists
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // advisory lock
       .mockResolvedValueOnce({ rows: [] }) // delete everything for that day
-      .mockResolvedValueOnce({ rows: [] }); // final select — nothing left
+      .mockResolvedValueOnce({ rows: [] }) // final select — nothing left
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
 
     const app = makeApp(assignmentsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).put('/api/x/').send({ employee_id: REP.id, assignment_date: '2026-08-10', dealer_ids: [] });
@@ -94,10 +119,11 @@ describe('PUT /api/x/', () => {
     expect(res.status).toBe(200);
     expect(res.body.assignments).toEqual([]);
     // No dealer-existence check and no upsert calls when the list is empty —
-    // just the employee check, the clearing DELETE, and the final re-select.
-    expect(pool.query).toHaveBeenCalledTimes(3);
-    expect(pool.query.mock.calls[1][0]).toMatch(/DELETE FROM dealer_assignments/);
-    expect(pool.query.mock.calls[1][1]).toEqual([REP.id, '2026-08-10', []]);
+    // just the employee check, BEGIN, the advisory lock, the clearing
+    // DELETE, the final re-select, and COMMIT.
+    expect(client.query).toHaveBeenCalledTimes(6);
+    expect(client.query.mock.calls[3][0]).toMatch(/DELETE FROM dealer_assignments/);
+    expect(client.query.mock.calls[3][1]).toEqual([REP.id, '2026-08-10', []]);
   });
 });
 

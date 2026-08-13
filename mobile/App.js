@@ -54,7 +54,21 @@ function SplashRoute({ navigation, setEmployee, fetchTodayState }) {
         const empStr = await AsyncStorage.getItem('employeeData');
 
         if (token && empStr) {
-          setEmployee(JSON.parse(empStr));
+          let parsedEmployee;
+          try {
+            parsedEmployee = JSON.parse(empStr);
+          } catch (parseError) {
+            // Unlike handleLoginSuccess's own corrupt-data catch, this path
+            // previously never purged the bad value — a device with a valid
+            // accessToken but corrupted employeeData would hit this same
+            // failure on every cold start until the user happened to log in
+            // again and overwrite the key.
+            console.error('Corrupt employeeData in storage:', parseError);
+            await AsyncStorage.removeItem('employeeData');
+            navigation.replace('Login');
+            return;
+          }
+          setEmployee(parsedEmployee);
           // Don't block leaving the splash on this — it hits the backend,
           // which can take up to a minute to respond on a Render cold start.
           // Navigate now; MainTabs already shows a refreshing state while
@@ -98,6 +112,8 @@ export default function App() {
   // refresh, login) — sequences requests so a slower, older response can't
   // overwrite state a newer response already set.
   const todayStateSeqRef = useRef(0);
+  // Same purpose as todayStateSeqRef, for fetchAssignedDealers below.
+  const assignedDealersSeqRef = useRef(0);
 
   // Computed state
   const dayStatus = !attendance
@@ -184,6 +200,26 @@ export default function App() {
     const interval = setInterval(refreshPendingCount, 10000);
     return () => clearInterval(interval);
   }, [employee]);
+
+  // Reconciles locally-held temporary ids once the offline queue fully
+  // drains. A dealer login/logout performed while offline resolves through
+  // DealerLoginScreen/DealerLogoutScreen's own offline fallback with a
+  // temporary "offline-<timestamp>" id (see those screens), which then only
+  // gets rewritten to the real server id inside syncManager's own internal
+  // idMap when the queue flushes — attendance/visits here never hear about
+  // it. Without this, a live (non-queued) action performed right after
+  // reconnecting — e.g. an immediate dealer logout — would still send that
+  // now-meaningless offline id to the server and fail. Refetching from the
+  // server the moment the queue empties picks up the real ids everywhere.
+  const prevPendingCountRef = useRef(0);
+  useEffect(() => {
+    if (!employee) return;
+    const prev = prevPendingCountRef.current;
+    prevPendingCountRef.current = pendingSyncCount;
+    if (prev > 0 && pendingSyncCount === 0) {
+      fetchTodayState();
+    }
+  }, [employee, pendingSyncCount]);
 
   // Initial load of today's manager-assigned dealers whenever a session
   // becomes active (fresh login or restored from Splash). HomeScreen's own
@@ -371,16 +407,28 @@ export default function App() {
 
   // Same seq-ref-guarded shape as fetchTodayState — a separate function
   // (not folded into it) so existing fetchTodayState() callers/behavior are
-  // completely unaffected by this feature.
+  // completely unaffected by this feature. This one needs its own guard too:
+  // it's invoked from several independent, possibly-overlapping triggers
+  // (mount, HomeScreen's focus listener, TodaysVisitsScreen's focus
+  // listener, the geofence re-registration effect), any of which can race
+  // and let an older response clobber a newer one.
   const fetchAssignedDealers = async () => {
+    const seq = ++assignedDealersSeqRef.current;
     try {
       const response = await api.get('/assignments/today');
+      if (seq !== assignedDealersSeqRef.current) return; // a newer call has since started
       setAssignedDealers(response.data.assignments || []);
     } catch (error) {
+      if (seq !== assignedDealersSeqRef.current) return;
       console.error('Failed to fetch assigned dealers:', error);
     }
   };
 
+  // Returns whether the session was actually established — the caller
+  // (LoginScreen's onLoginSuccess below) must not navigate into MainTabs on
+  // a false, since every effect gated on `if (!employee) return;` would
+  // never run with employee still null, effectively bricking the session
+  // until the app is restarted.
   const handleLoginSuccess = async () => {
     const empStr = await AsyncStorage.getItem('employeeData');
     if (empStr) {
@@ -389,13 +437,19 @@ export default function App() {
       } catch (error) {
         console.error('Corrupt employeeData in storage:', error);
         await AsyncStorage.removeItem('employeeData');
-        return;
+        return false;
       }
     }
     await fetchTodayState();
+    return true;
   };
 
   const handleDayLogin = (newAttendance) => {
+    // Invalidates any older in-flight fetchTodayState() call — without this,
+    // a slow request issued just before this check-in (e.g. a pull-to-
+    // refresh, or a Render cold-start response taking up to a minute) could
+    // resolve afterward and silently overwrite this state with stale data.
+    todayStateSeqRef.current++;
     setAttendance(newAttendance);
   };
 
@@ -410,7 +464,11 @@ export default function App() {
         'Login required',
         'You need to log in for the day before visiting a dealer. Go to the Home tab and tap "Login".',
         [
-          { text: 'Go to Home', onPress: () => navigation.navigate('Home') },
+          // 'Home' is a tab inside the 'MainTabs' screen, not a top-level
+          // route on this root stack — navigating to it directly failed
+          // silently (most notably when this fires from a cold-start
+          // notification tap, before MainTabs is even the active screen).
+          { text: 'Go to Home', onPress: () => navigation.navigate('MainTabs', { screen: 'Home' }) },
           { text: 'Cancel', style: 'cancel' },
         ]
       );
@@ -451,6 +509,9 @@ export default function App() {
   };
 
   const handleDealerLogin = (newVisit) => {
+    // Same reasoning as handleDayLogin above — a stale fetchTodayState()
+    // response landing right after this check-in must not overwrite it.
+    todayStateSeqRef.current++;
     setVisits((prev) => [...prev, newVisit]);
   };
 
@@ -460,6 +521,8 @@ export default function App() {
   };
 
   const handleDayLogout = (updatedAttendance) => {
+    // Same reasoning as handleDayLogin above.
+    todayStateSeqRef.current++;
     setAttendance(updatedAttendance);
   };
 
@@ -573,8 +636,12 @@ export default function App() {
                   <LoginScreen
                     navigation={navigation}
                     onLoginSuccess={async () => {
-                      await handleLoginSuccess();
-                      navigation.replace('MainTabs');
+                      const sessionReady = await handleLoginSuccess();
+                      if (sessionReady) {
+                        navigation.replace('MainTabs');
+                      } else {
+                        showAlert('Something went wrong', 'Please try logging in again.');
+                      }
                     }}
                   />
                 )}

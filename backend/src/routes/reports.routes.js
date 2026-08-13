@@ -11,6 +11,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
+const { businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -42,12 +43,28 @@ function toCsv(rows, excludeKeys = []) {
 const ROW_CAP = 2000;
 
 function sendReport(res, rows, format, filename) {
+  const truncated = rows.length >= ROW_CAP;
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // The JSON branch has a `truncated` body field; a raw CSV download has no
+    // body to attach one to, so this header is the equivalent signal that
+    // the export was capped at ROW_CAP rows and isn't the complete result.
+    res.setHeader('X-Report-Truncated', String(truncated));
     return res.send(toCsv(rows, ID_LIKE_KEYS));
   }
-  return res.json({ rows, count: rows.length, truncated: rows.length >= ROW_CAP });
+  return res.json({ rows, count: rows.length, truncated });
+}
+
+// Strict YYYY-MM-DD check — Date.parse() accepts many non-ISO formats
+// (including some whose string order doesn't match calendar order), and an
+// outright malformed value like "abc" reaches Postgres's own date cast and
+// surfaces as an uncaught 500 instead of a clean 400.
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidDateString(value) {
+  if (typeof value !== 'string' || !DATE_ONLY_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime());
 }
 
 // Returns an error message string if employee_id/employee_ids was given but
@@ -67,13 +84,20 @@ function buildDateEmployeeFilter(query, params, conditions, dateColumn) {
     params.push(employeeId);
     conditions.push(`a.employee_id = $${params.length}`);
   }
+  // Filtered against the app's business-day boundary (5am IST rollover, see
+  // businessDay.js), not the raw UTC calendar date — otherwise a manager
+  // filtering by a given date got results that don't match what the app
+  // itself (and the rep's own device) considers that business day for any
+  // record near the boundary.
   if (from) {
+    if (!isValidDateString(from)) return 'Invalid from date (expected YYYY-MM-DD)';
     params.push(from);
-    conditions.push(`${dateColumn} >= $${params.length}`);
+    conditions.push(`${businessDateExpr(dateColumn)} >= $${params.length}::date`);
   }
   if (to) {
+    if (!isValidDateString(to)) return 'Invalid to date (expected YYYY-MM-DD)';
     params.push(to);
-    conditions.push(`${dateColumn} <= $${params.length}::date + INTERVAL '1 day'`);
+    conditions.push(`${businessDateExpr(dateColumn)} <= $${params.length}::date`);
   }
   return null;
 }
@@ -207,7 +231,8 @@ router.get('/exceptions', async (req, res) => {
   // buildDateEmployeeFilter assumes an `a.employee_id` alias for the employee
   // filter, but this query has no attendance join — pass only from/to through
   // it and apply employee_id/dealer_id filters against `el` directly below.
-  buildDateEmployeeFilter({ from, to }, params, conditions, 'el.created_at');
+  const dateFilterError = buildDateEmployeeFilter({ from, to }, params, conditions, 'el.created_at');
+  if (dateFilterError) return res.status(400).json({ error: dateFilterError });
   const dealerFilterError = pushDealerIdFilter(dealer_id, params, conditions, 'el.dealer_id');
   if (dealerFilterError) return res.status(400).json({ error: dealerFilterError });
 

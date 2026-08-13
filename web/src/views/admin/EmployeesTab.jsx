@@ -284,6 +284,11 @@ export default function EmployeesTab({ currentEmployeeId }) {
           <EmptyState title="No employees yet" subtitle="Employees you add will appear here." />
         ) : (
           <DataTable
+            // Forces a remount (resetting internal page state) whenever the
+            // search query changes — otherwise a manager on page 2 of the
+            // full list who then searches for something with fewer matches
+            // stays on "page 2" showing unrelated (or no) rows.
+            key={searchQuery}
             columns={columns}
             rows={filteredEmployees}
             loading={loading}

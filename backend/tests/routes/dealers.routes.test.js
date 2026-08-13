@@ -1,7 +1,14 @@
-jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
 const { makeApp } = require('../helpers/testApp');
+
+// DELETE /api/x/:id runs its reads + delete inside a transaction via
+// pool.connect() — this stub client's own `query` mock is what the route's
+// BEGIN/SELECT/DELETE/COMMIT calls hit.
+function mockClient() {
+  return { query: jest.fn(), release: jest.fn() };
+}
 
 const dealersRouter = require('../../src/routes/dealers.routes');
 
@@ -73,32 +80,48 @@ describe('DELETE /api/x/:id — manager only', () => {
   });
 
   test('404 when dealer does not exist', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] });
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }); // existence check (FOR UPDATE)
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).delete('/api/x/999');
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   // Deletion now cascades (schema.sql) instead of being blocked — deleting a
   // dealer with recorded visits succeeds and permanently removes that
   // history too; deletedVisitCount just reports what was removed.
   test('200 deletes a dealer with recorded visits, cascading to its history', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // existence check
       .mockResolvedValueOnce({ rows: [{ count: 3 }] }) // visit count
-      .mockResolvedValueOnce({ rows: [] }); // delete
+      .mockResolvedValueOnce({ rows: [] }) // affected follow-ups/assignments
+      .mockResolvedValueOnce({ rows: [] }) // delete
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).delete('/api/x/1');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.deletedVisitCount).toBe(3);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('200 deletes a dealer with no recorded visits', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // existence check
       .mockResolvedValueOnce({ rows: [{ count: 0 }] }) // visit count
-      .mockResolvedValueOnce({ rows: [] }); // delete
+      .mockResolvedValueOnce({ rows: [] }) // affected follow-ups/assignments
+      .mockResolvedValueOnce({ rows: [] }) // delete
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(dealersRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).delete('/api/x/1');
     expect(res.status).toBe(200);

@@ -8,7 +8,12 @@
 :root {
   --color-green: #22C55E;
 
-  --color-primary: var(--color-green);
+  /* Text/icon/border usage of "brand green" — #15803D (~4.6:1 on white)
+     instead of the flat --color-green fill above, which is only ~2.3:1 and
+     fails WCAG AA for nav links, badge text, and avatar initials. Fills
+     (buttons, banners, badge backgrounds) reference --color-green directly
+     and are unaffected by this. */
+  --color-primary: #15803D;
   --color-primary-mid: var(--color-green);
   --color-primary-dark: var(--color-green);
   --color-primary-light: #DCFCE7;
@@ -342,7 +347,11 @@ select:focus-visible,
   background-color: #FFFFFF;
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-raised);
-  animation: ft-scale-in 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  /* backwards, not both — same containing-block footgun fixed elsewhere in
+     this file: a lingering `transform: scale(...)` after the animation ends
+     would break `position: fixed` for anything nested inside this card
+     (e.g. a future tooltip/date-picker popover). */
+  animation: ft-scale-in 200ms cubic-bezier(0.4, 0, 0.2, 1) backwards;
 }
 
 /* ── Nav active indicator / hover ───────────────────────────────────────── */

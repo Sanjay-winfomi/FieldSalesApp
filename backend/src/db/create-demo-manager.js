@@ -23,6 +23,21 @@ const DEMO_MANAGER = {
 };
 
 async function run() {
+  // This creates a full-privilege manager account with a hardcoded,
+  // publicly-known-in-source password — the ONLY restriction on it
+  // (hiding one tab) is client-side in the web app and doesn't stop the
+  // mobile app, the API directly, or any other web feature. Guard against
+  // running this by accident against a real production database; pass
+  // ALLOW_DEMO_ACCOUNT=true explicitly if a prod demo account is truly
+  // intended.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_ACCOUNT !== 'true') {
+    console.error(
+      '❌ Refusing to create the demo manager account with NODE_ENV=production. ' +
+      'Set ALLOW_DEMO_ACCOUNT=true if this is intentional.'
+    );
+    process.exit(1);
+  }
+
   const useSsl = process.env.DB_SSL === 'true';
   const client = new Client({
     host: process.env.DB_HOST || 'localhost',

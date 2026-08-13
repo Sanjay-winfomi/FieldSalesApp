@@ -86,6 +86,13 @@ router.put('/:id', async (req, res) => {
   if (role && !['rep', 'manager'].includes(role)) {
     return res.status(400).json({ error: "role must be 'rep' or 'manager'" });
   }
+  // `name` in req.body distinguishes "field omitted" (keep existing) from
+  // "explicitly sent" — COALESCE($1, name) below only guards against SQL
+  // NULL, not an empty string, so { name: "" } would otherwise blank out a
+  // field POST /api/employees requires to be non-empty at creation time.
+  if ('name' in req.body && !name) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
 
   try {
     const existing = await pool.query('SELECT id, phone, region FROM employees WHERE id = $1', [id]);

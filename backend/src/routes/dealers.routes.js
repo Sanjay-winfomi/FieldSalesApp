@@ -20,6 +20,17 @@ const router = express.Router();
 
 const DEALER_FIELDS = 'id, name, address, latitude, longitude, contact_person, contact_phone, radius_meters';
 
+// Coerces a coordinate/radius field to a finite number within range, or
+// returns undefined for "not provided" (so callers can distinguish that from
+// "provided but invalid") — null/'' pass through as "not provided" since the
+// mobile client's forms send those for an intentionally-cleared field.
+function parseOptionalNumber(value, min, max) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  if (!Number.isFinite(n) || n < min || n > max) return null; // null = invalid
+  return n;
+}
+
 // GET /api/dealers
 router.get('/', async (req, res) => {
   const { search } = req.query;
@@ -59,7 +70,14 @@ router.get('/', async (req, res) => {
 
 // GET /api/dealers/not-visited?days=7
 router.get('/not-visited', requireRole('manager'), async (req, res) => {
-  const days = parseInt(req.query.days) || 7;
+  // `parseInt('0') || 7` treats an explicit days=0 as falsy and silently
+  // falls back to the default instead of honoring it (or rejecting it) —
+  // check for NaN specifically instead, and reject anything <= 0.
+  const daysParam = req.query.days;
+  const days = daysParam === undefined ? 7 : parseInt(daysParam);
+  if (!Number.isInteger(days) || days <= 0) {
+    return res.status(400).json({ error: 'days must be a positive integer' });
+  }
 
   try {
     const result = await pool.query(
@@ -88,12 +106,22 @@ router.post('/', requireRole('manager'), async (req, res) => {
     return res.status(400).json({ error: 'name is required' });
   }
 
+  const lat = parseOptionalNumber(latitude, -90, 90);
+  const lng = parseOptionalNumber(longitude, -180, 180);
+  const radius = parseOptionalNumber(radius_meters, 1, 100000);
+  if (lat === null || lng === null) {
+    return res.status(400).json({ error: 'latitude and longitude must be valid numbers (-90..90, -180..180)' });
+  }
+  if (radius === null) {
+    return res.status(400).json({ error: 'radius_meters must be a positive number' });
+  }
+
   try {
     const result = await pool.query(
       `INSERT INTO dealers (name, address, latitude, longitude, contact_person, contact_phone, radius_meters)
        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 200))
        RETURNING ${DEALER_FIELDS}`,
-      [name, address || null, latitude ?? null, longitude ?? null, contact_person || null, contact_phone || null, radius_meters ?? null]
+      [name, address || null, lat ?? null, lng ?? null, contact_person || null, contact_phone || null, radius ?? null]
     );
 
     return res.status(201).json({ dealer: result.rows[0] });
@@ -110,6 +138,16 @@ router.put('/:id', requireRole('manager'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid dealer id' });
   }
   const { name, address, latitude, longitude, contact_person, contact_phone, radius_meters } = req.body;
+
+  const lat = parseOptionalNumber(latitude, -90, 90);
+  const lng = parseOptionalNumber(longitude, -180, 180);
+  const radius = parseOptionalNumber(radius_meters, 1, 100000);
+  if (lat === null || lng === null) {
+    return res.status(400).json({ error: 'latitude and longitude must be valid numbers (-90..90, -180..180)' });
+  }
+  if (radius === null) {
+    return res.status(400).json({ error: 'radius_meters must be a positive number' });
+  }
 
   try {
     const existing = await pool.query('SELECT id FROM dealers WHERE id = $1', [id]);
@@ -128,7 +166,7 @@ router.put('/:id', requireRole('manager'), async (req, res) => {
            radius_meters  = COALESCE($7, radius_meters)
        WHERE id = $8
        RETURNING ${DEALER_FIELDS}`,
-      [name, address, latitude, longitude, contact_person, contact_phone, radius_meters, id]
+      [name, address, lat, lng, contact_person, contact_phone, radius, id]
     );
 
     return res.json({ dealer: result.rows[0] });
@@ -145,9 +183,22 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid dealer id' });
   }
 
+  // The two "what's about to be lost" reads and the DELETE itself run in one
+  // transaction so the counts reported back are an exact snapshot of what
+  // this DELETE actually removed, not a value that a concurrent write
+  // between separate autocommit statements could make stale (e.g. a
+  // follow-up request created between the SELECT and the DELETE would
+  // otherwise vanish with the cascade but never appear in the notification).
+  const client = await pool.connect();
+  let visitCount;
+  let affectedResult;
   try {
-    const existing = await pool.query('SELECT id FROM dealers WHERE id = $1', [id]);
+    await client.query('BEGIN');
+
+    const existing = await client.query('SELECT id FROM dealers WHERE id = $1 FOR UPDATE', [id]);
     if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).json({ error: 'Dealer not found' });
     }
 
@@ -156,7 +207,7 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
     // notifications, and reminders. Counted up front (not to block the
     // delete, just to report what was actually removed) since this is
     // irreversible.
-    const visitCount = await pool.query('SELECT COUNT(*)::int AS count FROM client_visits WHERE dealer_id = $1', [id]);
+    visitCount = await client.query('SELECT COUNT(*)::int AS count FROM client_visits WHERE dealer_id = $1', [id]);
 
     // A pending follow-up request or a not-yet-completed future assignment
     // for this dealer represents an in-flight workflow a rep is actively
@@ -164,7 +215,7 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
     // no trace would leave the rep never finding out why their request/plan
     // vanished. Captured up front so the manager can be told what else this
     // delete took with it.
-    const affectedResult = await pool.query(
+    affectedResult = await client.query(
       `SELECT e.id AS employee_id, e.name AS employee_name
        FROM dealer_followup_requests r
        JOIN employees e ON e.id = r.employee_id
@@ -178,8 +229,17 @@ router.delete('/:id', requireRole('manager'), async (req, res) => {
       [id, getBusinessDateString()]
     );
 
-    await pool.query('DELETE FROM dealers WHERE id = $1', [id]);
+    await client.query('DELETE FROM dealers WHERE id = $1', [id]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('DELETE /api/dealers/:id error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
 
+  try {
     if (affectedResult.rows.length > 0) {
       const names = affectedResult.rows.map((r) => r.employee_name).join(', ');
       await createManagerNotification({

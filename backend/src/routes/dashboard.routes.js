@@ -1,9 +1,7 @@
 /**
  * dashboard.routes.js — Stage 10
  *
- * GET /api/dashboard/today           — manager-only: all reps' current status for today
- * GET /api/dashboard/live-locations  — manager-only: reps' latest known GPS position, for the
- *                                       Representative Heat Map feature
+ * GET /api/dashboard/today — manager-only: all reps' current status for today
  */
 const express = require('express');
 const logger = require('../utils/logger');

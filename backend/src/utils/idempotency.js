@@ -18,11 +18,18 @@ const logger = require('./logger');
 // (not a server-issued secret), so without this an attacker who observed or
 // guessed another employee's Idempotency-Key value could replay it under
 // their own request and receive that employee's cached response.
-async function getIdempotentResponse(key, employeeId) {
+//
+// Also scoped by endpoint: `key` alone is the table's PRIMARY KEY, so if the
+// same employee's client ever reused one Idempotency-Key value across two
+// different mutating routes, a lookup that ignored `endpoint` would replay
+// the FIRST route's cached response back to the SECOND route's caller
+// instead of letting it perform its own write. Every caller must pass the
+// same `endpoint` string here as it later passes to saveIdempotentResponse.
+async function getIdempotentResponse(key, employeeId, endpoint) {
   if (!key) return null;
   const result = await pool.query(
-    `SELECT response_status, response_body FROM idempotency_keys WHERE key = $1 AND employee_id = $2`,
-    [key, employeeId]
+    `SELECT response_status, response_body FROM idempotency_keys WHERE key = $1 AND employee_id = $2 AND endpoint = $3`,
+    [key, employeeId, endpoint]
   );
   return result.rows[0] || null;
 }

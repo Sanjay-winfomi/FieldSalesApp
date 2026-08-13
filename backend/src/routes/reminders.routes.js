@@ -25,6 +25,17 @@ function validateNote(note) {
   return trimmed.length >= MIN_NOTE_LENGTH ? trimmed : null;
 }
 
+// Strict YYYY-MM-DD check — Date.parse() accepts many non-ISO formats
+// (e.g. "08-13-2026") whose string-lexicographic order doesn't match
+// calendar order, which broke the plain string `<` comparison against
+// todayDateString() used for the past-date guard below.
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidDateString(value) {
+  if (typeof value !== 'string' || !DATE_ONLY_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime());
+}
+
 // "Today" here means the current business day (5am IST rollover, see
 // businessDay.js) — the plain UTC calendar date would drift from it by up
 // to DAY_BOUNDARY_HOUR minutes once a day, right after the boundary rolls
@@ -41,7 +52,7 @@ router.post('/', async (req, res) => {
   }
 
   const reminderDate = req.body.reminder_date;
-  if (typeof reminderDate !== 'string' || Number.isNaN(Date.parse(reminderDate))) {
+  if (!isValidDateString(reminderDate)) {
     return res.status(400).json({ error: 'Invalid reminder_date' });
   }
   if (reminderDate < todayDateString()) {

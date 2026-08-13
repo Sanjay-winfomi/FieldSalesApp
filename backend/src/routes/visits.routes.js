@@ -20,6 +20,7 @@ const { requireRole }     = require('../middleware/auth.middleware');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 const { createManagerNotification } = require('../utils/managerNotifications');
 const { markAssignmentVisited } = require('../utils/dealerAssignments');
+const { businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -83,23 +84,48 @@ router.post('/login', async (req, res) => {
 
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
+  // A dedicated client + transaction (rather than pool.query per statement)
+  // so the attendance row can be locked with SELECT ... FOR UPDATE for the
+  // duration of the open-visit check + insert. Without this, two
+  // near-simultaneous check-ins for the same attendance_id (double-tap, or
+  // an offline queue flushing two check-ins close together) could both read
+  // "no open visit" before either inserts, creating two open visits and
+  // corrupting distance_from_previous_km chaining plus every downstream
+  // "current visit" assumption. The FOR UPDATE lock serializes the second
+  // request behind the first's commit, so it correctly sees the first
+  // request's now-open visit.
+  const client = await pool.connect();
+  let dealer;
+  let visit;
+  let insideRadius;
+  let trimmedReason;
+  let distanceM;
+
   try {
     // A retried request (e.g. the mobile client's cold-start retry) that
     // already created a visit replays that result instead of inserting a
     // second open visit — this route has no other guard against that.
-    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'visits/login');
     if (cached) {
+      client.release();
       return res.status(cached.response_status).json(cached.response_body);
     }
 
-    // Verify attendance belongs to this employee
-    const attResult = await pool.query(
+    await client.query('BEGIN');
+
+    // Verify attendance belongs to this employee and the day hasn't been
+    // ended yet, locking the row so a concurrent check-in for the same
+    // attendance_id waits for this transaction to finish.
+    const attResult = await client.query(
       `SELECT id, login_lat, login_lng FROM attendance
-       WHERE id = $1 AND employee_id = $2`,
+       WHERE id = $1 AND employee_id = $2 AND logout_time IS NULL
+       FOR UPDATE`,
       [attendance_id, employeeId]
     );
     if (attResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Attendance record not found' });
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(404).json({ error: 'Attendance record not found, or the day has already ended' });
     }
     const att = attResult.rows[0];
 
@@ -108,7 +134,7 @@ router.post('/login', async (req, res) => {
     // distance_from_previous_km (computed from the last logout) and break
     // every downstream assumption of a single "current visit" (dashboard,
     // radius-alert staging, geofence monitoring).
-    const openVisitResult = await pool.query(
+    const openVisitResult = await client.query(
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name
        FROM client_visits cv
        JOIN dealers d ON d.id = cv.dealer_id
@@ -117,6 +143,8 @@ router.post('/login', async (req, res) => {
       [attendance_id]
     );
     if (openVisitResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      client.release();
       const open = openVisitResult.rows[0];
       return res.status(409).json({
         error: 'visit_already_open',
@@ -125,19 +153,21 @@ router.post('/login', async (req, res) => {
     }
 
     // Verify dealer exists
-    const dealerResult = await pool.query(
+    const dealerResult = await client.query(
       `SELECT id, name, latitude, longitude, radius_meters FROM dealers WHERE id = $1`,
       [dealer_id]
     );
     if (dealerResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).json({ error: 'Dealer not found' });
     }
-    const dealer = dealerResult.rows[0];
+    dealer = dealerResult.rows[0];
 
     // Geofence check against the dealer's registered coordinates (Haversine).
     // A dealer with no registered coordinates can't be geofenced — treat as inside.
-    let distanceM = null;
-    let insideRadius = true;
+    insideRadius = true;
+    distanceM = null;
     if (dealer.latitude != null && dealer.longitude != null) {
       // dealers.radius_meters is NOT NULL DEFAULT 200 (schema.sql) — every
       // row always has a value, so no further fallback is needed here.
@@ -145,8 +175,10 @@ router.post('/login', async (req, res) => {
       insideRadius = distanceM <= dealer.radius_meters;
     }
 
-    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    trimmedReason = typeof reason === 'string' ? reason.trim() : '';
     if (!insideRadius && trimmedReason.length < MIN_REASON_LENGTH) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(422).json({
         error: 'reason_required',
         distanceMeters: distanceM,
@@ -155,7 +187,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Find the last known location (most recent logout, else day login)
-    const lastVisitResult = await pool.query(
+    const lastVisitResult = await client.query(
       `SELECT logout_lat, logout_lng
        FROM client_visits
        WHERE attendance_id = $1 AND logout_time IS NOT NULL
@@ -176,7 +208,7 @@ router.post('/login', async (req, res) => {
     const distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
 
     // Create visit record
-    const visitResult = await pool.query(
+    const visitResult = await client.query(
       `INSERT INTO client_visits
          (attendance_id, dealer_id, login_time, login_lat, login_lng,
           distance_from_previous_km, login_accuracy_m, login_distance_m,
@@ -186,10 +218,10 @@ router.post('/login', async (req, res) => {
                  login_distance_m, login_inside_radius`,
       [attendance_id, dealer_id, lat, lng, distFromPrev, accuracyMeters, distanceM, insideRadius, trimmedReason || null]
     );
-    const visit = visitResult.rows[0];
+    visit = visitResult.rows[0];
 
     // Update attendance total_distance_km
-    await pool.query(
+    await client.query(
       `UPDATE attendance
        SET total_distance_km = COALESCE(total_distance_km, 0) + $1
        WHERE id = $2`,
@@ -197,40 +229,49 @@ router.post('/login', async (req, res) => {
     );
 
     if (!insideRadius) {
-      await pool.query(
+      await client.query(
         `INSERT INTO exception_log
            (employee_id, dealer_id, visit_id, event_type, latitude, longitude,
             distance_meters, gps_accuracy_m, reason)
          VALUES ($1, $2, $3, 'login', $4, $5, $6, $7, $8)`,
         [employeeId, dealer_id, visit.id, lat, lng, distanceM, accuracyMeters, trimmedReason]
       );
-      await createManagerNotification({
-        type: 'login_exception',
-        title: 'Representative login exception',
-        body: `${req.employee.username} logged in at ${dealer.name} from outside the dealer radius (~${Math.round(distanceM)}m away). Reason: "${trimmedReason}"`,
-        severity: 'warning',
-        employeeId,
-        dealerId: dealer_id,
-        visitId: visit.id,
-      });
     }
 
-    logDealerLogin(req.employee.username, dealer.name);
-    // Non-blocking: if this dealer happens to be on today's manager-assigned
-    // list, mark it visited. Never affects the check-in response either way.
-    markAssignmentVisited({ employeeId, dealerId: dealer_id }).catch(() => {});
-    const body = {
-      visit: {
-        ...visit,
-        dealer_name: dealer.name,
-      },
-    };
-    await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/login', 201, body);
-    return res.status(201).json(body);
+    await client.query('COMMIT');
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     logger.error('Visit login error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
   }
+
+  // Side effects that don't need to be part of the transaction above.
+  if (!insideRadius) {
+    await createManagerNotification({
+      type: 'login_exception',
+      title: 'Representative login exception',
+      body: `${req.employee.username} logged in at ${dealer.name} from outside the dealer radius (~${Math.round(distanceM)}m away). Reason: "${trimmedReason}"`,
+      severity: 'warning',
+      employeeId,
+      dealerId: dealer_id,
+      visitId: visit.id,
+    });
+  }
+
+  logDealerLogin(req.employee.username, dealer.name);
+  // Non-blocking: if this dealer happens to be on today's manager-assigned
+  // list, mark it visited. Never affects the check-in response either way.
+  markAssignmentVisited({ employeeId, dealerId: dealer_id }).catch(() => {});
+  const body = {
+    visit: {
+      ...visit,
+      dealer_name: dealer.name,
+    },
+  };
+  await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/login', 201, body);
+  return res.status(201).json(body);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -259,7 +300,7 @@ router.post('/logout', async (req, res) => {
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
-    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'visits/logout');
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -427,7 +468,7 @@ router.post('/:id/location-check', async (req, res) => {
     // Without this, a retried ping would increment outside_radius_count a
     // second time for the same real breach and could double-fire the
     // "time to log out" alert.
-    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'visits/location-check');
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -463,25 +504,46 @@ router.post('/:id/location-check', async (req, res) => {
       insideRadius = distanceM <= visit.radius_meters;
     }
 
-    const nextOutsideCount = insideRadius ? visit.outside_radius_count : visit.outside_radius_count + 1;
-    // Any 2 breaches total during the visit (not necessarily consecutive) —
-    // once tripped, stays tripped for the rest of this visit (idempotent).
-    const shouldSendLogoutAlert = !visit.log_out_alert_sent && nextOutsideCount >= 2;
-
+    // The `old` CTE snapshots outside_radius_count/log_out_alert_sent once,
+    // atomically with the UPDATE that follows (both run as one statement
+    // under the row's write lock) — every derived column is computed from
+    // that single consistent snapshot instead of the earlier SELECT above,
+    // which could be stale by the time this query runs. This is what makes
+    // the increment and the alert-eligibility check race-safe: two
+    // near-simultaneous pings (the foreground poll racing the background
+    // geofence event) can no longer lose an increment or double-fire the
+    // alert the way a read-then-write-back-a-literal would.
     const updated = await pool.query(
-      `UPDATE client_visits
-       SET last_location_status    = $1,
-           last_location_check_at  = NOW(),
+      `WITH old AS (
+         SELECT outside_radius_count, log_out_alert_sent, interrupted, interrupted_distance_m
+         FROM client_visits WHERE id = $3
+       )
+       UPDATE client_visits cv
+       SET last_location_status     = $1,
+           last_location_check_at   = NOW(),
            last_location_distance_m = $2,
-           outside_radius_count    = $3,
-           log_out_alert_sent      = log_out_alert_sent OR $4,
-           interrupted             = interrupted OR $4,
-           interrupted_at          = CASE WHEN interrupted THEN interrupted_at WHEN $4 THEN NOW() ELSE interrupted_at END,
-           interrupted_distance_m  = CASE WHEN interrupted THEN interrupted_distance_m WHEN $4 THEN $2 ELSE interrupted_distance_m END
-       WHERE id = $5
-       RETURNING id, last_location_status, last_location_check_at, last_location_distance_m, outside_radius_count, log_out_alert_sent, interrupted`,
-      [insideRadius ? 'inside' : 'outside', distanceM, nextOutsideCount, shouldSendLogoutAlert, id]
+           outside_radius_count     = CASE WHEN $1 = 'inside' THEN old.outside_radius_count ELSE old.outside_radius_count + 1 END,
+           log_out_alert_sent       = old.log_out_alert_sent OR (
+             $1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
+           ),
+           interrupted              = old.interrupted OR (
+             $1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
+           ),
+           interrupted_at           = CASE WHEN old.interrupted THEN cv.interrupted_at
+                                           WHEN ($1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN NOW()
+                                           ELSE cv.interrupted_at END,
+           interrupted_distance_m   = CASE WHEN old.interrupted THEN old.interrupted_distance_m
+                                           WHEN ($1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN $2
+                                           ELSE old.interrupted_distance_m END
+       FROM old
+       WHERE cv.id = $3
+       RETURNING cv.id, cv.last_location_status, cv.last_location_check_at, cv.last_location_distance_m,
+                 cv.outside_radius_count, cv.log_out_alert_sent, cv.interrupted,
+                 (NOT old.log_out_alert_sent AND cv.log_out_alert_sent) AS should_send_logout_alert`,
+      [insideRadius ? 'inside' : 'outside', distanceM, id]
     );
+
+    const shouldSendLogoutAlert = updated.rows[0].should_send_logout_alert;
 
     if (shouldSendLogoutAlert) {
       await pool.query(
@@ -585,7 +647,9 @@ router.post('/:id/location-check', async (req, res) => {
       }
     }
 
-    const body = { visit: updated.rows[0], distance_meters: distanceM, rep_notification: repNotification };
+    // eslint-disable-next-line no-unused-vars
+    const { should_send_logout_alert, ...visitFields } = updated.rows[0];
+    const body = { visit: visitFields, distance_meters: distanceM, rep_notification: repNotification };
     await saveIdempotentResponse(idempotencyKey, employeeId, 'visits/location-check', 200, body);
     return res.json(body);
   } catch (err) {
@@ -628,13 +692,18 @@ router.get('/', async (req, res) => {
       params.push(dealerId);
       conditions.push(`cv.dealer_id = $${params.length}`);
     }
+    // Filtered against the app's business-day boundary (5am IST rollover,
+    // see businessDay.js), not the raw UTC calendar date — otherwise a
+    // manager filtering by a given date got results that don't match what
+    // the app itself considers that business day for any visit near the
+    // boundary.
     if (from) {
       params.push(from);
-      conditions.push(`cv.login_time >= $${params.length}`);
+      conditions.push(`${businessDateExpr('cv.login_time')} >= $${params.length}::date`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`cv.login_time <= $${params.length}::date + INTERVAL '1 day'`);
+      conditions.push(`${businessDateExpr('cv.login_time')} <= $${params.length}::date`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -704,13 +773,15 @@ router.get('/exceptions', requireRole('manager'), async (req, res) => {
       params.push(reviewed === 'true');
       conditions.push(`el.manager_reviewed = $${params.length}`);
     }
+    // Business-day boundary (5am IST), not the raw UTC calendar date — see
+    // the comment on the /visits list route above for why.
     if (from) {
       params.push(from);
-      conditions.push(`el.created_at >= $${params.length}`);
+      conditions.push(`${businessDateExpr('el.created_at')} >= $${params.length}::date`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`el.created_at <= $${params.length}::date + INTERVAL '1 day'`);
+      conditions.push(`${businessDateExpr('el.created_at')} <= $${params.length}::date`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

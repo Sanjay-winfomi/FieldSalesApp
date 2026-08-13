@@ -13,6 +13,14 @@ const SECTIONS = [
   { key: 'exceptions', title: 'Radius exceptions', endpoint: 'exceptions' },
 ];
 
+// A rep with zero visits/duration in range can get back null for an average
+// (the backend avoids a division-by-zero rather than returning 0) — without
+// this guard, parseFloat(null).toFixed(n) renders the literal string "NaN".
+function formatNumeric(value, decimals) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n.toFixed(decimals) : '0';
+}
+
 /**
  * Consolidated per-rep report — pulls the same /api/reports/* endpoints
  * ReportsPage uses (already employee_id-filterable), scoped to one rep and
@@ -96,10 +104,10 @@ export default function RepFullReport({ repId, employeeName }) {
       {rollup && (
         <div style={styles.metricsGrid}>
           <MetricCard icon={<CalendarCheck />} value={rollup.days_worked} label="Days worked" tone="primary" />
-          <MetricCard icon={<Route />} value={`${parseFloat(rollup.total_distance_km).toFixed(1)} km`} label="Total distance" tone="warning" />
-          <MetricCard icon={<Timer />} value={`${rollup.total_duration_minutes} min`} label="Total duration" tone="success" />
-          <MetricCard icon={<MapPin />} value={rollup.total_visits} label="Total visits" tone="primary" />
-          <MetricCard icon={<Timer />} value={`${parseFloat(rollup.avg_visit_duration_minutes).toFixed(0)} min`} label="Avg visit duration" tone="neutral" />
+          <MetricCard icon={<Route />} value={`${formatNumeric(rollup.total_distance_km, 1)} km`} label="Total distance" tone="warning" />
+          <MetricCard icon={<Timer />} value={`${rollup.total_duration_minutes ?? 0} min`} label="Total duration" tone="success" />
+          <MetricCard icon={<MapPin />} value={rollup.total_visits ?? 0} label="Total visits" tone="primary" />
+          <MetricCard icon={<Timer />} value={`${formatNumeric(rollup.avg_visit_duration_minutes, 0)} min`} label="Avg visit duration" tone="neutral" />
         </div>
       )}
 

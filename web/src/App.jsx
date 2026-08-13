@@ -76,13 +76,19 @@ export default function App() {
     }
   }, [token]);
 
+  // Paused while the Notifications page itself is open — that page marks
+  // everything read on mount and reports the new count (0) directly via
+  // onUnreadCountChange. Without this, a poll request already in flight when
+  // the page opens can resolve just after that mark-all-read call and
+  // overwrite the just-set 0 with its own stale (pre-read) count, making the
+  // bell badge reappear on a page where everything has in fact been read.
   useEffect(() => {
-    if (token) {
+    if (token && activeView !== 'notifications') {
       fetchUnreadNotifications();
       const interval = setInterval(fetchUnreadNotifications, 30000);
       return () => clearInterval(interval);
     }
-  }, [token, fetchUnreadNotifications]);
+  }, [token, activeView, fetchUnreadNotifications]);
 
   const handleLoginSuccess = (accessToken, employee) => {
     sessionStorage.setItem('ft_token', accessToken);

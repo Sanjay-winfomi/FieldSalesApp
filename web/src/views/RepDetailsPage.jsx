@@ -61,6 +61,14 @@ export default function RepDetailsPage({ repId, onBack }) {
         <IconButton icon={<ArrowLeft size={16} />} onClick={onBack} title="Back to dashboard" size={40} />
         <SectionHeader
           title={data ? `${data.employee.name} — ${view === 'today' ? "today's timeline" : 'full report'}` : 'Representative timeline'}
+          // SectionHeader's own marginBottom is meant for it standing alone
+          // as a page's top header — composed here as one flex item among
+          // the back button and view-toggle buttons, that margin made it
+          // the tallest item in the row, so align-items:center centered it
+          // (including the empty margin) and visibly pushed the title text
+          // above the other two. headerRow below already carries the
+          // spacing this block needs beneath the whole row.
+          style={{ marginBottom: 0, flex: 1 }}
         />
         {data && (
           <div style={styles.viewToggle}>

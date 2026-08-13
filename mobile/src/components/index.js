@@ -4,7 +4,6 @@ export { default as SecondaryButton } from './buttons/SecondaryButton';
 export { default as Card } from './cards/Card';
 export { default as StatusCard } from './cards/StatusCard';
 export { default as SummaryCard } from './cards/SummaryCard';
-export { default as DealerCard } from './cards/DealerCard';
 export { default as AssignedDealerCard } from './cards/AssignedDealerCard';
 export { default as GPSStatusCard } from './cards/GPSStatusCard';
 export { default as LocationCard } from './cards/LocationCard';

@@ -47,7 +47,7 @@ router.post('/login', async (req, res) => {
   try {
     // A retry of a request that already completed replays the original
     // response instead of re-running the insert below.
-    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'attendance/login');
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -106,7 +106,7 @@ router.post('/logout', async (req, res) => {
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
-    const cached = await getIdempotentResponse(idempotencyKey, employeeId);
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'attendance/logout');
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
@@ -304,13 +304,17 @@ router.get('/', async (req, res) => {
       conditions.push(`a.employee_id = $${params.length}`);
     }
 
+    // Business-day boundary (5am IST rollover), not the raw UTC calendar
+    // date — otherwise a manager filtering by a given date gets results that
+    // don't match what the app itself considers that business day for any
+    // record near the boundary.
     if (from) {
       params.push(from);
-      conditions.push(`a.login_time >= $${params.length}`);
+      conditions.push(`${businessDateExpr('a.login_time')} >= $${params.length}::date`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`a.login_time <= $${params.length}::date + INTERVAL '1 day'`);
+      conditions.push(`${businessDateExpr('a.login_time')} <= $${params.length}::date`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

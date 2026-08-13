@@ -159,8 +159,8 @@ function extractRawAddress(components) {
 router.get('/reverse', async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
-  if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    return res.status(400).json({ error: 'lat and lng are required' });
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
   // Round to ~11m precision for the cache key — logins cluster tightly
@@ -191,9 +191,9 @@ router.get('/reverse', async (req, res) => {
 router.get('/nearby', async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
-  const radius = Math.min(parseInt(req.query.radius) || 150, 500);
-  if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    return res.status(400).json({ error: 'lat and lng are required' });
+  const radius = Math.min(Math.max(parseInt(req.query.radius) || 150, 1), 500);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
 
   const cacheKey = `nearby:${lat.toFixed(4)},${lng.toFixed(4)},${radius}`;

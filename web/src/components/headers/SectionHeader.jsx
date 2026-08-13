@@ -1,9 +1,9 @@
 import React from 'react';
 import { colors, typography, spacing } from '../../theme';
 
-export default function SectionHeader({ title, subtitle, action }) {
+export default function SectionHeader({ title, subtitle, action, style }) {
   return (
-    <div style={styles.wrap}>
+    <div style={{ ...styles.wrap, ...style }}>
       <div style={styles.accentBar} aria-hidden="true" />
       <div style={styles.row}>
         <div>

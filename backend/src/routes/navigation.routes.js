@@ -68,9 +68,14 @@ router.post('/compute', async (req, res) => {
     }
 
     if (assignmentId != null) {
+      // Must also match dealer_id — without this, a navigation computed for
+      // dealer A could be tied to an assignment actually for dealer B,
+      // advancing dealer B's assignment status (via markAssignmentVisited)
+      // and misattributing dealer-A distance/duration to dealer B in the
+      // Daily Travel Summary.
       const assignmentResult = await pool.query(
-        'SELECT id FROM dealer_assignments WHERE id = $1 AND employee_id = $2',
-        [assignmentId, employeeId]
+        'SELECT id FROM dealer_assignments WHERE id = $1 AND employee_id = $2 AND dealer_id = $3',
+        [assignmentId, employeeId, dealerId]
       );
       if (assignmentResult.rows.length === 0) {
         return res.status(404).json({ error: 'Assignment not found' });

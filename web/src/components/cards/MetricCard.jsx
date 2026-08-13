@@ -40,11 +40,16 @@ function useAnimatedValue(rawValue) {
       const progress = Math.min(1, (now - startTime) / duration);
       const eased = 1 - (1 - progress) ** 3;
       const current = start + (target - start) * eased;
+      // Updated every frame (not just on natural completion) — if rawValue
+      // changes again before this animation finishes (e.g. two refreshes in
+      // quick succession), the effect's cleanup cancels the frame below
+      // without this, leaving fromRef.current at the stale pre-animation
+      // value; the next animation would then visibly jump backward to
+      // resume from there instead of from whatever was actually on screen.
+      fromRef.current = current;
       setDisplay(current.toFixed(decimals) + suffix);
       if (progress < 1) {
         rafRef.current = requestAnimationFrame(tick);
-      } else {
-        fromRef.current = target;
       }
     };
     rafRef.current = requestAnimationFrame(tick);

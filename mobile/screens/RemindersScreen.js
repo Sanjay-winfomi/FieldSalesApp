@@ -19,7 +19,10 @@ function formatReminderDate(dateStr) {
 }
 
 function preview(note) {
-  const firstLine = note.split('\n')[0];
+  // A malformed API record or stale cache entry could hand this a
+  // null/undefined note — without the fallback, .split() throws and crashes
+  // the whole list render instead of just showing an empty preview.
+  const firstLine = (note || '').split('\n')[0];
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
 }
 

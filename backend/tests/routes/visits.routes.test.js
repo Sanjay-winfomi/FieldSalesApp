@@ -1,4 +1,4 @@
-jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
 const { makeApp } = require('../helpers/testApp');
@@ -7,6 +7,13 @@ const visitsRouter = require('../../src/routes/visits.routes');
 
 const REP = { id: 1, role: 'rep', username: 'arun' };
 const MANAGER = { id: 2, role: 'manager', username: 'priya' };
+
+// POST /api/x/login runs inside a transaction via pool.connect(), not
+// pool.query() directly — this stub client's own `query` mock is what the
+// route's BEGIN/SELECT.../INSERT/COMMIT/ROLLBACK calls hit.
+function mockClient() {
+  return { query: jest.fn(), release: jest.fn() };
+}
 
 describe('POST /api/x/login', () => {
   // resetAllMocks (not clearAllMocks) — clearAllMocks leaves any UNCONSUMED
@@ -31,26 +38,35 @@ describe('POST /api/x/login', () => {
   });
 
   test('422 with reason_required when outside radius and no reason given', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({ rows: [] }) // no open visit
-      .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 100 }] }); // dealer
+      .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 100 }] }) // dealer
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
       .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 1, lat: 12, lng: 78, accuracy_meters: 10 }); // ~150km away
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('reason_required');
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('201 logs in successfully inside the radius', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({ rows: [] }) // no open visit
       .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 200 }] }) // dealer
       .mockResolvedValueOnce({ rows: [] }) // last visit (none)
       .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 1, login_time: 'now', login_lat: 11, login_lng: 77 }] }) // insert visit
-      .mockResolvedValueOnce({ rows: [] }); // update attendance distance
+      .mockResolvedValueOnce({ rows: [] }) // update attendance distance
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
       .post('/api/x/login')
@@ -58,24 +74,34 @@ describe('POST /api/x/login', () => {
     expect(res.status).toBe(201);
     expect(res.body.visit.id).toBe(55);
     expect(res.body.visit.dealer_name).toBe('Dealer A');
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('404 when the dealer does not exist', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] })
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
       .mockResolvedValueOnce({ rows: [] }) // no open visit
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [] }) // dealer not found
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
       .post('/api/x/login')
       .send({ attendance_id: 1, dealer_id: 999, lat: 11, lng: 77, accuracy_meters: 10 });
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('409 visit_already_open when the rep already has an open visit for this attendance', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance
-      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 2, dealer_name: 'Dealer B' }] }); // open visit found
+      .mockResolvedValueOnce({ rows: [{ id: 55, dealer_id: 2, dealer_name: 'Dealer B' }] }) // open visit found
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app)
       .post('/api/x/login')
@@ -83,6 +109,7 @@ describe('POST /api/x/login', () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('visit_already_open');
     expect(res.body.visit).toEqual({ id: 55, dealer_id: 2, dealer_name: 'Dealer B' });
+    expect(client.release).toHaveBeenCalled();
   });
 });
 
@@ -271,7 +298,7 @@ describe('POST /api/x/:id/location-check', () => {
           dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 2, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 2, log_out_alert_sent: true, interrupted: true, should_send_logout_alert: true }] })
       .mockResolvedValueOnce({ rows: [] }) // exception_log insert
       .mockResolvedValueOnce({ rows: [] }) // visit_radius_events open-event lookup — non-consecutive, so no open excursion right now
       .mockResolvedValueOnce({ rows: [] }); // visit_radius_events insert — new excursion starts

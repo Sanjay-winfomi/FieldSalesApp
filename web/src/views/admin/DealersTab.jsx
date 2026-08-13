@@ -346,7 +346,15 @@ export default function DealersTab() {
         {!loading && dealers.length === 0 && !error ? (
           <EmptyState title="No dealers yet" subtitle="Dealers you add will appear here." />
         ) : (
-          <DataTable columns={columns} rows={filteredDealers} loading={loading} emptyTitle="No dealers match your search" />
+          <DataTable
+            // Forces a remount (resetting internal page state) whenever the
+            // search query changes — see EmployeesTab.jsx's DataTable for why.
+            key={searchQuery}
+            columns={columns}
+            rows={filteredDealers}
+            loading={loading}
+            emptyTitle="No dealers match your search"
+          />
         )}
       </div>
 

@@ -16,11 +16,11 @@ describe('idempotency', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
-  test('getIdempotentResponse scopes the lookup by employee_id, not just the key', async () => {
+  test('getIdempotentResponse scopes the lookup by employee_id and endpoint, not just the key', async () => {
     pool.query.mockResolvedValueOnce({ rows: [{ response_status: 201, response_body: { ok: true } }] });
-    const result = await getIdempotentResponse('abc', 42);
+    const result = await getIdempotentResponse('abc', 42, 'visits/login');
     expect(result).toEqual({ response_status: 201, response_body: { ok: true } });
-    expect(pool.query.mock.calls[0][1]).toEqual(['abc', 42]);
+    expect(pool.query.mock.calls[0][1]).toEqual(['abc', 42, 'visits/login']);
   });
 
   test('cleanupOldIdempotencyKeys deletes rows older than the retention window', async () => {
