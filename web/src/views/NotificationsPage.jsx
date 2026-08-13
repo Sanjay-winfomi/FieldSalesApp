@@ -245,6 +245,6 @@ const styles = {
   followupBtn: { height: 32, padding: '0 12px', fontSize: 12 },
   followupError: { ...typography.caption, color: colors.danger },
   followupDateLabel: { display: 'flex', flexDirection: 'column', gap: 2, ...typography.caption, color: colors.textSecondary, fontWeight: 600 },
-  followupDateInput: { height: 32, padding: '0 8px', fontSize: 12, width: 140 },
+  followupDateInput: { height: 32, padding: '0 8px', fontSize: 12, width: 140, maxWidth: '100%' },
   followupApprovedDate: { ...typography.caption, color: colors.textMuted },
 };

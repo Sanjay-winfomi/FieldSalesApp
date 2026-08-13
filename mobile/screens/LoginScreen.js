@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { StyleSheet, Text, View, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable } from 'react-native';
+import { StyleSheet, Text, View, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,8 +9,15 @@ import { api } from '../src/services/api';
 import { showAlert } from '../src/services/themedAlert';
 import { PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing, typography, radius } from '../src/theme';
+import { moderateScale } from '../src/utils/responsive';
 
 const winfomiLogo = require('../assets/brand/winfomi-logo.png');
+
+// Decorative blob sizes/offsets below are proportioned as a fraction of
+// screen width rather than fixed dp, so they occupy the same relative
+// footprint on a narrow phone as on a large one instead of looking
+// oversized/undersized depending on the device.
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // After this long waiting on a login response, it's more likely the free-tier
 // backend is waking from an idle sleep than that something is actually stuck
@@ -154,11 +161,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   blobOne: {
-    position: 'absolute', top: -60, left: -50, width: 220, height: 220, borderRadius: 110,
+    position: 'absolute', top: -SCREEN_WIDTH * 0.16, left: -SCREEN_WIDTH * 0.14,
+    width: SCREEN_WIDTH * 0.58, height: SCREEN_WIDTH * 0.58, borderRadius: SCREEN_WIDTH * 0.29,
     backgroundColor: 'rgba(34,197,94,0.12)',
   },
   blobTwo: {
-    position: 'absolute', bottom: -80, right: -60, width: 260, height: 260, borderRadius: 130,
+    position: 'absolute', bottom: -SCREEN_WIDTH * 0.21, right: -SCREEN_WIDTH * 0.16,
+    width: SCREEN_WIDTH * 0.68, height: SCREEN_WIDTH * 0.68, borderRadius: SCREEN_WIDTH * 0.34,
     backgroundColor: 'rgba(34,197,94,0.16)',
   },
   scrollContent: {
@@ -175,13 +184,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xxl,
   },
   logoImg: {
-    width: 140,
-    height: 40,
+    width: moderateScale(140),
+    height: moderateScale(40),
   },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.card,
-    padding: 20,
+    padding: spacing.xl,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.20,

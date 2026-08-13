@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl } from 'react-native';
-import { TrendingUp, MapPin } from 'lucide-react-native';
+import { TrendingUp, MapPin, Home } from 'lucide-react-native';
 import { fetchActivityData, groupActivityByDay } from '../src/utils/activityHistory';
 import { AppHeader, EmptyState, LoadingCard, FadeSlideIn, Card } from '../src/components';
 import { colors, typography, spacing, radius } from '../src/theme';
@@ -89,27 +89,61 @@ export default function DistanceHistoryScreen({ navigation }) {
             </View>
 
             {section.visits.length === 0 ? (
-              <Text style={styles.noStopsText}>No dealer stops recorded this day.</Text>
-            ) : (
-              section.visits.map((visit, index) => (
-                <FadeSlideIn key={visit.id} delay={Math.min(index, 6) * 25}>
+              section.finalLegDistanceKm != null && section.finalLegDistanceKm > 0 ? (
+                <FadeSlideIn>
                   <View style={styles.stopRow}>
                     <View style={styles.stopIcon}>
-                      <MapPin size={14} color={colors.primary} />
+                      <Home size={14} color={colors.primary} />
                     </View>
                     <View style={styles.stopText}>
-                      <Text style={styles.stopName} numberOfLines={1}>
-                        {visit.dealer_name || `Dealer #${visit.dealer_id}`}
-                      </Text>
+                      <Text style={styles.stopName}>No dealer stops today</Text>
                       <Text style={styles.stopDistance}>
-                        {visit.distance_from_previous_km > 0
-                          ? `${parseFloat(visit.distance_from_previous_km).toFixed(1)} km from previous stop`
-                          : 'Start of day'}
+                        {section.finalLegIsRouted ? '' : '~'}{section.finalLegDistanceKm.toFixed(1)} km travelled (day start → day end)
                       </Text>
                     </View>
                   </View>
                 </FadeSlideIn>
-              ))
+              ) : (
+                <Text style={styles.noStopsText}>No dealer stops recorded this day.</Text>
+              )
+            ) : (
+              <>
+                {section.visits.map((visit, index) => (
+                  <FadeSlideIn key={visit.id} delay={Math.min(index, 6) * 25}>
+                    <View style={styles.stopRow}>
+                      <View style={styles.stopIcon}>
+                        <MapPin size={14} color={colors.primary} />
+                      </View>
+                      <View style={styles.stopText}>
+                        <Text style={styles.stopName} numberOfLines={1}>
+                          {visit.dealer_name || `Dealer #${visit.dealer_id}`}
+                        </Text>
+                        <Text style={styles.stopDistance}>
+                          {visit.distance_from_previous_km > 0
+                            ? `${visit.distance_is_routed ? '' : '~'}${parseFloat(visit.distance_from_previous_km).toFixed(1)} km from previous stop`
+                            : 'Start of day'}
+                        </Text>
+                      </View>
+                    </View>
+                  </FadeSlideIn>
+                ))}
+
+                {section.finalLegDistanceKm != null && section.finalLegDistanceKm > 0 && (
+                  <FadeSlideIn delay={Math.min(section.visits.length, 6) * 25}>
+                    <View style={styles.stopRow}>
+                      <View style={styles.stopIcon}>
+                        <Home size={14} color={colors.primary} />
+                      </View>
+                      <View style={styles.stopText}>
+                        <Text style={styles.stopName}>Return leg</Text>
+                        <Text style={styles.stopDistance}>
+                          {section.finalLegIsRouted ? '' : '~'}{section.finalLegDistanceKm.toFixed(1)} km from last stop
+                        </Text>
+                      </View>
+                    </View>
+                  </FadeSlideIn>
+                )}
+              </>
             )}
           </View>
         ))}

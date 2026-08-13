@@ -15,6 +15,7 @@ const express             = require('express');
 const logger = require('../utils/logger');
 const pool                = require('../db/pool');
 const { haversineKm }     = require('../utils/haversine');
+const { computeRoute }    = require('../services/googleRoutesService');
 const { logDealerLogin, logDealerLogout, logVisitInterrupted } = require('../utils/activityLog');
 const { requireRole }     = require('../middleware/auth.middleware');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
@@ -205,18 +206,37 @@ router.post('/login', async (req, res) => {
       prevLng = parseFloat(att.login_lng);
     }
 
-    const distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
+    // Road distance for this leg (previous dealer's logout, or the day's
+    // login/home point if this is the first dealer today, -> this dealer)
+    // via Google Routes API — falls back to the old haversine straight-line
+    // figure if the API call fails, so a rep's check-in is never blocked by
+    // an upstream Google outage. distanceIsRouted tells the mobile Distance
+    // tab which figure it's looking at.
+    let distFromPrev;
+    let distanceIsRouted = false;
+    try {
+      const route = await computeRoute({ originLat: prevLat, originLng: prevLng, destLat: lat, destLng: lng });
+      if (route.distanceMeters != null) {
+        distFromPrev = route.distanceMeters / 1000;
+        distanceIsRouted = true;
+      } else {
+        distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
+      }
+    } catch (routeErr) {
+      logger.warn('Routes API failed for dealer-to-dealer leg, using haversine fallback', { error: routeErr.message });
+      distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
+    }
 
     // Create visit record
     const visitResult = await client.query(
       `INSERT INTO client_visits
          (attendance_id, dealer_id, login_time, login_lat, login_lng,
-          distance_from_previous_km, login_accuracy_m, login_distance_m,
+          distance_from_previous_km, distance_is_routed, login_accuracy_m, login_distance_m,
           login_inside_radius, login_justification_note, sync_status)
-       VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, 'synced')
+       VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'synced')
        RETURNING id, dealer_id, login_time, login_lat, login_lng, distance_from_previous_km,
-                 login_distance_m, login_inside_radius`,
-      [attendance_id, dealer_id, lat, lng, distFromPrev, accuracyMeters, distanceM, insideRadius, trimmedReason || null]
+                 distance_is_routed, login_distance_m, login_inside_radius`,
+      [attendance_id, dealer_id, lat, lng, distFromPrev, distanceIsRouted, accuracyMeters, distanceM, insideRadius, trimmedReason || null]
     );
     visit = visitResult.rows[0];
 
@@ -714,7 +734,7 @@ router.get('/', async (req, res) => {
               cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius,
               cv.login_justification_note,
               cv.logout_time, cv.logout_lat, cv.logout_lng, cv.logout_justification_note,
-              cv.visit_duration_minutes, cv.distance_from_previous_km,
+              cv.visit_duration_minutes, cv.distance_from_previous_km, cv.distance_is_routed,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id
@@ -856,7 +876,7 @@ router.get('/:id', async (req, res) => {
               cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius,
               cv.login_justification_note,
               cv.logout_time, cv.logout_lat, cv.logout_lng, cv.logout_justification_note,
-              cv.visit_duration_minutes, cv.distance_from_previous_km,
+              cv.visit_duration_minutes, cv.distance_from_previous_km, cv.distance_is_routed,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at, cv.sync_status
        FROM client_visits cv
        JOIN attendance a ON a.id = cv.attendance_id

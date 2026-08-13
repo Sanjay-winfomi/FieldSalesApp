@@ -19,7 +19,16 @@ const getBaseUrl = () => {
     return 'http://192.168.0.57:3001/api';
   }
 
-  throw new Error('EXPO_PUBLIC_API_URL must be set for production builds.');
+  // Throwing here used to happen synchronously at module-import time — before
+  // React (or even the app's own global error handler in index.js) ever gets
+  // a chance to run, since this module is pulled in transitively via
+  // index.js's top-of-file geofenceTask import. That turned a misconfigured
+  // build into a silent, undiagnosable crash on every launch instead of a
+  // visible error. Returning null instead lets the app boot; every request
+  // below fails loudly (and catchably, inside whatever screen made it)
+  // pointing at the real misconfiguration instead.
+  console.error('EXPO_PUBLIC_API_URL must be set for production builds — see mobile/eas.json build profiles.');
+  return null;
 };
 
 const BASE_URL = getBaseUrl();

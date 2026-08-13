@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Modal, View, Text, TextInput, Pressable, Platform, KeyboardAvoidingView, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Modal, View, Text, TextInput, Pressable, Platform, Keyboard, Animated, StyleSheet } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { X, CalendarDays } from 'lucide-react-native';
 import { api } from '../services/api';
@@ -35,6 +35,40 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   const [pendingDate, setPendingDate] = useState(new Date());
   const [saving, setSaving] = useState(false);
 
+  // RN's Modal renders in its own native window/Dialog on Android, which
+  // KeyboardAvoidingView (and the OS's normal adjustResize/adjustPan
+  // handling) doesn't reliably reach — so the sheet previously stayed
+  // pinned to the true bottom of the screen and the keyboard just covered
+  // the Reason field underneath it. Tracking the keyboard's own height and
+  // pushing the sheet up by that amount works inside a Modal on both
+  // platforms, instead of depending on avoidance behavior the Modal window
+  // doesn't actually get.
+  //
+  // Driven through an Animated.Value (not a plain state-driven style) so the
+  // sheet slides up/down in step with the keyboard's own animation instead
+  // of snapping to the new margin the instant the event fires — that abrupt
+  // snap, landing mid-way through the OS's own keyboard slide animation, is
+  // what read as a "flicker" rather than a smooth keyboard-avoiding motion.
+  const keyboardOffset = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow';
+    const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
+    const animateTo = (height, duration) => {
+      Animated.timing(keyboardOffset, {
+        toValue: height,
+        duration: duration || 200,
+        useNativeDriver: false, // animating layout (marginBottom), not transform/opacity
+      }).start();
+    };
+    const showSub = Keyboard.addListener(showEvent, (e) => animateTo(e.endCoordinates?.height || 0, e.duration));
+    const hideSub = Keyboard.addListener(hideEvent, (e) => animateTo(0, e.duration));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [keyboardOffset]);
+
   const trimmedLength = reason.trim().length;
   const canSave = !!date && trimmedLength >= MIN_REASON_LENGTH && !saving;
 
@@ -50,6 +84,13 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   };
 
   const openDatePicker = () => {
+    // Without this, tapping the date selector while the Reason field still
+    // has focus made the soft keyboard's own dismiss animation (triggered by
+    // the focus change) and the native date dialog's open animation race
+    // each other — both visibly competing for the same space at once, which
+    // read as the calendar itself flickering. Dismissing explicitly, before
+    // the dialog opens, makes the two transitions sequential instead.
+    Keyboard.dismiss();
     setPendingDate(date || new Date());
     setShowDatePicker(true);
   };
@@ -99,7 +140,7 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetWrap}>
+        <Animated.View style={[styles.sheetWrap, { marginBottom: keyboardOffset }]}>
           <View style={styles.sheet}>
             <View style={styles.header}>
               <Text style={styles.title}>Request follow-up</Text>
@@ -140,7 +181,7 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
 
             <PrimaryButton title="Send request" onPress={handleSave} disabled={!canSave} loading={saving} />
           </View>
-        </KeyboardAvoidingView>
+        </Animated.View>
 
         {showDatePicker && Platform.OS === 'android' && (
           <DateTimePicker

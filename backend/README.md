@@ -66,13 +66,15 @@ The manager dashboard's dealer-registration map, address search, and nearby-plac
 lookup are backed by Google's Geocoding API + Places API (proxied through
 `geocode.routes.js` so the key never reaches the browser). To set this up:
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a project and enable **Geocoding API** and **Places API** (billing must be enabled on the project — both stay within the free monthly quota for normal usage).
+1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a project and enable **Geocoding API**, **Places API**, and **Routes API** (billing must be enabled on the project — Geocoding/Places stay within the free monthly quota for normal usage; see the Routes API cost note below).
 2. Create an API key and set it in `backend/.env`:
    ```
    GOOGLE_MAPS_API_KEY=your_key_here
    ```
 3. Optionally restrict the key to your server's IP in Cloud Console (it's never sent to a browser, so this is just extra hardening, not required).
 4. The web dashboard needs a **second**, separately-restricted key for the Maps JavaScript API itself — see `web/.env.example`.
+
+**Routes API cost note**: unlike Geocoding/Places, Routes API "Compute Routes" calls are not free at normal usage volume — each dealer check-in and each day logout now makes one call (`googleRoutesService.js`, used from `visits.routes.js` and `attendance.routes.js` to get real road distance instead of a straight-line estimate for the Distance tab). A rep with ~5 visits/day is ~6 calls/day; budget accordingly across your whole team before enabling this in production. On any Routes API failure (quota exhausted, network error, missing key) these routes fall back to the old haversine straight-line distance automatically — a visit or day logout is never blocked by it.
 
 ---
 

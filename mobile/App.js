@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { StyleSheet, View, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
@@ -15,7 +15,7 @@ import { startDealerGeofence, stopDealerGeofence } from './src/services/geofence
 import { startAssignedDealersGeofence, stopAssignedDealersGeofence, checkArrivalNow } from './src/services/assignedDealerGeofence';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
 import { configureGeofenceNotificationChannel, configureArrivalNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
-import { AppStateContext } from './src/context/AppStateContext';
+import { AppStateContext, PendingSyncContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
 import { ThemedAlertHost } from './src/components';
@@ -235,11 +235,25 @@ export default function App() {
   // per pending assignment (see assignedDealerGeofence.js) so the OS itself
   // notifies the rep on arrival even if DealerNavigationScreen was never
   // opened, or the app is backgrounded/closed. Re-registers whenever the
-  // pending list changes (a check-in drops a dealer off it, a fresh fetch
-  // adds/removes one).
+  // pending SET actually changes (a check-in drops a dealer off it, a fresh
+  // fetch adds/removes one).
+  //
+  // Registering a geofence starts an Android foreground service — not free
+  // to tear down and restart. `assignedDealers` gets a brand-new array
+  // reference on every fetchAssignedDealers() call (e.g. every time Home
+  // regains focus), even when the actual set of pending dealers hasn't
+  // changed at all, so gating this effect on the array reference alone
+  // re-registered the geofence on every single one of those fetches. This
+  // ref+signature only lets it through when the pending set has genuinely
+  // changed.
+  const registeredGeofenceKeyRef = useRef(null);
   useEffect(() => {
     if (!employee) return;
     const pending = assignedDealers.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+    const key = pending.map((a) => `${a.id}:${a.dealer_lat}:${a.dealer_lng}:${a.radius_meters}`).sort().join('|');
+
+    if (key === registeredGeofenceKeyRef.current) return;
+    registeredGeofenceKeyRef.current = key;
 
     if (pending.length === 0) {
       stopAssignedDealersGeofence();
@@ -412,7 +426,7 @@ export default function App() {
   // (mount, HomeScreen's focus listener, TodaysVisitsScreen's focus
   // listener, the geofence re-registration effect), any of which can race
   // and let an older response clobber a newer one.
-  const fetchAssignedDealers = async () => {
+  const runFetchAssignedDealers = async () => {
     const seq = ++assignedDealersSeqRef.current;
     try {
       const response = await api.get('/assignments/today');
@@ -422,6 +436,24 @@ export default function App() {
       if (seq !== assignedDealersSeqRef.current) return;
       console.error('Failed to fetch assigned dealers:', error);
     }
+  };
+
+  // Debounced wrapper: HomeScreen refetches on every focus, TodaysVisits
+  // refetches on every focus, and both refetch on mount — switching tabs
+  // back and forth fires several of these in quick succession. Each real
+  // fetch that changes the pending set retriggers the geofence effect below
+  // to stop/restart Android's background-location foreground service, and
+  // doing that in a tight loop is the kind of background-resource churn
+  // Android's battery/background-activity limits can respond to by killing
+  // the app outright. Coalescing rapid-fire calls into one actual request
+  // keeps that registration stable during normal navigation.
+  const fetchAssignedDealersTimerRef = useRef(null);
+  const fetchAssignedDealers = () => {
+    if (fetchAssignedDealersTimerRef.current) clearTimeout(fetchAssignedDealersTimerRef.current);
+    fetchAssignedDealersTimerRef.current = setTimeout(() => {
+      fetchAssignedDealersTimerRef.current = null;
+      runFetchAssignedDealers();
+    }, 800);
   };
 
   // Returns whether the session was actually established — the caller
@@ -586,7 +618,18 @@ export default function App() {
   // Bundles the state/handlers every tab screen needs, so Home/Dealers/
   // History/Profile can each read what they need without HomeScreen owning
   // all of them and passing them down as before.
-  const appStateValue = {
+  //
+  // Memoized so useAppState() consumers only re-render when something they
+  // actually might care about changes — without this, every screen in the
+  // tree re-rendered on this component's every render for any reason at all
+  // (most visibly, pendingSyncCount's own 10s poll — now split out into
+  // PendingSyncContext below instead of living in this object). The handler
+  // functions are intentionally left out of the dependency list: none of
+  // them close over state that isn't already listed here (they read
+  // whichever ref/setter they need, or take their inputs as call
+  // arguments), so using the current render's closures without forcing a
+  // recompute on every render is safe rather than a stale-closure risk.
+  const appStateValue = useMemo(() => ({
     employee,
     attendance,
     visits,
@@ -594,11 +637,6 @@ export default function App() {
     visitsCount,
     distanceTravelled,
     refreshing,
-    pendingSyncCount,
-    // Lets SyncQueueModal push a fresh count the instant a retry/discard
-    // resolves something, instead of the Home banner sitting stale until
-    // the next 10s poll above picks it up.
-    setPendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
     backgroundLocationDenied,
@@ -609,7 +647,23 @@ export default function App() {
     assignedDealers,
     fetchAssignedDealers,
     onSelectAssignment: handleSelectAssignment,
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    employee, attendance, visits, dayStatus, visitsCount, distanceTravelled,
+    refreshing, locationPermissionDenied, locationPermissionCanAskAgain,
+    backgroundLocationDenied, assignedDealers,
+  ]);
+
+  // See PendingSyncContext's own comment (src/context/AppStateContext.js) —
+  // kept separate from appStateValue above so its 10s poll only re-renders
+  // whichever component actually reads it.
+  const pendingSyncValue = useMemo(() => ({
+    pendingSyncCount,
+    // Lets SyncQueueModal push a fresh count the instant a retry/discard
+    // resolves something, instead of the Home banner sitting stale until
+    // the next 10s poll above picks it up.
+    setPendingSyncCount,
+  }), [pendingSyncCount]);
 
   return (
     <SafeAreaProvider>
@@ -624,6 +678,7 @@ export default function App() {
         <ThemedAlertHost />
         <NavigationContainer ref={navigationRef}>
           <AppStateContext.Provider value={appStateValue}>
+          <PendingSyncContext.Provider value={pendingSyncValue}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               <Stack.Screen name="Splash">
                 {({ navigation }) => (
@@ -749,6 +804,7 @@ export default function App() {
               <Stack.Screen name="ReminderEditor" component={ReminderEditorScreen} />
               <Stack.Screen name="About" component={AboutScreen} />
             </Stack.Navigator>
+          </PendingSyncContext.Provider>
           </AppStateContext.Provider>
         </NavigationContainer>
       </View>

@@ -2,14 +2,14 @@ jest.mock('../../src/services/api', () => ({
   api: { post: jest.fn(), patch: jest.fn(() => Promise.resolve()) },
 }));
 jest.mock('../../src/services/location', () => ({
-  getCurrentLocation: jest.fn(),
+  getApproximateLocation: jest.fn(),
   haversineMeters: jest.fn(),
 }));
 
 import React from 'react';
 import { render, waitFor, fireEvent } from '@testing-library/react-native';
 import { api } from '../../src/services/api';
-import { getCurrentLocation, haversineMeters } from '../../src/services/location';
+import { getApproximateLocation, haversineMeters } from '../../src/services/location';
 import DealerNavigationScreen from '../DealerNavigationScreen';
 
 // The first render in this file pays a one-time cold-start cost for the
@@ -34,7 +34,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('shows an error state when GPS location cannot be acquired', async () => {
-    getCurrentLocation.mockResolvedValue(null);
+    getApproximateLocation.mockResolvedValue(null);
 
     const { findByText } = await render(
       <DealerNavigationScreen assignment={ASSIGNMENT} navigation={{ goBack: jest.fn() }} onArrived={jest.fn()} />
@@ -44,7 +44,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('computes and displays the route once GPS and the backend succeed', async () => {
-    getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
     api.post.mockResolvedValue({
       data: {
         navigation: {
@@ -73,7 +73,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('shows a friendly message when the backend cannot reach Google', async () => {
-    getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
     api.post.mockRejectedValue({ response: { status: 502 } });
 
     const { findByText } = await render(
@@ -84,7 +84,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('surfaces a distinct message for a dealer with no registered coordinates', async () => {
-    getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
 
     const { findByText } = await render(
       <DealerNavigationScreen
@@ -99,7 +99,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('treats a non-numeric dealer coordinate as missing rather than crashing on NaN', async () => {
-    getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
 
     const { findByText } = await render(
       <DealerNavigationScreen
@@ -114,7 +114,7 @@ describe('DealerNavigationScreen', () => {
   });
 
   test('cancelling stops the position poll and patches the backend before navigating back', async () => {
-    getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
     api.post.mockResolvedValue({
       data: {
         navigation: {

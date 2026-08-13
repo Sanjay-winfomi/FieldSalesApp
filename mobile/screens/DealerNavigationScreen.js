@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, Text, Pressable, Platform, Linking, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, Pressable, Platform, Linking, ActivityIndicator, Dimensions } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Navigation2, MapPin, Clock, AlertTriangle, X } from 'lucide-react-native';
-import { getCurrentLocation, haversineMeters } from '../src/services/location';
+import { getApproximateLocation, haversineMeters } from '../src/services/location';
 import { decodePolyline } from '../src/utils/polyline';
 import { api } from '../src/services/api';
 import { isNetworkError } from '../src/services/syncManager';
@@ -16,8 +16,18 @@ import { colors, typography, spacing, radius } from '../src/theme';
 const POSITION_POLL_MS = 15000;
 const DEFAULT_RADIUS_METERS = 200;
 
+// The map view fills the screen, whose width/height ratio varies by device
+// (tall phone vs. a squarer tablet) — using the same delta for both lat and
+// long, as before, skews non-uniformly on any screen that isn't roughly
+// square. Deriving longitudeDelta from this ratio (and correcting for how
+// longitude degrees shrink away from the equator) keeps the visible map
+// area proportioned the same regardless of device.
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MAP_ASPECT_RATIO = SCREEN_WIDTH / SCREEN_HEIGHT;
+
 const STATUS_LABELS = {
   loading: 'Loading',
+  mapReady: 'Ready',
   ready: 'Ready',
   navigating: 'Navigating',
   arrived: 'Arrived',
@@ -104,8 +114,16 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
   const computeRoute = async () => {
     setStatus('loading');
     setErrorMessage(null);
+    setRoute(null);
 
-    const loc = await getCurrentLocation();
+    // A route *preview* doesn't need the survey-grade GPS fix
+    // getCurrentLocation acquires for the actual login/logout radius check
+    // (up to 3 attempts x 15s of GPS-only Accuracy.Highest = 45s worst
+    // case) — getApproximateLocation trades that precision for speed
+    // (network-assisted Accuracy.Balanced, single 8s attempt, falls back to
+    // the last cached fix), since being off by a stray few dozen metres
+    // doesn't meaningfully change a map preview.
+    const loc = await getApproximateLocation();
     if (!isMountedRef.current) return;
     if (!loc) {
       setStatus('error');
@@ -119,6 +137,16 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
       setErrorMessage('This dealer has no registered coordinates, so a route cannot be computed.');
       return;
     }
+
+    // Show the map immediately (both markers, no route line yet) rather
+    // than leaving the whole screen blank until the network round-trip
+    // below also finishes — the distance/ETA panel fills in once that
+    // resolves. Splitting these also means the MapView's own first-render
+    // (Android briefly flashes/greys out a freshly mounted Google Map while
+    // its native SDK initializes) happens while there's already stuff to
+    // look at, instead of appearing as a jarring pop-in at the very end of
+    // a long wait.
+    setStatus('mapReady');
 
     try {
       const res = await api.post('/navigation/compute', {
@@ -158,15 +186,17 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
     }
   };
 
-  // Poll position while a route is active, to auto-detect arrival.
+  // Poll position while a route is active, to auto-detect arrival. Starts
+  // as soon as the map itself is up ('mapReady') rather than waiting on the
+  // route API too — arrival detection doesn't depend on the route/ETA data.
   useEffect(() => {
-    if (status !== 'ready' && status !== 'navigating') {
+    if (status !== 'mapReady' && status !== 'ready' && status !== 'navigating') {
       if (pollRef.current) clearInterval(pollRef.current);
       return;
     }
 
     const checkArrival = async () => {
-      const loc = await getCurrentLocation();
+      const loc = await getApproximateLocation();
       if (!isMountedRef.current || !loc || dealerLat == null || dealerLng == null) return;
       setCoords(loc);
       const distanceMeters = haversineMeters(loc.lat, loc.lng, dealerLat, dealerLng);
@@ -235,17 +265,21 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
         </View>
       )}
 
-      {(status === 'ready' || status === 'navigating' || status === 'arrived') && dealerLat != null && (
+      {(status === 'mapReady' || status === 'ready' || status === 'navigating' || status === 'arrived') && dealerLat != null && (
         <>
           <MapView
             style={styles.map}
             provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-            initialRegion={{
-              latitude: (coords?.lat ?? dealerLat) ,
-              longitude: (coords?.lng ?? dealerLng),
-              latitudeDelta: Math.abs((coords?.lat ?? dealerLat) - dealerLat) * 2 + 0.05,
-              longitudeDelta: Math.abs((coords?.lng ?? dealerLng) - dealerLng) * 2 + 0.05,
-            }}
+            loadingEnabled
+            loadingIndicatorColor={colors.primary}
+            loadingBackgroundColor={colors.background}
+            initialRegion={(() => {
+              const latitude = coords?.lat ?? dealerLat;
+              const longitude = coords?.lng ?? dealerLng;
+              const latitudeDelta = Math.abs(latitude - dealerLat) * 2 + 0.05;
+              const longitudeDelta = (latitudeDelta * MAP_ASPECT_RATIO) / Math.cos((latitude * Math.PI) / 180);
+              return { latitude, longitude, latitudeDelta, longitudeDelta };
+            })()}
           >
             {coords && (
               <Marker coordinate={{ latitude: coords.lat, longitude: coords.lng }} title="You" pinColor={colors.primary} />
@@ -278,6 +312,12 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
               )}
               {route?.expected_arrival_time && (
                 <Text style={styles.metaText}>Arrival ~{formatEta(route.expected_arrival_time)}</Text>
+              )}
+              {!route && status === 'mapReady' && (
+                <View style={styles.metaItem}>
+                  <ActivityIndicator size="small" color={colors.textMuted} />
+                  <Text style={styles.metaText}>Calculating route...</Text>
+                </View>
               )}
             </View>
 

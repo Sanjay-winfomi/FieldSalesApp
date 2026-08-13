@@ -27,7 +27,9 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -61,11 +63,11 @@
         }
       ]
     ],
+    "owner": "winfomis-team",
     "extra": {
       "eas": {
-        "projectId": "4380602a-3a21-4dd8-9e40-ec200b572e9f"
+        "projectId": "bf38c17c-1a63-4e81-ac28-3b8410400462"
       }
-    },
-    "owner": "sanjay_winfomi"
+    }
   }
 }

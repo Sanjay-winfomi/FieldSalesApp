@@ -40,8 +40,8 @@ describe('DistanceHistoryScreen', () => {
         return Promise.resolve({
           data: {
             visits: [
-              { id: 1, dealer_id: 10, dealer_name: 'Dealer A', login_time: '2026-08-10T05:00:00Z', distance_from_previous_km: 3 },
-              { id: 2, dealer_id: 11, dealer_name: 'Dealer B', login_time: '2026-08-10T06:00:00Z', distance_from_previous_km: 2.5 },
+              { id: 1, dealer_id: 10, dealer_name: 'Dealer A', login_time: '2026-08-10T05:00:00Z', distance_from_previous_km: 3, distance_is_routed: true },
+              { id: 2, dealer_id: 11, dealer_name: 'Dealer B', login_time: '2026-08-10T06:00:00Z', distance_from_previous_km: 2.5, distance_is_routed: true },
             ],
           },
         });

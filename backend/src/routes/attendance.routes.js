@@ -9,6 +9,7 @@ const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
 const { haversineKm } = require('../utils/haversine');
+const { computeRoute } = require('../services/googleRoutesService');
 const { logDayLogin, logDayLogout } = require('../utils/activityLog');
 const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
@@ -112,7 +113,7 @@ router.post('/logout', async (req, res) => {
     }
 
     const existing = await pool.query(
-      `SELECT id, login_time, logout_time, total_distance_km
+      `SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km
        FROM attendance
        WHERE id = $1 AND employee_id = $2`,
       [attendance_id, employeeId]
@@ -193,15 +194,58 @@ router.post('/logout', async (req, res) => {
       }
     }
 
+    // The day's final leg: last dealer logout (including one just
+    // auto-closed above, if any), or the day's login/home point if no
+    // dealer was ever visited today, -> this day-logout point. Without
+    // this, total_distance_km only ever covered dealer-to-dealer legs and
+    // silently dropped however far the rep travelled after their last stop.
+    const lastVisitResult = await pool.query(
+      `SELECT logout_lat, logout_lng
+       FROM client_visits
+       WHERE attendance_id = $1 AND logout_time IS NOT NULL
+       ORDER BY logout_time DESC
+       LIMIT 1`,
+      [attendance_id]
+    );
+    let finalLegOriginLat, finalLegOriginLng;
+    if (lastVisitResult.rows.length > 0 && lastVisitResult.rows[0].logout_lat != null) {
+      finalLegOriginLat = parseFloat(lastVisitResult.rows[0].logout_lat);
+      finalLegOriginLng = parseFloat(lastVisitResult.rows[0].logout_lng);
+    } else {
+      finalLegOriginLat = parseFloat(att.login_lat);
+      finalLegOriginLng = parseFloat(att.login_lng);
+    }
+
+    let finalLegDistanceKm = null;
+    let finalLegIsRouted = false;
+    if (Number.isFinite(finalLegOriginLat) && Number.isFinite(finalLegOriginLng)) {
+      try {
+        const route = await computeRoute({ originLat: finalLegOriginLat, originLng: finalLegOriginLng, destLat: lat, destLng: lng });
+        if (route.distanceMeters != null) {
+          finalLegDistanceKm = route.distanceMeters / 1000;
+          finalLegIsRouted = true;
+        } else {
+          finalLegDistanceKm = haversineKm(finalLegOriginLat, finalLegOriginLng, lat, lng);
+        }
+      } catch (routeErr) {
+        logger.warn('Routes API failed for final leg, using haversine fallback', { error: routeErr.message });
+        finalLegDistanceKm = haversineKm(finalLegOriginLat, finalLegOriginLng, lat, lng);
+      }
+    }
+
     const result = await pool.query(
       `UPDATE attendance
        SET logout_time = NOW(),
            logout_lat  = $1,
            logout_lng  = $2,
-           total_duration_minutes = $3
+           total_duration_minutes = $3,
+           total_distance_km = COALESCE(total_distance_km, 0) + COALESCE($5, 0),
+           final_leg_distance_km = $5,
+           final_leg_is_routed = $6
        WHERE id = $4
-       RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes`,
-      [lat, lng, durationMins, attendance_id]
+       RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes,
+                 final_leg_distance_km, final_leg_is_routed`,
+      [lat, lng, durationMins, attendance_id, finalLegDistanceKm, finalLegIsRouted]
     );
 
     // Fetch visit summary for the day-end summary screen
@@ -241,7 +285,8 @@ router.get('/today', async (req, res) => {
     const attResult = await pool.query(
       `SELECT id, login_time, login_lat, login_lng,
               logout_time, logout_lat, logout_lng,
-              total_distance_km, total_duration_minutes, sync_status
+              total_distance_km, total_duration_minutes,
+              final_leg_distance_km, final_leg_is_routed, sync_status
        FROM attendance
        WHERE employee_id = $1
          AND ${isCurrentBusinessDay('login_time')}
@@ -259,7 +304,7 @@ router.get('/today', async (req, res) => {
       `SELECT cv.id, cv.dealer_id, d.name AS dealer_name, d.address AS dealer_address,
               d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters,
               cv.login_time, cv.login_lat, cv.login_lng, cv.login_inside_radius, cv.logout_time,
-              cv.visit_duration_minutes, cv.distance_from_previous_km,
+              cv.visit_duration_minutes, cv.distance_from_previous_km, cv.distance_is_routed,
               cv.out_of_radius, cv.interrupted, cv.interrupted_at,
               cv.login_justification_note, cv.sync_status
        FROM client_visits cv
@@ -323,7 +368,8 @@ router.get('/', async (req, res) => {
       `SELECT a.id, a.employee_id, e.name AS employee_name,
               a.login_time, a.login_lat, a.login_lng,
               a.logout_time, a.logout_lat, a.logout_lng,
-              a.total_distance_km, a.total_duration_minutes, a.sync_status
+              a.total_distance_km, a.total_duration_minutes,
+              a.final_leg_distance_km, a.final_leg_is_routed, a.sync_status
        FROM attendance a
        JOIN employees e ON e.id = a.employee_id
        ${whereClause}
@@ -354,7 +400,8 @@ router.get('/:id', async (req, res) => {
       `SELECT a.id, a.employee_id, e.name AS employee_name,
               a.login_time, a.login_lat, a.login_lng,
               a.logout_time, a.logout_lat, a.logout_lng,
-              a.total_distance_km, a.total_duration_minutes, a.sync_status
+              a.total_distance_km, a.total_duration_minutes,
+              a.final_leg_distance_km, a.final_leg_is_routed, a.sync_status
        FROM attendance a
        JOIN employees e ON e.id = a.employee_id
        WHERE a.id = $1`,

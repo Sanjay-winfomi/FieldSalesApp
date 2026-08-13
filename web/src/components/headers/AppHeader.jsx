@@ -191,7 +191,7 @@ const styles = {
   },
   profileName: { ...typography.body, fontSize: 13, fontWeight: 600, color: colors.text },
   profileMenu: {
-    position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 220, backgroundColor: colors.card,
+    position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 220, maxWidth: '90vw', backgroundColor: colors.card,
     border: `1px solid ${colors.border}`, borderRadius: 12, boxShadow: shadows.dropdown, overflow: 'hidden', zIndex: 200,
   },
   profileMenuHeader: { padding: '14px 16px', borderBottom: `1px solid ${colors.border}` },

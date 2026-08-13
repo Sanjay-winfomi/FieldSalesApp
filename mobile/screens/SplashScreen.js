@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Animated, Easing, Image } from 'react-native';
 import * as SplashScreenNative from 'expo-splash-screen';
 import { colors, spacing } from '../src/theme';
+import { moderateScale } from '../src/utils/responsive';
 
 const winfomiLogo = require('../assets/brand/winfomi-logo.png');
 
@@ -73,8 +74,8 @@ const styles = StyleSheet.create({
     padding: spacing.xxl,
   },
   logoImg: {
-    width: 220,
-    height: 63,
+    width: moderateScale(220),
+    height: moderateScale(63),
     marginBottom: spacing.xxl,
   },
   taglineDivider: {

@@ -107,6 +107,16 @@ CREATE INDEX IF NOT EXISTS idx_attendance_login_time ON attendance (login_time);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_employee_business_date
   ON attendance (employee_id, business_date) WHERE business_date IS NOT NULL;
 
+-- The day's final leg — last dealer logout (or day login, if no dealer was
+-- ever visited) -> day logout — computed via Google Routes API at day
+-- logout (attendance.routes.js) and folded into total_distance_km.
+-- final_leg_distance_km keeps it addressable on its own so the mobile
+-- Distance tab can show it as its own row ("Return leg") instead of only
+-- the opaque running total. final_leg_is_routed is false only when the
+-- Routes API call failed and the haversine straight-line fallback was used.
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS final_leg_distance_km DOUBLE PRECISION;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS final_leg_is_routed BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ============================================================
 -- 4. client_visits
 -- ============================================================
@@ -239,6 +249,14 @@ ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS log_out_alert_sent BOOLEAN NO
 -- one-time login moment. Lets the dashboard show a live "distance from
 -- dealer" figure for an open visit instead of a stale login-time value.
 ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS last_location_distance_m DOUBLE PRECISION;
+
+-- Google Routes API road distance for the leg ending at this visit's login
+-- (day-login/home -> first dealer, or previous dealer's logout -> this
+-- dealer) — distance_from_previous_km is populated from this when
+-- available (visits.routes.js). distance_is_routed is false only when the
+-- Routes API call failed and the haversine straight-line fallback was used
+-- instead, so the mobile Distance tab can mark that leg as an estimate.
+ALTER TABLE client_visits ADD COLUMN IF NOT EXISTS distance_is_routed BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ============================================================
 -- 5. exception_log

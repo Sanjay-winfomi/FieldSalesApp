@@ -1,13 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, NotebookPen, BellRing,
 } from 'lucide-react-native';
-import { useAppState } from '../src/context/AppStateContext';
+import { useAppState, usePendingSync } from '../src/context/AppStateContext';
 import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal } from '../src/components';
 import { colors, typography, spacing, shadows, radius } from '../src/theme';
+
+// Sized as a fraction of screen width (see LoginScreen.js for the same
+// pattern) so this decorative glow keeps the same relative footprint across
+// different device screen sizes instead of a fixed dp look that varies.
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function formatTime(isoString) {
   if (!isoString) return '';
@@ -40,8 +45,6 @@ export default function HomeScreen({ navigation }) {
     attendance,
     visits,
     refreshing,
-    pendingSyncCount,
-    setPendingSyncCount,
     locationPermissionDenied,
     locationPermissionCanAskAgain,
     backgroundLocationDenied,
@@ -50,6 +53,7 @@ export default function HomeScreen({ navigation }) {
     onSelectDealer,
     fetchAssignedDealers,
   } = useAppState();
+  const { pendingSyncCount, setPendingSyncCount } = usePendingSync();
 
   // Refresh the assigned-dealer list (and any in-progress navigation
   // status on it) whenever this tab regains focus — e.g. returning from
@@ -82,22 +86,24 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient
-        colors={colors.gradientHeader}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
-      >
-        <View style={styles.headerGlow} pointerEvents="none" />
-        <Text style={styles.greeting}>{getGreeting()}</Text>
-        <Text style={styles.userName} numberOfLines={1}>{employee?.name || 'User'}</Text>
-        <View style={styles.metaRow}>
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>{employee?.role === 'manager' ? 'Manager' : 'Field rep'}</Text>
+      <View style={styles.headerShadowWrap}>
+        <LinearGradient
+          colors={colors.gradientHeader}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.header, { paddingTop: insets.top + 16 }]}
+        >
+          <View style={styles.headerGlow} pointerEvents="none" />
+          <Text style={styles.greeting}>{getGreeting()}</Text>
+          <Text style={styles.userName} numberOfLines={1}>{employee?.name || 'User'}</Text>
+          <View style={styles.metaRow}>
+            <View style={styles.rolePill}>
+              <Text style={styles.rolePillText}>{employee?.role === 'manager' ? 'Manager' : 'Field rep'}</Text>
+            </View>
+            <Text style={styles.dateText}>{todayLabel}</Text>
           </View>
-          <Text style={styles.dateText}>{todayLabel}</Text>
-        </View>
-      </LinearGradient>
+        </LinearGradient>
+      </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -316,6 +322,16 @@ export default function HomeScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  // Shadow (elevation) lives on this outer, non-clipping wrapper — Android
+  // flickers when the same view both casts an elevation shadow AND clips its
+  // content via overflow:hidden (needed below for the rounded bottom
+  // corners), since it has to composite the shadow layer separately from the
+  // clipped gradient on every frame.
+  headerShadowWrap: {
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    ...shadows.raised,
+  },
   header: {
     paddingHorizontal: spacing.screenHorizontal,
     paddingBottom: spacing.xl,
@@ -323,10 +339,10 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.card,
     overflow: 'hidden',
     position: 'relative',
-    ...shadows.raised,
   },
   headerGlow: {
-    position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
+    position: 'absolute', top: -SCREEN_WIDTH * 0.13, right: -SCREEN_WIDTH * 0.1,
+    width: SCREEN_WIDTH * 0.47, height: SCREEN_WIDTH * 0.47, borderRadius: SCREEN_WIDTH * 0.235,
     backgroundColor: 'rgba(34,197,94,0.14)',
   },
   greeting: { ...typography.caption, color: colors.textSecondary },

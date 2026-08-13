@@ -67,8 +67,9 @@ describe('POST /api/x/logout', () => {
 
   test('200 logs out successfully with a visit summary', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: null, total_distance_km: 3 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
       .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
+      .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either — final leg falls back to login point
       .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] })
       .mockResolvedValueOnce({ rows: [{ visits_count: '4' }] });
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
@@ -79,7 +80,7 @@ describe('POST /api/x/logout', () => {
 
   test('auto-closes a still-open dealer visit when the day ends', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: null, total_distance_km: 3 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
       .mockResolvedValueOnce({
         rows: [{
           id: 90, dealer_id: 7, login_time: '2026-07-27T10:00:00Z', dealer_name: 'Dealer Z',
@@ -88,6 +89,7 @@ describe('POST /api/x/logout', () => {
       }) // open dealer visit found
       .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // UPDATE client_visits (auto-close) — this request won the race
       .mockResolvedValueOnce({ rows: [] }) // createManagerNotification insert
+      .mockResolvedValueOnce({ rows: [{ logout_lat: 11, logout_lng: 77 }] }) // final leg origin = the just-auto-closed visit's logout point
       .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] })
       .mockResolvedValueOnce({ rows: [{ visits_count: '1' }] });
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
@@ -101,8 +103,8 @@ describe('POST /api/x/logout', () => {
 
   test('does not overwrite or notify when a manual dealer logout wins the race to close the visit first', async () => {
     pool.query.mockImplementation((sql) => {
-      if (/SELECT id, login_time, logout_time, total_distance_km/.test(sql)) {
-        return Promise.resolve({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: null, total_distance_km: 3 }] });
+      if (/SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km/.test(sql)) {
+        return Promise.resolve({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] });
       }
       if (/FROM client_visits cv\s+JOIN dealers d/.test(sql)) {
         // Stale read — a concurrent manual logout closes the visit before the UPDATE below runs.
@@ -122,8 +124,9 @@ describe('POST /api/x/logout', () => {
       if (/COUNT\(\*\) AS visits_count/.test(sql)) {
         return Promise.resolve({ rows: [{ visits_count: '1' }] });
       }
-      // notifyUnvisitedAssignments's own queries, and anything else — an
-      // empty result is fine for this test's purposes.
+      // notifyUnvisitedAssignments's own queries, the final-leg origin
+      // lookup, and anything else — an empty result is fine for this test's
+      // purposes.
       return Promise.resolve({ rows: [] });
     });
 

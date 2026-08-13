@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -9,6 +9,11 @@ import { showAlert } from '../src/services/themedAlert';
 import { ProfileCard, ProfileRow, SecondaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, shadows, radius } from '../src/theme';
 import appJson from '../app.json';
+
+// Same pattern as HomeScreen.js/LoginScreen.js: size the decorative glow as
+// a fraction of screen width so it keeps the same relative footprint across
+// different device screen sizes.
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function formatDuration(minutes) {
   if (!minutes || minutes < 1) return '0h 0m';
@@ -39,15 +44,17 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient
-        colors={colors.gradientHeader}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
-      >
-        <View style={styles.headerGlow} pointerEvents="none" />
-        <Text style={styles.title}>Profile</Text>
-      </LinearGradient>
+      <View style={styles.headerShadowWrap}>
+        <LinearGradient
+          colors={colors.gradientHeader}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.header, { paddingTop: insets.top + 16 }]}
+        >
+          <View style={styles.headerGlow} pointerEvents="none" />
+          <Text style={styles.title}>Profile</Text>
+        </LinearGradient>
+      </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <FadeSlideIn>
@@ -103,6 +110,13 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  // See HomeScreen.js's headerShadowWrap for why the shadow and the
+  // overflow:hidden clip are split across two nested views on Android.
+  headerShadowWrap: {
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    ...shadows.raised,
+  },
   header: {
     paddingHorizontal: spacing.screenHorizontal,
     paddingBottom: spacing.xl,
@@ -110,10 +124,10 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.card,
     overflow: 'hidden',
     position: 'relative',
-    ...shadows.raised,
   },
   headerGlow: {
-    position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
+    position: 'absolute', top: -SCREEN_WIDTH * 0.13, right: -SCREEN_WIDTH * 0.1,
+    width: SCREEN_WIDTH * 0.47, height: SCREEN_WIDTH * 0.47, borderRadius: SCREEN_WIDTH * 0.235,
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   title: { ...typography.sectionTitle, color: colors.text, fontSize: 22 },

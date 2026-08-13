@@ -236,6 +236,16 @@ router.get('/exceptions', async (req, res) => {
   const dealerFilterError = pushDealerIdFilter(dealer_id, params, conditions, 'el.dealer_id');
   if (dealerFilterError) return res.status(400).json({ error: dealerFilterError });
 
+  // This report is for login/logout radius exceptions a rep had to type a
+  // written reason for — 'interrupted' rows are a different thing
+  // entirely: an automatic mid-visit "left the dealer premises" flag from
+  // the Random Location Verification poll (visits.routes.js's
+  // /:id/location-check), with no rep-provided reason and nothing for a
+  // manager to review here. They read as noise (huge stray
+  // distance/accuracy values, blank Reason) next to real exceptions, so
+  // they're excluded unconditionally rather than behind a filter toggle.
+  conditions.push(`el.event_type <> 'interrupted'`);
+
   if (employee_ids) {
     const ids = employee_ids.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isInteger);
     if (ids.length === 0) return res.status(400).json({ error: 'Invalid employee_ids' });

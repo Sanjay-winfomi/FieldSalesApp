@@ -18,3 +18,22 @@ export function useAppState() {
   }
   return ctx;
 }
+
+/**
+ * pendingSyncCount changes on its own 10s poll (see App.js) independently of
+ * everything else in AppStateContext. Sharing one context object for both
+ * meant that 10s tick re-rendered every screen consuming useAppState() —
+ * Home, Profile, DealerLogin, DealerLogout, DealerNavigation, etc. — even
+ * though only the "N pending sync" banner on Home actually reads this value.
+ * Splitting it into its own context confines that periodic re-render to just
+ * the component(s) that call usePendingSync().
+ */
+export const PendingSyncContext = createContext(null);
+
+export function usePendingSync() {
+  const ctx = useContext(PendingSyncContext);
+  if (!ctx) {
+    throw new Error('usePendingSync() must be called within PendingSyncContext.Provider');
+  }
+  return ctx;
+}

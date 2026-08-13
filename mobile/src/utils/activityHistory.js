@@ -52,13 +52,31 @@ export function formatDuration(minutes) {
   return `${h}h ${m}m`;
 }
 
+// Fetching a rep's entire attendance/visit history with no bound gets
+// slower every week they use the app — both the request payload and the
+// (non-virtualized) list these feed grow without limit. 90 days comfortably
+// covers what these three drill-down screens are actually used for (recent
+// activity review), while keeping the fetch/render cost flat over time.
+const DEFAULT_LOOKBACK_DAYS = 90;
+
+function isoDateDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
+ * @param {object} [opts]
+ * @param {number} [opts.lookbackDays] - how many days of history to fetch,
+ *   default 90. Pass a larger value (or Infinity, which omits the filter
+ *   entirely) if a caller ever needs full history.
  * @returns {Promise<{attendanceDays: object[], visits: object[]}>}
  */
-export async function fetchActivityData() {
+export async function fetchActivityData({ lookbackDays = DEFAULT_LOOKBACK_DAYS } = {}) {
+  const params = Number.isFinite(lookbackDays) ? { from: isoDateDaysAgo(lookbackDays) } : {};
   const [attendanceRes, visitsRes] = await Promise.all([
-    api.get('/attendance'),
-    api.get('/visits'),
+    api.get('/attendance', { params }),
+    api.get('/visits', { params }),
   ]);
   return {
     attendanceDays: attendanceRes.data.attendance || [],
@@ -107,7 +125,15 @@ export function groupActivityByDay(attendanceDays, visits) {
         ? parseFloat(section.attendance.total_distance_km || 0)
         : section.visits.reduce((sum, v) => sum + parseFloat(v.distance_from_previous_km || 0), 0);
       const durationMinutes = section.attendance?.total_duration_minutes || 0;
+      // The day's last dealer (or day-login/home point, if none) -> day
+      // logout leg — computed server-side via Google Routes API at day
+      // logout (see attendance.routes.js). null for a day still in
+      // progress (no logout yet) or one that predates this field.
+      const finalLegDistanceKm = section.attendance?.final_leg_distance_km != null
+        ? parseFloat(section.attendance.final_leg_distance_km)
+        : null;
+      const finalLegIsRouted = !!section.attendance?.final_leg_is_routed;
 
-      return { ...section, dealersVisitedCount, distanceKm, durationMinutes };
+      return { ...section, dealersVisitedCount, distanceKm, durationMinutes, finalLegDistanceKm, finalLegIsRouted };
     });
 }

@@ -133,6 +133,56 @@ export const getCurrentLocation = async () => {
   }
 };
 
+// A per-attempt budget for getApproximateLocation below — short because it
+// falls back to a stale-but-instant cached fix rather than making the caller
+// wait, unlike getCurrentLocation's 15s-per-attempt budget.
+const APPROXIMATE_TIMEOUT_MS = 8000;
+
+/**
+ * Fast, "good enough" location for previews that don't gate an actual
+ * login/logout radius check (e.g. centering a route-preview map) — trades
+ * getCurrentLocation's precision for speed:
+ *  - Location.Accuracy.Balanced (network+GPS fused) instead of Highest
+ *    (GPS-only), which routinely takes 10s+ to get a fix indoors/urban.
+ *  - A single attempt with an 8s budget instead of up to 3 attempts at 15s
+ *    each — the 45s worst case for a strict fix is exactly the kind of
+ *    delay a route *preview* shouldn't impose.
+ *  - Falls back to the last cached fix (near-instant, possibly a bit stale)
+ *    if a fresh one doesn't arrive in time, rather than failing outright —
+ *    a few-hundred-metre-old position is entirely fine for a map preview.
+ * @returns {Promise<{lat: number, lng: number, accuracyMeters: number|null} | null>}
+ */
+export const getApproximateLocation = async () => {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+
+    try {
+      const location = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        APPROXIMATE_TIMEOUT_MS
+      );
+      return {
+        lat: location.coords.latitude,
+        lng: location.coords.longitude,
+        accuracyMeters: location.coords.accuracy ?? null,
+      };
+    } catch (timeoutErr) {
+      console.warn('Approximate location timed out, falling back to last known position:', timeoutErr.message);
+      const last = await Location.getLastKnownPositionAsync();
+      if (!last) return null;
+      return {
+        lat: last.coords.latitude,
+        lng: last.coords.longitude,
+        accuracyMeters: last.coords.accuracy ?? null,
+      };
+    }
+  } catch (error) {
+    console.error('Error fetching approximate location:', error);
+    return null;
+  }
+};
+
 // Mirrors backend/src/utils/haversine.js's haversineKm — needed client-side
 // so DealerLogoutScreen can compute inside-radius/drift-match distances
 // immediately from a fresh GPS reading, without waiting on a server round-trip.
