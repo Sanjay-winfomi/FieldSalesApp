@@ -65,15 +65,16 @@ export default function DashboardPage({
     <div style={styles.page} className="ft-page">
       <div style={styles.hero}>
         <div style={styles.heroGlow} aria-hidden="true" />
+        <div style={styles.heroSheen} aria-hidden="true" />
         <div style={styles.heroContent}>
-          <h1 style={styles.title}>Field team — today</h1>
+          <h1 style={styles.title}>Field Team — Today</h1>
           <p style={styles.subtitle}>
             {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
       </div>
 
-      <div style={styles.metricsGrid}>
+      <div style={styles.metricsGrid} className="ft-stagger">
         <MetricCard icon={<Users />} value={reps.length} label="Total employees" tone="primary" />
         <MetricCard icon={<UserCheck />} value={stats.logged_in} label="Logged in" tone="success" />
         <MetricCard icon={<Clock />} value={stats.not_logged_in} label="Pending login" tone="warning" />
@@ -113,7 +114,7 @@ export default function DashboardPage({
           )}
         </div>
 
-        <div style={styles.repGrid}>
+        <div style={styles.repGrid} className="ft-stagger">
           {loading && reps.length === 0 ? (
             Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
           ) : reps.length === 0 ? (
@@ -143,18 +144,27 @@ export default function DashboardPage({
 const styles = {
   page: { padding: `${spacing.xxl}px`, maxWidth: 1920, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   hero: {
-    position: 'relative', overflow: 'hidden', background: colors.gradientHero,
+    position: 'relative', overflow: 'hidden',
+    background: colors.neutralBg,
+    backdropFilter: 'blur(20px) saturate(120%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(120%)',
+    border: `1px solid ${colors.neutralBorder}`,
     borderRadius: radius.card, padding: `${spacing.xxl}px ${spacing.xxl}px`,
-    marginBottom: spacing.xl, boxShadow: shadows.raised,
+    marginBottom: spacing.xl, boxShadow: '0 8px 32px rgba(15,23,42,0.10)',
   },
   heroGlow: {
     position: 'absolute', top: -60, right: -40, width: 220, height: 220, borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 70%)',
+    background: 'radial-gradient(circle, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0) 70%)',
+    pointerEvents: 'none',
+  },
+  heroSheen: {
+    position: 'absolute', inset: 0,
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0) 55%)',
     pointerEvents: 'none',
   },
   heroContent: { position: 'relative' },
-  title: { ...typography.dashboardTitle, color: '#FFFFFF' },
-  subtitle: { ...typography.body, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
+  title: { ...typography.dashboardTitle, color: colors.text },
+  subtitle: { ...typography.body, color: 'rgba(31,41,55,0.75)', marginTop: 4 },
   metricsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',

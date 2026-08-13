@@ -266,7 +266,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
         action={<Button icon={<UserPlus size={15} />} onClick={() => { setCreateError(''); setCreateOpen(true); }} fullWidthMobile>Add employee</Button>}
       />
 
-      <div style={styles.metricsGrid}>
+      <div style={styles.metricsGrid} className="ft-stagger">
         <MetricCard icon={<Users />} value={summary.total} label="Total employees" tone="primary" />
         <MetricCard icon={<UserCheck />} value={summary.active} label="Active" tone="success" />
         <MetricCard icon={<UserX />} value={summary.inactive} label="Inactive" tone="danger" />
@@ -300,7 +300,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
             <TextField label="Username" value={createForm.username} onChange={(v) => setCreateForm({ ...createForm, username: v })} required />
             <TextField label="Password (min 6 chars)" type="password" value={createForm.password} onChange={(v) => setCreateForm({ ...createForm, password: v })} required minLength={6} />
             <TextField label="Region" value={createForm.region} onChange={(v) => setCreateForm({ ...createForm, region: v })} />
-            <div>
+            <div style={{ position: 'relative' }}>
               <label style={styles.selectLabel}>Role</label>
               <select className="ft-input" style={{ height: 46 }} value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}>
                 {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -321,7 +321,7 @@ export default function EmployeesTab({ currentEmployeeId }) {
             <TextField label="Full name" value={editForm.name} onChange={(v) => setEditForm({ ...editForm, name: v })} required />
             <TextField label="Phone" value={editForm.phone} onChange={(v) => setEditForm({ ...editForm, phone: v })} />
             <TextField label="Region" value={editForm.region} onChange={(v) => setEditForm({ ...editForm, region: v })} />
-            <div>
+            <div style={{ position: 'relative' }}>
               <label style={styles.selectLabel}>Role</label>
               <select className="ft-input" style={{ height: 46 }} value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
                 {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -379,7 +379,14 @@ const styles = {
   avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.avatarBg, color: colors.avatarText, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 },
   actionBtn: { width: 32, height: 32 },
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: spacing.md, marginBottom: spacing.lg },
-  selectLabel: { fontSize: 12, fontWeight: 600, color: colors.textSecondary, display: 'block', marginBottom: 6 },
+  // Matches TextField's floated-label position exactly (overlapping the
+  // border, not sitting above it) so the select's box lines up with text
+  // inputs in the same form-grid row instead of sitting lower.
+  selectLabel: {
+    position: 'absolute', left: 14, top: -8, fontSize: 11, fontWeight: 600,
+    color: colors.textSecondary, backgroundColor: colors.card, padding: '0 4px',
+    pointerEvents: 'none', zIndex: 1,
+  },
   formError: { fontSize: 13, color: colors.danger, marginBottom: spacing.md },
   formActions: { display: 'flex', justifyContent: 'flex-end', gap: 10 },
 };

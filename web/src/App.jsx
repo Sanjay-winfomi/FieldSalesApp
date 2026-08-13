@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient, setAuthToken, setSessionExpiredHandler } from './api';
 import AppHeader from './components/headers/AppHeader';
+import AppBackground from './components/AppBackground';
 import LoginPage from './views/LoginPage';
 import ForgotPasswordPage from './views/ForgotPasswordPage';
 import RepDetailsPage from './views/RepDetailsPage';
@@ -10,7 +11,6 @@ import DashboardPage from './views/DashboardPage';
 import ReportsPage from './views/ReportsPage';
 import AdminPage from './views/AdminPage';
 import NotificationsPage from './views/NotificationsPage';
-import { colors } from './theme';
 import './App.css';
 
 export default function App() {
@@ -117,7 +117,7 @@ export default function App() {
 
   if (selectedRepId) {
     return (
-      <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
+      <AppBackground>
         <AppHeader
           activeView={activeView}
           onNavigate={(view) => { setActiveView(view); setSelectedRepId(null); }}
@@ -129,16 +129,18 @@ export default function App() {
           unreadNotifications={unreadNotifications}
           onOpenNotifications={() => { setActiveView('notifications'); setSelectedRepId(null); }}
         />
-        <RepDetailsPage
-          repId={selectedRepId}
-          onBack={() => setSelectedRepId(null)}
-        />
-      </div>
+        <div key={selectedRepId} className="ft-page-transition">
+          <RepDetailsPage
+            repId={selectedRepId}
+            onBack={() => setSelectedRepId(null)}
+          />
+        </div>
+      </AppBackground>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
+    <AppBackground>
       <AppHeader
         activeView={activeView}
         onNavigate={setActiveView}
@@ -151,20 +153,22 @@ export default function App() {
         onOpenNotifications={() => setActiveView('notifications')}
       />
 
-      {activeView === 'dashboard' && (
-        <DashboardPage
-          reps={reps}
-          loading={loading}
-          error={error}
-          onSelectRep={setSelectedRepId}
-        />
-      )}
+      <div key={activeView} className="ft-page-transition">
+        {activeView === 'dashboard' && (
+          <DashboardPage
+            reps={reps}
+            loading={loading}
+            error={error}
+            onSelectRep={setSelectedRepId}
+          />
+        )}
 
-      {activeView === 'reports' && <ReportsPage />}
-      {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} currentUsername={manager?.username} />}
-      {activeView === 'notifications' && (
-        <NotificationsPage onUnreadCountChange={setUnreadNotifications} onBack={() => setActiveView('dashboard')} />
-      )}
-    </div>
+        {activeView === 'reports' && <ReportsPage />}
+        {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} currentUsername={manager?.username} />}
+        {activeView === 'notifications' && (
+          <NotificationsPage onUnreadCountChange={setUnreadNotifications} onBack={() => setActiveView('dashboard')} />
+        )}
+      </div>
+    </AppBackground>
   );
 }

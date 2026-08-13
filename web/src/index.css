@@ -6,16 +6,22 @@
  */
 
 :root {
-  --color-primary: #1B7F5A;
-  --color-primary-mid: #22946A;
-  --color-primary-dark: #146449;
-  --color-primary-deep: #0F4E39;
-  --color-primary-light: #EEF8F2;
-  --color-primary-tint: #DCF2E7;
-  --gradient-primary: linear-gradient(135deg, #22946A 0%, #146449 100%);
-  --gradient-hero: linear-gradient(135deg, #1B7F5A 0%, #0F4E39 100%);
+  --color-green: #22C55E;
 
-  --color-success: #22C55E;
+  --color-primary: var(--color-green);
+  --color-primary-mid: var(--color-green);
+  --color-primary-dark: var(--color-green);
+  --color-primary-light: #DCFCE7;
+  --color-primary-tint: #F0FDF4;
+
+  --color-button-bg: var(--color-green);
+  --color-button-bg-hover: var(--color-green);
+  --color-button-text: #FFFFFF;
+
+  --gradient-primary: var(--color-green);
+  --gradient-hero: var(--color-green);
+
+  --color-success: var(--color-green);
   --color-success-light: #F0FDF4;
   --color-success-dark: #15803D;
 
@@ -48,9 +54,9 @@
   --shadow-card-hover: 0 10px 26px rgba(15, 23, 42, 0.10);
   --shadow-raised: 0 14px 34px rgba(15, 23, 42, 0.14);
   --shadow-dropdown: 0 16px 40px rgba(15, 23, 42, 0.16);
-  --shadow-button: 0 6px 16px rgba(20, 100, 73, 0.32);
-  --shadow-button-hover: 0 8px 22px rgba(20, 100, 73, 0.38);
-  --shadow-focus-ring: 0 0 0 3px rgba(27, 127, 90, 0.18);
+  --shadow-button: 0 6px 16px rgba(34, 197, 94, 0.35);
+  --shadow-button-hover: 0 8px 22px rgba(34, 197, 94, 0.45);
+  --shadow-focus-ring: 0 0 0 3px rgba(34, 197, 94, 0.20);
 
   --transition-fast: 120ms ease;
   --transition-base: 180ms ease;
@@ -133,8 +139,11 @@ select:focus-visible,
 }
 
 .ft-fade-in { animation: ft-fade-in var(--transition-base) both; }
-.ft-slide-up { animation: ft-slide-up 240ms cubic-bezier(0.4, 0, 0.2, 1) both; }
-.ft-scale-in { animation: ft-scale-in 200ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+/* backwards, not both — same containing-block footgun as .ft-page-transition
+   below: a lingering transform after the animation ends would break
+   position:fixed descendants (e.g. a Modal rendered inside an animated card). */
+.ft-slide-up { animation: ft-slide-up 240ms cubic-bezier(0.4, 0, 0.2, 1) backwards; }
+.ft-scale-in { animation: ft-scale-in 200ms cubic-bezier(0.4, 0, 0.2, 1) backwards; }
 .ft-spin { animation: ft-spin 0.8s linear infinite; }
 
 .ft-skeleton {
@@ -142,6 +151,70 @@ select:focus-visible,
   background-size: 800px 100%;
   animation: ft-shimmer 1.4s ease infinite;
   border-radius: var(--radius-input);
+}
+
+/* ── Page/tab transitions & staggered entrances ────────────────────────── */
+@keyframes ft-page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* backwards (not "both") — the entrance transform must not linger after the
+   animation ends, since any non-none `transform` on an ancestor creates a
+   new containing block for `position: fixed` descendants (e.g. a Modal
+   rendered inside this wrapper), breaking its viewport-centered positioning. */
+.ft-page-transition { animation: ft-page-in 260ms cubic-bezier(0.4, 0, 0.2, 1) backwards; }
+
+/* Grid/list children fade+rise in with a small cascading delay — applied via
+   nth-child so no per-item inline style or JS index bookkeeping is needed.
+   Capped at 12 items; anything past that just appears with the last delay. */
+.ft-stagger > * {
+  animation: ft-slide-up 320ms cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+.ft-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.ft-stagger > *:nth-child(2) { animation-delay: 30ms; }
+.ft-stagger > *:nth-child(3) { animation-delay: 60ms; }
+.ft-stagger > *:nth-child(4) { animation-delay: 90ms; }
+.ft-stagger > *:nth-child(5) { animation-delay: 120ms; }
+.ft-stagger > *:nth-child(6) { animation-delay: 150ms; }
+.ft-stagger > *:nth-child(7) { animation-delay: 180ms; }
+.ft-stagger > *:nth-child(8) { animation-delay: 210ms; }
+.ft-stagger > *:nth-child(9) { animation-delay: 240ms; }
+.ft-stagger > *:nth-child(10) { animation-delay: 270ms; }
+.ft-stagger > *:nth-child(n+11) { animation-delay: 300ms; }
+
+/* Table rows — same cascading idea, shorter/quicker since rows are denser. */
+.ft-table tbody tr {
+  animation: ft-fade-in 220ms ease both;
+}
+.ft-table tbody tr:nth-child(1) { animation-delay: 0ms; }
+.ft-table tbody tr:nth-child(2) { animation-delay: 20ms; }
+.ft-table tbody tr:nth-child(3) { animation-delay: 40ms; }
+.ft-table tbody tr:nth-child(4) { animation-delay: 60ms; }
+.ft-table tbody tr:nth-child(5) { animation-delay: 80ms; }
+.ft-table tbody tr:nth-child(n+6) { animation-delay: 100ms; }
+
+@keyframes ft-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.ft-notify-pulse { animation: ft-pulse-ring 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+@keyframes ft-count-tick {
+  from { opacity: 0.4; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ft-count-value { animation: ft-count-tick 200ms ease backwards; }
+
+/* Respect the user's OS-level motion preference — collapse every animation
+   and transition to an instant state instead of just "make it faster". */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Interactive primitives ────────────────────────────────────────────── */
@@ -160,8 +233,8 @@ select:focus-visible,
 .ft-btn:active:not(:disabled) { transform: scale(0.98); }
 .ft-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 
-.ft-btn-primary { background: var(--gradient-primary); color: #FFFFFF; box-shadow: var(--shadow-button); }
-.ft-btn-primary:hover:not(:disabled) { box-shadow: var(--shadow-button-hover); transform: translateY(-1px); }
+.ft-btn-primary { background-color: var(--color-button-bg); color: var(--color-button-text); box-shadow: var(--shadow-button); }
+.ft-btn-primary:hover:not(:disabled) { background-color: var(--color-button-bg-hover); box-shadow: var(--shadow-button-hover); transform: translateY(-1px); }
 
 .ft-btn-secondary { background-color: #FFFFFF; color: var(--color-primary); border-color: var(--color-primary); }
 .ft-btn-secondary:hover:not(:disabled) { background-color: var(--color-primary-light); }
@@ -341,6 +414,20 @@ select:focus-visible,
 
 @media (max-width: 640px) {
   .ft-full-width-mobile { width: 100%; }
+}
+
+/* Split-panel login/forgot-password card — branded green panel + form panel
+   side by side; the branded panel drops off on narrow viewports so the form
+   still gets full width instead of squeezing both columns. */
+.ft-login-split {
+  display: flex;
+  align-items: stretch;
+}
+.ft-login-left { flex: 1 1 42%; }
+.ft-login-right { flex: 1 1 58%; }
+@media (max-width: 700px) {
+  .ft-login-left { display: none !important; }
+  .ft-login-right { flex: 1 1 100%; }
 }
 
 /* Representative Heat Map — responsive height so the map shrinks gracefully

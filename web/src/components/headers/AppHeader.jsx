@@ -83,7 +83,9 @@ export default function AppHeader({ activeView, onNavigate, manager, lastUpdated
             >
               <Bell size={17} color={colors.textSecondary} />
               {unreadNotifications > 0 && (
-                <span style={styles.bellBadge}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>
+                <span style={styles.bellBadge} className="ft-notify-pulse">
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
               )}
             </button>
           )}
@@ -139,8 +141,10 @@ const styles = {
     position: 'sticky',
     top: 0,
     zIndex: 100,
-    backgroundColor: colors.card,
-    borderBottom: `1px solid ${colors.border}`,
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    backdropFilter: 'blur(24px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    borderBottom: '1px solid rgba(255,255,255,0.6)',
     boxShadow: shadows.card,
   },
   inner: {

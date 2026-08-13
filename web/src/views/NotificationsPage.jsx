@@ -144,7 +144,7 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
         ) : notifications.length === 0 ? (
           <EmptyState icon={<Bell size={24} color={colors.textMuted} />} title="No notifications yet" subtitle="Dealer visit alerts and exceptions will show up here." />
         ) : (
-          <div style={styles.list}>
+          <div style={styles.list} className="ft-stagger">
             {notifications.map((n) => {
               const meta = TYPE_META[n.type] || { icon: Bell, tone: 'neutral' };
               const Icon = meta.icon;

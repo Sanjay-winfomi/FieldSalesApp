@@ -53,6 +53,8 @@ export default function ForgotPasswordPage({ onBackToLogin }) {
     <div style={styles.page}>
       <div style={styles.blobOne} aria-hidden="true" />
       <div style={styles.blobTwo} aria-hidden="true" />
+      <div style={styles.blobThree} aria-hidden="true" />
+      <div style={styles.glassOverlay} aria-hidden="true" />
       <div style={styles.card} className="ft-fade-in">
         <div style={styles.logoWrap}>
           <img src={winfomiLogo} alt="Winfomi" style={styles.logoImg} />
@@ -132,15 +134,26 @@ export default function ForgotPasswordPage({ onBackToLogin }) {
 const styles = {
   page: {
     position: 'relative', overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center',
-    minHeight: '100vh', background: colors.gradientHero, padding: spacing.xl, boxSizing: 'border-box',
+    minHeight: '100vh', background: '#EFFDF4', padding: spacing.xl, boxSizing: 'border-box',
   },
   blobOne: {
-    position: 'absolute', top: '-15%', left: '-10%', width: 420, height: 420, borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 70%)', pointerEvents: 'none',
+    position: 'absolute', top: '-18%', left: '-12%', width: 480, height: 480, borderRadius: '50%',
+    background: 'rgba(34,197,94,0.55)', filter: 'blur(90px)', pointerEvents: 'none',
   },
   blobTwo: {
-    position: 'absolute', bottom: '-20%', right: '-10%', width: 480, height: 480, borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%)', pointerEvents: 'none',
+    position: 'absolute', bottom: '-22%', right: '-12%', width: 520, height: 520, borderRadius: '50%',
+    background: 'rgba(74,222,128,0.5)', filter: 'blur(100px)', pointerEvents: 'none',
+  },
+  blobThree: {
+    position: 'absolute', top: '30%', right: '15%', width: 320, height: 320, borderRadius: '50%',
+    background: 'rgba(134,239,172,0.45)', filter: 'blur(80px)', pointerEvents: 'none',
+  },
+  glassOverlay: {
+    position: 'absolute', inset: 0,
+    background: 'rgba(255,255,255,0.12)',
+    backdropFilter: 'blur(40px)',
+    WebkitBackdropFilter: 'blur(40px)',
+    pointerEvents: 'none',
   },
   card: {
     position: 'relative', backgroundColor: colors.card, borderRadius: radius.card, boxShadow: shadows.dropdown,

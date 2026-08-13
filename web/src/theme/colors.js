@@ -1,18 +1,26 @@
 // Centralized color palette — do not hardcode hex values in pages/components.
-export const colors = {
-  primary: '#1B7F5A',
-  primaryMid: '#22946A',
-  primaryDark: '#146449',
-  primaryDeep: '#0F4E39',
-  primaryLight: '#EEF8F2',
-  primaryTint: '#DCF2E7',
+// Single flat brand green used everywhere (buttons, links, icons, banners).
+export const GREEN = '#22C55E';
 
-  gradientPrimary: 'linear-gradient(135deg, #22946A 0%, #146449 100%)',
-  gradientHero: 'linear-gradient(135deg, #1B7F5A 0%, #0F4E39 100%)',
+export const colors = {
+  // Identity color for text/icons/links/borders on light backgrounds.
+  primary: GREEN,
+  primaryMid: GREEN,
+  primaryDark: GREEN,
+  primaryLight: '#DCFCE7',
+  primaryTint: '#F0FDF4',
+
+  // Button fills — same flat green for default and hover.
+  buttonBg: GREEN,
+  buttonBgHover: GREEN,
+  buttonText: '#FFFFFF',
+
+  gradientPrimary: GREEN,
+  gradientHero: GREEN,
 
   secondary: '#5C6B63',
 
-  success: '#22C55E',
+  success: GREEN,
   successLight: '#F0FDF4',
   successDark: '#15803D',
 
@@ -24,8 +32,8 @@ export const colors = {
   dangerLight: '#FEF2F2',
   dangerDark: '#B91C1C',
 
-  info: '#1B7F5A',
-  infoLight: '#EEF8F2',
+  info: GREEN,
+  infoLight: '#F0FDF4',
 
   background: '#F5FBF6',
   card: '#FFFFFF',
@@ -43,8 +51,8 @@ export const colors = {
   neutralBg: '#F3F4F6',
   neutralBorder: '#E5E7EB',
 
-  avatarBg: '#E9F7EF',
-  avatarText: '#146449',
+  avatarBg: '#DCFCE7',
+  avatarText: GREEN,
 
   overlay: 'rgba(15, 23, 42, 0.5)',
   disabled: '#CBD5E1',

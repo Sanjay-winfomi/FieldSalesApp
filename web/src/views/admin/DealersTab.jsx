@@ -333,7 +333,7 @@ export default function DealersTab() {
         action={<Button icon={<Store size={15} />} onClick={() => { resetForm(); setShowForm(true); }} fullWidthMobile>Add dealer</Button>}
       />
 
-      <div style={styles.metricsGrid}>
+      <div style={styles.metricsGrid} className="ft-stagger">
         <MetricCard icon={<Store />} value={dealers.length} label="Total dealers" tone="primary" />
       </div>
 

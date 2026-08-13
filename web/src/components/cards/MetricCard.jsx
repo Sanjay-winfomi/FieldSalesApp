@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Card from './Card';
 import { colors, typography, spacing, radius } from '../../theme';
@@ -11,6 +11,49 @@ const TONES = {
   neutral: { bg: colors.hover, iconColor: colors.textSecondary },
 };
 
+const NUMERIC_VALUE_RE = /^(-?\d+(?:\.\d+)?)(.*)$/;
+
+/**
+ * Animates a metric's displayed value counting up/down from whatever it
+ * previously showed to the new value — e.g. "0" -> "4", "0.0 km" -> "12.4 km".
+ * Non-numeric values (e.g. "—" for a failed load) pass through unanimated.
+ */
+function useAnimatedValue(rawValue) {
+  const [display, setDisplay] = useState(rawValue);
+  const fromRef = useRef(0);
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const match = String(rawValue).match(NUMERIC_VALUE_RE);
+    if (!match) {
+      setDisplay(rawValue);
+      return undefined;
+    }
+    const target = parseFloat(match[1]);
+    const suffix = match[2];
+    const decimals = (match[1].split('.')[1] || '').length;
+    const start = fromRef.current;
+    const duration = 600;
+    const startTime = performance.now();
+
+    const tick = (now) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      const current = start + (target - start) * eased;
+      setDisplay(current.toFixed(decimals) + suffix);
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = target;
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [rawValue]);
+
+  return display;
+}
+
 /**
  * A single top-of-page metric tile (icon, value, subtitle, optional trend) —
  * used across the Dashboard and Reports summary rows.
@@ -20,6 +63,7 @@ const TONES = {
 export default function MetricCard({ icon, value, label, subtitle, tone = 'primary', trend, onClick }) {
   const t = TONES[tone] || TONES.primary;
   const trendUp = typeof trend === 'number' && trend >= 0;
+  const animatedValue = useAnimatedValue(value);
 
   return (
     <Card hoverable onClick={onClick} style={{ ...styles.card, ...(onClick ? { cursor: 'pointer' } : {}) }}>
@@ -35,7 +79,7 @@ export default function MetricCard({ icon, value, label, subtitle, tone = 'prima
           </span>
         )}
       </div>
-      <div style={styles.value}>{value}</div>
+      <div style={styles.value} className="ft-count-value">{animatedValue}</div>
       <div style={styles.label}>{label}</div>
       {!!subtitle && <div style={styles.subtitle}>{subtitle}</div>}
     </Card>
