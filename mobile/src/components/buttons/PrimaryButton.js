@@ -25,7 +25,8 @@ export default function PrimaryButton({
   };
 
   const bg =
-    variant === 'danger' ? colors.danger : variant === 'success' ? colors.success : colors.primary;
+    variant === 'danger' ? colors.danger : variant === 'success' ? colors.success : colors.buttonBg;
+  const textColor = variant === 'primary' ? colors.buttonText : colors.textInverse;
 
   return (
     <Animated.View style={[{ transform: [{ scale }] }, style]}>
@@ -44,7 +45,7 @@ export default function PrimaryButton({
         ]}
       >
         {loading ? (
-          <ActivityIndicator color={colors.textInverse} size="small" />
+          <ActivityIndicator color={textColor} size="small" />
         ) : (
           <>
             {icon}
@@ -52,7 +53,7 @@ export default function PrimaryButton({
               style={[
                 typography.button,
                 styles.text,
-                { color: isInactive ? colors.disabledText : colors.textInverse },
+                { color: isInactive ? colors.disabledText : textColor },
               ]}
               numberOfLines={1}
             >

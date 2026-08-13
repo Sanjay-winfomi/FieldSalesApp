@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, NotebookPen, BellRing,
 } from 'lucide-react-native';
@@ -81,7 +82,12 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <LinearGradient
+        colors={colors.gradientHeader}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + 16 }]}
+      >
         <View style={styles.headerGlow} pointerEvents="none" />
         <Text style={styles.greeting}>{getGreeting()}</Text>
         <Text style={styles.userName} numberOfLines={1}>{employee?.name || 'User'}</Text>
@@ -91,7 +97,7 @@ export default function HomeScreen({ navigation }) {
           </View>
           <Text style={styles.dateText}>{todayLabel}</Text>
         </View>
-      </View>
+      </LinearGradient>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -311,7 +317,6 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
-    backgroundColor: colors.primaryDeep,
     paddingHorizontal: spacing.screenHorizontal,
     paddingBottom: spacing.xl,
     borderBottomLeftRadius: radius.card,
@@ -322,20 +327,20 @@ const styles = StyleSheet.create({
   },
   headerGlow: {
     position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(34,197,94,0.14)',
   },
-  greeting: { ...typography.caption, color: 'rgba(255,255,255,0.75)' },
-  userName: { ...typography.sectionTitle, color: '#FFFFFF', marginTop: 2, fontSize: 22 },
+  greeting: { ...typography.caption, color: colors.textSecondary },
+  userName: { ...typography.sectionTitle, color: colors.text, marginTop: 2, fontSize: 22 },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm },
   rolePill: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
     marginRight: spacing.sm,
   },
-  rolePillText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
-  dateText: { ...typography.caption, color: 'rgba(255,255,255,0.75)' },
+  rolePillText: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  dateText: { ...typography.caption, color: colors.textSecondary },
 
   scrollContent: {
     padding: spacing.screenHorizontal,

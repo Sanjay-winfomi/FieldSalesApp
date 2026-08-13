@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View, ScrollView, Linking } from 'react-native';
 import { Info, Mail } from 'lucide-react-native';
-import { AppHeader, Card } from '../src/components';
+import { AppHeader, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 import appJson from '../app.json';
 
@@ -11,29 +11,33 @@ export default function AboutScreen({ navigation }) {
       <AppHeader title="About app" onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Card style={styles.card}>
-          <View style={styles.iconCircle}>
-            <Info size={22} color={colors.primary} />
-          </View>
-          <Text style={styles.appName}>Winfomi</Text>
-          <Text style={styles.version}>Version {appJson.expo.version}</Text>
-          <Text style={styles.description}>
-            Attendance and dealer visit tracking for field sales teams — day login/logout,
-            dealer login/logout with location verification, visit history, notes, and
-            dealer follow-up reminders.
-          </Text>
-        </Card>
+        <FadeSlideIn>
+          <Card style={styles.card}>
+            <View style={styles.iconCircle}>
+              <Info size={22} color={colors.primary} />
+            </View>
+            <Text style={styles.appName}>Winfomi</Text>
+            <Text style={styles.version}>Version {appJson.expo.version}</Text>
+            <Text style={styles.description}>
+              Attendance and dealer visit tracking for field sales teams — day login/logout,
+              dealer login/logout with location verification, visit history, notes, and
+              dealer follow-up reminders.
+            </Text>
+          </Card>
+        </FadeSlideIn>
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>Support</Text>
-          <Text
-            style={styles.link}
-            onPress={() => Linking.openURL('mailto:support@winfomi.com')}
-            accessibilityRole="link"
-          >
-            <Mail size={14} color={colors.primary} /> support@winfomi.com
-          </Text>
-        </Card>
+        <FadeSlideIn delay={60}>
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Support</Text>
+            <Text
+              style={styles.link}
+              onPress={() => Linking.openURL('mailto:support@winfomi.com')}
+              accessibilityRole="link"
+            >
+              <Mail size={14} color={colors.primary} /> support@winfomi.com
+            </Text>
+          </Card>
+        </FadeSlideIn>
       </ScrollView>
     </View>
   );

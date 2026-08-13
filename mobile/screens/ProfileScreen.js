@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { LogOut, Info, Clock, ChevronRight } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
@@ -38,10 +39,15 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <LinearGradient
+        colors={colors.gradientHeader}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + 16 }]}
+      >
         <View style={styles.headerGlow} pointerEvents="none" />
         <Text style={styles.title}>Profile</Text>
-      </View>
+      </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <FadeSlideIn>
@@ -98,7 +104,6 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
-    backgroundColor: colors.primaryDeep,
     paddingHorizontal: spacing.screenHorizontal,
     paddingBottom: spacing.xl,
     borderBottomLeftRadius: radius.card,
@@ -109,9 +114,9 @@ const styles = StyleSheet.create({
   },
   headerGlow: {
     position: 'absolute', top: -50, right: -40, width: 180, height: 180, borderRadius: 90,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
-  title: { ...typography.sectionTitle, color: '#FFFFFF', fontSize: 22 },
+  title: { ...typography.sectionTitle, color: colors.text, fontSize: 22 },
   content: { padding: spacing.screenHorizontal, paddingBottom: spacing.xxxl },
 
   statusCard: { marginBottom: spacing.cardGap },

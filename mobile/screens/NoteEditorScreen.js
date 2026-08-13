@@ -4,7 +4,7 @@ import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
-import { AppHeader, PrimaryButton, LoadingCard } from '../src/components';
+import { AppHeader, PrimaryButton, LoadingCard, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, serifFontFamily } from '../src/theme';
 
 const MIN_CONTENT_LENGTH = 100;
@@ -144,12 +144,12 @@ export default function NoteEditorScreen({ navigation, route }) {
             textAlignVertical="top"
           />
 
-          <View style={styles.footer}>
+          <FadeSlideIn style={styles.footer}>
             <Text style={[styles.counter, trimmedLength < MIN_CONTENT_LENGTH && styles.counterShort]}>
               {trimmedLength} / {MIN_CONTENT_LENGTH} characters minimum
             </Text>
             <PrimaryButton title="Save note" onPress={handleSave} disabled={!canSave} loading={saving} />
-          </View>
+          </FadeSlideIn>
         </>
       )}
     </KeyboardAvoidingView>

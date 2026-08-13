@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { StyleSheet, Text, View, KeyboardAvoidingView, ScrollView, Platform, Image, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -59,8 +60,9 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
   };
 
   return (
+    <LinearGradient colors={colors.gradientHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.container}>
     <KeyboardAvoidingView
-      style={styles.container}
+      style={styles.keyboardView}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.blobOne} pointerEvents="none" />
@@ -140,21 +142,24 @@ export default function LoginScreen({ onLoginSuccess, navigation }) {
         </FadeSlideIn>
       </ScrollView>
     </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primaryDeep,
+  },
+  keyboardView: {
+    flex: 1,
   },
   blobOne: {
     position: 'absolute', top: -60, left: -50, width: 220, height: 220, borderRadius: 110,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(34,197,94,0.12)',
   },
   blobTwo: {
     position: 'absolute', bottom: -80, right: -60, width: 260, height: 260, borderRadius: 130,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(34,197,94,0.16)',
   },
   scrollContent: {
     flexGrow: 1,

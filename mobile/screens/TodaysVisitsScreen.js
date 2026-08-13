@@ -80,10 +80,9 @@ export default function TodaysVisitsScreen({ navigation }) {
             subtitle="Your manager hasn't assigned any dealers for today yet."
           />
         ) : (
-          <FadeSlideIn>
-            {assignedDealers.map((assignment) => (
+          assignedDealers.map((assignment, index) => (
+            <FadeSlideIn key={assignment.id} delay={Math.min(index, 6) * 25}>
               <AssignedDealerCard
-                key={assignment.id}
                 assignment={assignment}
                 estimatedDistanceKm={estimatedDistanceKmByDealerId[assignment.dealer_id] ?? null}
                 preciseDistanceKm={preciseDistances[assignment.dealer_id]?.km ?? null}
@@ -92,8 +91,8 @@ export default function TodaysVisitsScreen({ navigation }) {
                 onRequestFollowup={setFollowupAssignment}
                 onFetchAccurateDistance={coords ? handleFetchAccurateDistance : undefined}
               />
-            ))}
-          </FadeSlideIn>
+            </FadeSlideIn>
+          ))
         )}
       </ScrollView>
 

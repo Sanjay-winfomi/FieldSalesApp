@@ -6,7 +6,7 @@ import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { scheduleReminderNotifications } from '../src/services/reminderNotifications';
 import { showAlert } from '../src/services/themedAlert';
-import { AppHeader, PrimaryButton, DealerPickerModal } from '../src/components';
+import { AppHeader, PrimaryButton, DealerPickerModal, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, radius, serifFontFamily } from '../src/theme';
 
 const MIN_NOTE_LENGTH = 20;
@@ -117,7 +117,7 @@ export default function ReminderEditorScreen({ navigation }) {
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <AppHeader title="New reminder" onBack={() => navigation.goBack()} />
 
-      <View style={styles.form}>
+      <FadeSlideIn style={styles.form}>
         <Text style={styles.label}>Dealer</Text>
         <Pressable
           style={styles.selector}
@@ -157,11 +157,11 @@ export default function ReminderEditorScreen({ navigation }) {
         <Text style={[styles.counter, trimmedLength < MIN_NOTE_LENGTH && styles.counterShort]}>
           {trimmedLength} / {MIN_NOTE_LENGTH} characters minimum
         </Text>
-      </View>
+      </FadeSlideIn>
 
-      <View style={styles.footer}>
+      <FadeSlideIn delay={60} style={styles.footer}>
         <PrimaryButton title="Save reminder" onPress={handleSave} disabled={!canSave} loading={saving} />
-      </View>
+      </FadeSlideIn>
 
       <DealerPickerModal
         visible={showDealerPicker}

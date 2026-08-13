@@ -6,7 +6,7 @@ import { getCurrentLocation, haversineMeters } from '../src/services/location';
 import { decodePolyline } from '../src/utils/polyline';
 import { api } from '../src/services/api';
 import { isNetworkError } from '../src/services/syncManager';
-import { AppHeader, PrimaryButton, LoadingCard } from '../src/components';
+import { AppHeader, PrimaryButton, LoadingCard, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, radius } from '../src/theme';
 
 // How often to re-check the rep's position against the dealer's radius while
@@ -256,7 +256,7 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
             )}
           </MapView>
 
-          <View style={styles.infoPanel}>
+          <FadeSlideIn style={styles.infoPanel}>
             <View style={styles.statusRow}>
               <View style={[styles.statusPill, styles[`statusPill_${status}`] || styles.statusPill_ready]}>
                 <Text style={styles.statusPillText}>{statusLabel}</Text>
@@ -295,7 +295,7 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
               <X size={14} color={colors.textMuted} />
               <Text style={styles.cancelBtnText}>Cancel navigation</Text>
             </Pressable>
-          </View>
+          </FadeSlideIn>
         </>
       )}
     </View>
