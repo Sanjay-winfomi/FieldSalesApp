@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { StyleSheet, View, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -13,6 +13,9 @@ import { api, setAuthInvalidatedHandler } from './src/services/api';
 import { startAutoSync, stopAutoSync, getPendingCount, flushQueue, clearQueue, setConflictHandler } from './src/services/syncManager';
 import { startVisitMonitoring, stopVisitMonitoring } from './src/services/visitMonitor';
 import { startDealerGeofence, stopDealerGeofence } from './src/services/geofenceTask';
+import { startVisitForegroundService, stopVisitForegroundService } from './src/services/visitForegroundService';
+import { isMiuiDevice, hasSeenMiuiOnboarding } from './src/services/miui';
+import { captureException } from './src/services/crashReporter';
 import { startAssignedDealersGeofence, stopAssignedDealersGeofence, checkArrivalNow } from './src/services/assignedDealerGeofence';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
 import { configureGeofenceNotificationChannel, configureArrivalNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
@@ -40,6 +43,7 @@ import NoteEditorScreen from './screens/NoteEditorScreen';
 import RemindersScreen from './screens/RemindersScreen';
 import ReminderEditorScreen from './screens/ReminderEditorScreen';
 import AboutScreen from './screens/AboutScreen';
+import MiuiOnboardingScreen from './screens/MiuiOnboardingScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -303,6 +307,7 @@ export default function App() {
     if (!activeVisit) {
       stopVisitMonitoring();
       stopDealerGeofence();
+      stopVisitForegroundService();
       return;
     }
 
@@ -337,6 +342,12 @@ export default function App() {
             longitude: activeVisit.dealer_longitude,
             radius_meters: activeVisit.dealer_radius_meters,
           });
+          // Raises this process's priority for as long as the visit stays
+          // open, via a real Android foreground service — see
+          // visitForegroundService.js for why. Scoped to the same window as
+          // the geofence above so the persistent notification this requires
+          // is only visible while it's actually earning its keep.
+          startVisitForegroundService(activeVisit.id);
         }
       });
     }
@@ -344,6 +355,7 @@ export default function App() {
     return () => {
       stopVisitMonitoring();
       stopDealerGeofence();
+      stopVisitForegroundService();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeVisitId]);
@@ -366,6 +378,7 @@ export default function App() {
         setLocationPermissionCanAskAgain(canAskAgain);
       } catch (error) {
         console.error('Failed to check location permission on foreground:', error);
+        captureException(error, { area: 'appstate-check-permission' });
       }
     };
 
@@ -403,6 +416,7 @@ export default function App() {
         pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
       } catch (error) {
         console.error('Failed to compute pending assignments on foreground:', error);
+        captureException(error, { area: 'appstate-pending-assignments' });
         return;
       }
       if (pending.length === 0) return;
@@ -431,10 +445,18 @@ export default function App() {
       setEmployee(null);
       setAttendance(null);
       setVisits([]);
-      setPendingSyncCount(0);
       setSelectedDealer(null);
       setAssignedDealers([]);
-      clearQueue();
+      // Deliberately does NOT clearQueue() here, unlike finishLogout below.
+      // This fires from an unannounced, automatic session expiry (refresh
+      // token rejected mid-request) — the rep never chose to log out and
+      // had no chance to see/confirm a "discard unsynced changes" warning.
+      // Any check-in/checkout/follow-up still queued stays in AsyncStorage
+      // and simply flushes once they log back in, which is overwhelmingly
+      // the same person on the same device. finishLogout's explicit wipe
+      // (guarded by handleLogout's own "you have N unsynced actions"
+      // confirmation) still covers the actual risk this queue-clear was
+      // for: a *different* user logging in and inheriting stale data.
       stopAssignedDealersGeofence();
       navigationRef.current?.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
     });
@@ -486,13 +508,25 @@ export default function App() {
   // the app outright. Coalescing rapid-fire calls into one actual request
   // keeps that registration stable during normal navigation.
   const fetchAssignedDealersTimerRef = useRef(null);
-  const fetchAssignedDealers = () => {
+  // useCallback (not a plain function redefined every render) so this keeps
+  // one stable identity across renders — it closes over nothing reactive
+  // (just a ref and runFetchAssignedDealers, which itself only closes over a
+  // ref and setState setters, both stable). HomeScreen/TodaysVisitsScreen
+  // both re-subscribe their navigation focus listener whenever the
+  // fetchAssignedDealers reference they read from context changes; without
+  // this, appStateValue's own useMemo recreating a new object on every
+  // attendance/visits/assignedDealers change (i.e. on every refresh) handed
+  // both screens a fresh function reference each time, unsubscribing and
+  // resubscribing their focus listener on every single state refresh for no
+  // functional reason.
+  const fetchAssignedDealers = useCallback(() => {
     if (fetchAssignedDealersTimerRef.current) clearTimeout(fetchAssignedDealersTimerRef.current);
     fetchAssignedDealersTimerRef.current = setTimeout(() => {
       fetchAssignedDealersTimerRef.current = null;
       runFetchAssignedDealers();
     }, 800);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Returns whether the session was actually established — the caller
   // (LoginScreen's onLoginSuccess below) must not navigate into MainTabs on
@@ -733,6 +767,13 @@ export default function App() {
                       const sessionReady = await handleLoginSuccess();
                       if (sessionReady) {
                         navigation.replace('MainTabs');
+                        // MIUI's own background-app killers (confirmed via
+                        // adb logcat) can't be exempted through any standard
+                        // Android permission prompt — only shown once, ever,
+                        // per device (see MiuiOnboardingScreen.js).
+                        if (isMiuiDevice() && !(await hasSeenMiuiOnboarding())) {
+                          navigation.navigate('MiuiOnboarding');
+                        }
                       } else {
                         showAlert('Something went wrong', 'Please try logging in again.');
                       }
@@ -842,6 +883,7 @@ export default function App() {
               <Stack.Screen name="Reminders" component={RemindersScreen} />
               <Stack.Screen name="ReminderEditor" component={ReminderEditorScreen} />
               <Stack.Screen name="About" component={AboutScreen} />
+              <Stack.Screen name="MiuiOnboarding" component={MiuiOnboardingScreen} />
             </Stack.Navigator>
           </PendingSyncContext.Provider>
           </AppStateContext.Provider>

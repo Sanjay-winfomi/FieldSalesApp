@@ -3,6 +3,7 @@ import * as TaskManager from 'expo-task-manager';
 import { api } from './api';
 import { enqueueAction } from './syncManager';
 import { sendGeofenceNotification } from './geofenceNotifications';
+import { captureException } from './crashReporter';
 
 /**
  * geofenceTask.js — background radius monitoring for an open dealer visit.
@@ -25,6 +26,7 @@ export const DEALER_GEOFENCE_TASK = 'dealer-geofence-task';
 TaskManager.defineTask(DEALER_GEOFENCE_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('Dealer geofence task error:', error.message);
+    captureException(error, { area: 'dealer-geofence-task' });
     return;
   }
 
@@ -55,12 +57,14 @@ TaskManager.defineTask(DEALER_GEOFENCE_TASK, async ({ data, error }) => {
         await enqueueAction('post', `/visits/${visitId}/location-check`, payload);
       } else {
         console.warn('Background geofence location-check failed:', postError.message);
+        captureException(postError, { area: 'dealer-geofence-task-post' });
       }
     }
   } catch (locationError) {
     // Best-effort — a missed background reading isn't worth surfacing to the
     // rep, and the next foreground open or geofence crossing will retry.
     console.warn('Background geofence GPS read failed:', locationError.message);
+    captureException(locationError, { area: 'dealer-geofence-task-gps' });
   }
 });
 

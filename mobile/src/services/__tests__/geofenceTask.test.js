@@ -16,6 +16,7 @@ jest.mock('expo-location', () => ({
 }));
 jest.mock('../api', () => ({ api: { post: jest.fn() } }));
 jest.mock('../syncManager', () => ({ enqueueAction: jest.fn() }));
+jest.mock('../crashReporter', () => ({ captureException: jest.fn() }));
 
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';

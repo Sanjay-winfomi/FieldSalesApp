@@ -13,6 +13,7 @@ jest.mock('expo-location', () => ({
   stopGeofencingAsync: jest.fn(),
 }));
 jest.mock('../geofenceNotifications', () => ({ sendArrivalNotification: jest.fn() }));
+jest.mock('../crashReporter', () => ({ captureException: jest.fn() }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as TaskManager from 'expo-task-manager';

@@ -2,6 +2,7 @@ import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { api } from './api';
 import { enqueueAction } from './syncManager';
+import { captureException } from './crashReporter';
 
 /**
  * visitMonitor.js — Random Location Verification.
@@ -72,6 +73,7 @@ export function startVisitMonitoring({ visit, onWarning, onLogoutAlert, onRepNot
       // GPS acquisition failures here are non-fatal (best-effort background
       // check) — swallow rather than surface a disruptive alert mid-visit.
       console.warn('Visit monitor check failed:', error.message);
+      captureException(error, { area: 'visit-monitor-check' });
     }
   };
 
@@ -130,6 +132,7 @@ async function reportLocationCheck(visitId, lat, lng, { onWarning, onLogoutAlert
       await enqueueAction('post', `/visits/${visitId}/location-check`, payload);
     } else {
       console.warn('Failed to report location check:', error.message);
+      captureException(error, { area: 'visit-monitor-report' });
     }
   }
 }

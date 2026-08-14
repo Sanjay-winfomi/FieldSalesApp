@@ -3,6 +3,7 @@ import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendArrivalNotification } from './geofenceNotifications';
 import { haversineMeters } from './location';
+import { captureException } from './crashReporter';
 
 /**
  * assignedDealerGeofence.js — proactive background arrival detection for
@@ -54,6 +55,7 @@ async function markNotified(regionId) {
 TaskManager.defineTask(ASSIGNED_DEALER_ARRIVAL_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('Assigned dealer arrival task error:', error.message);
+    captureException(error, { area: 'assigned-dealer-arrival-task' });
     return;
   }
 
@@ -81,6 +83,7 @@ TaskManager.defineTask(ASSIGNED_DEALER_ARRIVAL_TASK, async ({ data, error }) => 
     await markNotified(regionId);
   } catch (err) {
     console.warn('Assigned dealer arrival task failed:', err.message);
+    captureException(err, { area: 'assigned-dealer-arrival-task' });
   }
 });
 
@@ -179,5 +182,6 @@ export async function checkArrivalNow(lat, lng) {
     }
   } catch (err) {
     console.warn('Foreground arrival check failed:', err.message);
+    captureException(err, { area: 'check-arrival-now' });
   }
 }

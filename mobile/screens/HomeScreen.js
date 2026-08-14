@@ -7,6 +7,7 @@ import {
 } from 'lucide-react-native';
 import { useAppState, usePendingSync } from '../src/context/AppStateContext';
 import { openBatteryOptimizationSettings } from '../src/services/location';
+import { isMiuiDevice } from '../src/services/miui';
 import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal } from '../src/components';
 import { colors, typography, spacing, shadows, radius } from '../src/theme';
 
@@ -148,6 +149,20 @@ export default function HomeScreen({ navigation }) {
                     </Text>
                     <Pressable onPress={openBatteryOptimizationSettings} accessibilityRole="button">
                       <Text style={styles.warningBannerLink}>Open battery settings</Text>
+                    </Pressable>
+                  </>
+                )}
+                {isMiuiDevice() && (
+                  <>
+                    <Text style={[styles.warningBannerText, { marginTop: spacing.xs }]}>
+                      Your phone's software (MIUI) needs its own separate settings for this to
+                      work reliably in the background.
+                    </Text>
+                    <Pressable
+                      onPress={() => (navigation.getParent() || navigation).navigate('MiuiOnboarding')}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.warningBannerLink}>Fix background restrictions (MIUI)</Text>
                     </Pressable>
                   </>
                 )}

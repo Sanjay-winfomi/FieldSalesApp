@@ -3,9 +3,10 @@ import { StyleSheet, Text, View, ScrollView, Pressable, Dimensions } from 'react
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { LogOut, Info, Clock, ChevronRight } from 'lucide-react-native';
+import { LogOut, Info, Clock, ChevronRight, ShieldCheck } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { showAlert } from '../src/services/themedAlert';
+import { isMiuiDevice } from '../src/services/miui';
 import { ProfileCard, ProfileRow, SecondaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, shadows, radius } from '../src/theme';
 import appJson from '../app.json';
@@ -81,6 +82,20 @@ export default function ProfileScreen() {
             </View>
           </Card>
         </FadeSlideIn>
+
+        {isMiuiDevice() && (
+          <FadeSlideIn delay={80}>
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => (navigation.getParent() || navigation).navigate('MiuiOnboarding')}
+              accessibilityRole="button"
+            >
+              <ShieldCheck size={18} color={colors.textSecondary} style={styles.menuIcon} />
+              <Text style={styles.menuText}>Background reliability (MIUI)</Text>
+              <ChevronRight size={18} color={colors.textMuted} />
+            </Pressable>
+          </FadeSlideIn>
+        )}
 
         <FadeSlideIn delay={100}>
           <Pressable

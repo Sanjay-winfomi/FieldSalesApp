@@ -74,7 +74,8 @@
           "imageWidth": 1,
           "resizeMode": "contain"
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "owner": "winfomis-team",
     "extra": {

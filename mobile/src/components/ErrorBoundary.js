@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import * as Updates from 'expo-updates';
 import PrimaryButton from './buttons/PrimaryButton';
+import { captureException } from '../services/crashReporter';
 import { colors, typography, spacing } from '../theme';
 
 /**
@@ -10,10 +11,9 @@ import { colors, typography, spacing } from '../theme';
  * red-box-then-crash behavior a release build falls back to. This only
  * catches errors from React's render tree (render/lifecycle) — NOT errors
  * from event handlers, promises, or native code; those are handled
- * separately by index.js's `global.ErrorUtils.setGlobalHandler`.
- *
- * No crash reporter is wired up yet (see componentDidCatch) — this is the
- * one place that would forward to one once the team adds it.
+ * separately by index.js's `global.ErrorUtils.setGlobalHandler`, and
+ * AppState/background-task callbacks' own try/catch blocks (App.js,
+ * geofenceTask.js, assignedDealerGeofence.js, visitMonitor.js).
  */
 export default class ErrorBoundary extends React.Component {
   state = { error: null };
@@ -24,6 +24,7 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error('Caught by ErrorBoundary:', error, info?.componentStack);
+    captureException(error, { area: 'error-boundary', componentStack: info?.componentStack });
   }
 
   handleRestart = async () => {

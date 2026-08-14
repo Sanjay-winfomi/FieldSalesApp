@@ -1,6 +1,13 @@
 import { registerRootComponent } from 'expo';
 import { Alert, Text, TextInput } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import { initCrashReporter, captureException } from './src/services/crashReporter';
+
+// Before anything else runs — including the ErrorUtils handler just below —
+// so even a startup-time crash is reported, not just crashes that happen
+// once the app is fully up. No-ops safely if EXPO_PUBLIC_SENTRY_DSN isn't
+// configured (see crashReporter.js).
+initCrashReporter();
 
 // The OS-level "font size" / "display size" accessibility setting differs
 // per device and is a common reason the same screen renders with visibly
@@ -21,6 +28,7 @@ TextInput.defaultProps.allowFontScaling = false;
 // Remove once the root cause is found and fixed.
 const defaultGlobalHandler = global.ErrorUtils.getGlobalHandler();
 global.ErrorUtils.setGlobalHandler((error, isFatal) => {
+  captureException(error, { area: 'global-handler', isFatal });
   Alert.alert(
     isFatal ? 'Fatal error' : 'Error',
     `${error?.name || 'Error'}: ${error?.message || String(error)}\n\n${error?.stack || ''}`.slice(0, 1800)
