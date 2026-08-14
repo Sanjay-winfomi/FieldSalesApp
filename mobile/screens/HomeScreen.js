@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable, Dimensions, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Store, Clock, Check, RefreshCw, AlertTriangle, TrendingUp, Timer, MapPin, ChevronRight, NotebookPen, BellRing,
 } from 'lucide-react-native';
 import { useAppState, usePendingSync } from '../src/context/AppStateContext';
+import { openBatteryOptimizationSettings } from '../src/services/location';
 import { StatusCard, SummaryCard, PrimaryButton, FadeSlideIn, SyncQueueModal } from '../src/components';
 import { colors, typography, spacing, shadows, radius } from '../src/theme';
 
@@ -139,6 +140,17 @@ export default function HomeScreen({ navigation }) {
                 <Pressable onPress={onOpenLocationSettings} accessibilityRole="button">
                   <Text style={styles.warningBannerLink}>Open Settings to allow "All the time"</Text>
                 </Pressable>
+                {Platform.OS === 'android' && (
+                  <>
+                    <Text style={[styles.warningBannerText, { marginTop: spacing.xs }]}>
+                      Also check your phone's battery settings — some devices stop background
+                      location on their own to save power, even with permission granted.
+                    </Text>
+                    <Pressable onPress={openBatteryOptimizationSettings} accessibilityRole="button">
+                      <Text style={styles.warningBannerLink}>Open battery settings</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
             </View>
           </FadeSlideIn>

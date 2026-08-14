@@ -4,8 +4,15 @@ jest.mock('expo-location', () => ({
   getCurrentPositionAsync: jest.fn(),
   Accuracy: { Highest: 6 },
 }));
+jest.mock('expo-intent-launcher', () => ({
+  startActivityAsync: jest.fn(() => Promise.resolve()),
+  ActivityAction: { IGNORE_BATTERY_OPTIMIZATION_SETTINGS: 'mock-action' },
+}));
 jest.mock('../api', () => ({ api: { get: jest.fn() } }));
-jest.mock('react-native', () => ({ Linking: { openSettings: jest.fn() } }));
+jest.mock('react-native', () => ({
+  Linking: { openSettings: jest.fn() },
+  Platform: { OS: 'android', select: (obj) => obj.android ?? obj.default },
+}));
 
 import * as Location from 'expo-location';
 import { getCurrentLocation, getLocationPermissionStatus } from '../location';

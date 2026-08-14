@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { api } from './api';
 
 // expo-location returns the full state name (e.g. "Tamil Nadu"), not the
@@ -60,6 +61,28 @@ export const getLocationPermissionStatus = async () => {
  * was permanently denied and the only way back is a manual toggle there.
  */
 export const openLocationSettings = () => Linking.openSettings();
+
+/**
+ * Deep-links to Android's battery-optimization settings LIST (not the direct
+ * "allow this app to ignore battery optimizations?" system dialog) — that
+ * direct dialog needs the REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest
+ * permission, which Google Play requires a specific declaration/justification
+ * for and can flag on review. This action needs no special permission: it
+ * just opens the same screen a user would reach manually via
+ * Settings > Apps > Battery usage, where they can find this app and choose
+ * "Don't optimize" themselves. Aggressive OEM battery managers (MIUI, Oppo,
+ * etc.) sometimes have their own separate allowlist screen this doesn't
+ * reach — those need OEM-specific instructions, not a code fix.
+ * No-op on iOS, which has no equivalent per-app battery-optimization concept.
+ */
+export const openBatteryOptimizationSettings = () => {
+  if (Platform.OS !== 'android') return;
+  IntentLauncher.startActivityAsync(
+    IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+  ).catch((error) => {
+    console.warn('Failed to open battery optimization settings:', error.message);
+  });
+};
 
 /**
  * Requests the "Always" location permission needed for geofencing to keep
