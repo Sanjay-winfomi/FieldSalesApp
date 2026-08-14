@@ -20,14 +20,33 @@ import { getCurrentLocation, getLocationPermissionStatus } from '../location';
 describe('getCurrentLocation', () => {
   afterEach(() => jest.clearAllMocks());
 
-  test('returns null when permission is denied', async () => {
+  test('returns null when permission is denied and cannot be asked again', async () => {
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: false });
+    const result = await getCurrentLocation();
+    expect(result).toBeNull();
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  test('returns null when the OS prompt itself is denied', async () => {
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
     Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied' });
     const result = await getCurrentLocation();
     expect(result).toBeNull();
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not re-prompt the OS when permission is already granted', async () => {
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'granted', canAskAgain: true });
+    Location.getCurrentPositionAsync.mockResolvedValueOnce({ coords: { latitude: 11, longitude: 77, accuracy: 5 } });
+
+    const result = await getCurrentLocation();
+
+    expect(result.accuracyMeters).toBe(5);
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
   });
 
   test('returns the best (lowest-error) reading across attempts', async () => {
-    Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'granted' });
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'granted', canAskAgain: true });
     Location.getCurrentPositionAsync
       .mockResolvedValueOnce({ coords: { latitude: 11, longitude: 77, accuracy: 40 } })
       .mockResolvedValueOnce({ coords: { latitude: 11.001, longitude: 77.001, accuracy: 15 } });
@@ -39,7 +58,7 @@ describe('getCurrentLocation', () => {
   });
 
   test('stops early once a good-enough reading is acquired', async () => {
-    Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'granted' });
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'granted', canAskAgain: true });
     Location.getCurrentPositionAsync.mockResolvedValueOnce({ coords: { latitude: 11, longitude: 77, accuracy: 5 } });
 
     const result = await getCurrentLocation();

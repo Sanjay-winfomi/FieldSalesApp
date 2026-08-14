@@ -57,6 +57,31 @@ export const getLocationPermissionStatus = async () => {
 };
 
 /**
+ * Both getCurrentLocation and getApproximateLocation used to call
+ * requestForegroundPermissionsAsync() unconditionally on every single
+ * invocation — including from the 15s navigation poll (DealerNavigationScreen)
+ * and every AppState foreground-resume check (App.js). Once permission is
+ * already granted that's normally a no-op, but each of those call sites also
+ * *resumes* from exactly the kind of Activity transition
+ * (background -> active) that re-triggers the next poll/listener tick, so
+ * any hiccup that makes the OS re-surface its own permission Activity for
+ * one of these calls feeds straight back into another request on the very
+ * next resume — observed on-device as Android's activity manager rapidly
+ * launching/force-removing GrantPermissionsActivity and MainActivity, which
+ * is what shows up on screen as a black/white flash. Checking the cached
+ * status first and only calling the request API when actually needed breaks
+ * that loop at the source.
+ * @returns {Promise<boolean>} whether foreground permission is granted
+ */
+async function ensureForegroundPermission() {
+  const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
+  if (status === 'granted') return true;
+  if (!canAskAgain) return false;
+  const { status: requested } = await Location.requestForegroundPermissionsAsync();
+  return requested === 'granted';
+}
+
+/**
  * Deep-links to this app's OS Settings screen, for when location permission
  * was permanently denied and the only way back is a manual toggle there.
  */
@@ -112,9 +137,9 @@ export const requestBackgroundLocationPermission = async () => {
  */
 export const getCurrentLocation = async () => {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
+    const granted = await ensureForegroundPermission();
 
-    if (status !== 'granted') {
+    if (!granted) {
       console.warn('Permission to access location was denied');
       return null;
     }
@@ -177,8 +202,8 @@ const APPROXIMATE_TIMEOUT_MS = 8000;
  */
 export const getApproximateLocation = async () => {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return null;
+    const granted = await ensureForegroundPermission();
+    if (!granted) return null;
 
     try {
       const location = await withTimeout(
