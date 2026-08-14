@@ -69,6 +69,45 @@ describe('POST /api/x/', () => {
     }));
   });
 
+  test('a retried request with the same Idempotency-Key replays the cached response instead of inserting again', async () => {
+    // getIdempotentResponse's SELECT finds a row from the original attempt.
+    pool.query.mockResolvedValueOnce({
+      rows: [{ response_status: 201, response_body: { request: { id: 20, status: 'pending' } } }],
+    });
+
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/')
+      .set('Idempotency-Key', 'retry-key-1')
+      .send({ dealer_id: 5, requested_date: FUTURE_DATE, reason: LONG_REASON });
+
+    expect(res.status).toBe(201);
+    expect(res.body.request.id).toBe(20);
+    // Only the idempotency lookup ran — no dealer lookup, no second insert.
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(createManagerNotification).not.toHaveBeenCalled();
+  });
+
+  test('a first-time request with an Idempotency-Key still creates the request and saves the response for later replay', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [] }) // getIdempotentResponse SELECT — no cached row yet
+      .mockResolvedValueOnce({ rows: [{ id: 5, name: 'Dealer A' }] }) // dealer lookup
+      .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, reason: LONG_REASON, status: 'pending' }] }) // insert
+      .mockResolvedValueOnce({ rows: [] }); // saveIdempotentResponse INSERT
+
+    const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/')
+      .set('Idempotency-Key', 'fresh-key-1')
+      .send({ dealer_id: 5, requested_date: FUTURE_DATE, reason: LONG_REASON });
+
+    expect(res.status).toBe(201);
+    expect(res.body.request.id).toBe(20);
+    expect(createManagerNotification).toHaveBeenCalledTimes(1);
+    // Last call is the saveIdempotentResponse INSERT into idempotency_keys.
+    expect(pool.query.mock.calls[3][0]).toContain('INSERT INTO idempotency_keys');
+  });
+
   test('404 when assignment_id does not belong to the requesting rep', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 5, name: 'Dealer A' }] }) // dealer lookup

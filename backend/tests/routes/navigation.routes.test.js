@@ -41,6 +41,8 @@ describe('POST /api/x/compute', () => {
     const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
     const res = await request(app).post('/api/x/compute').send({ dealer_id: 5, origin_lat: 1, origin_lng: 2 });
     expect(res.status).toBe(502);
+    expect(res.body.error).toBe('route_computation_failed');
+    expect(res.body.message).toBe('Request timed out — Retry');
   });
 
   test('201 creates a navigation record and marks the assignment navigating', async () => {
@@ -59,6 +61,25 @@ describe('POST /api/x/compute', () => {
     expect(res.status).toBe(201);
     expect(res.body.navigation.id).toBe(100);
     expect(pool.query.mock.calls[3][0]).toMatch(/UPDATE dealer_assignments/);
+  });
+
+  test('a retried request with the same Idempotency-Key replays the cached response instead of computing/inserting again', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ response_status: 201, response_body: { navigation: { id: 100, status: 'navigating' } } }],
+    });
+
+    const app = makeApp(navigationRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/compute')
+      .set('Idempotency-Key', 'retry-key-1')
+      .send({ dealer_id: 5, origin_lat: 1, origin_lng: 2 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.navigation.id).toBe(100);
+    // Only the idempotency lookup ran — no dealer lookup, no second
+    // computeRoute call, no second insert.
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(computeRoute).not.toHaveBeenCalled();
   });
 });
 
@@ -101,6 +122,8 @@ describe('POST /api/x/distance-preview', () => {
       .post('/api/x/distance-preview')
       .send({ origin_lat: 11, origin_lng: 77, dest_lat: 11.02, dest_lng: 77.01 });
     expect(res.status).toBe(502);
+    expect(res.body.error).toBe('route_computation_failed');
+    expect(res.body.message).toBe('Request timed out — Retry');
   });
 });
 

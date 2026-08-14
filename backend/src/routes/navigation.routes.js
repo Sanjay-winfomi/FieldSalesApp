@@ -26,6 +26,7 @@ const pool = require('../db/pool');
 const { requireRole } = require('../middleware/auth.middleware');
 const { businessDateExpr } = require('../utils/businessDay');
 const { computeRoute } = require('../services/googleRoutesService');
+const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -53,8 +54,20 @@ router.post('/compute', async (req, res) => {
   }
 
   const employeeId = req.employee.id;
+  const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
+    // Without this, a fast double-tap on "Navigate" (or a retried request
+    // that actually reached the server but whose response the client
+    // missed) could insert a second dealer_navigations row and fire a
+    // second real Google Routes API charge for what the rep experiences as
+    // one tap — the same class of duplicate-write risk every other
+    // mutating route in this codebase already guards against.
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'navigation/compute');
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     const dealerResult = await pool.query(
       'SELECT id, name, latitude, longitude FROM dealers WHERE id = $1',
       [dealerId]
@@ -92,7 +105,7 @@ router.post('/compute', async (req, res) => {
       });
     } catch (err) {
       logger.error('Routes API compute error', { error: err.message, dealerId, employeeId });
-      return res.status(502).json({ error: 'Could not compute a route right now — please retry.' });
+      return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
     }
 
     const navResult = await pool.query(
@@ -116,7 +129,9 @@ router.post('/compute', async (req, res) => {
       );
     }
 
-    return res.status(201).json({ navigation: navResult.rows[0] });
+    const body = { navigation: navResult.rows[0] };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'navigation/compute', 201, body);
+    return res.status(201).json(body);
   } catch (err) {
     logger.error('POST /api/navigation/compute error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
@@ -149,7 +164,7 @@ router.post('/distance-preview', async (req, res) => {
     });
   } catch (err) {
     logger.error('POST /api/navigation/distance-preview error', { error: err.message });
-    return res.status(502).json({ error: 'Could not compute a distance right now — please retry.' });
+    return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
   }
 });
 

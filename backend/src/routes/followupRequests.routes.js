@@ -16,6 +16,7 @@ const pool = require('../db/pool');
 const { requireRole } = require('../middleware/auth.middleware');
 const { createManagerNotification } = require('../utils/managerNotifications');
 const { getBusinessDateString } = require('../utils/businessDay');
+const { getIdempotentResponse, saveIdempotentResponse } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -75,8 +76,19 @@ router.post('/', requireRole('rep'), async (req, res) => {
   }
 
   const employeeId = req.employee.id;
+  const idempotencyKey = req.get('Idempotency-Key') || null;
 
   try {
+    // The offline sync queue (mobile syncManager.js) retries this exact
+    // request — same Idempotency-Key — whenever the network drops between
+    // the server completing the insert and the client seeing the response.
+    // Without this check, that retry created a second dealer_followup_requests
+    // row and sent the manager a duplicate notification for one ask.
+    const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'followup-requests');
+    if (cached) {
+      return res.status(cached.response_status).json(cached.response_body);
+    }
+
     const dealerResult = await pool.query('SELECT id, name FROM dealers WHERE id = $1', [dealerId]);
     if (dealerResult.rows.length === 0) {
       return res.status(404).json({ error: 'Dealer not found' });
@@ -114,7 +126,9 @@ router.post('/', requireRole('rep'), async (req, res) => {
       followupRequestId: request.id,
     });
 
-    return res.status(201).json({ request });
+    const body = { request };
+    await saveIdempotentResponse(idempotencyKey, employeeId, 'followup-requests', 201, body);
+    return res.status(201).json(body);
   } catch (err) {
     logger.error('POST /api/followup-requests error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });

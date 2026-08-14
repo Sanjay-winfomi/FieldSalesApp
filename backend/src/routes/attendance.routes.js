@@ -28,6 +28,22 @@ function parseCoord(value, min, max) {
   return n;
 }
 
+// Unlike visits.routes.js's parseAccuracy/GPS_ACCURACY_THRESHOLD_M (which
+// gate dealer check-in/checkout, a radius decision), accuracy here is
+// OPTIONAL: attendance login/logout has no radius check, and making it
+// required would be a breaking change for already-enqueued offline queue
+// actions on devices that shipped before this field existed. When present,
+// though, it's validated the same way — a poor fix still anchors the day's
+// distance_from_previous_km/total_distance_km chain, so it's worth
+// rejecting outright rather than silently accepting a wildly imprecise
+// login/logout point.
+const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS || '30');
+function parseAccuracy(value) {
+  if (value === undefined || value === null) return undefined;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/attendance/login
 // ──────────────────────────────────────────────────────────────────────────────
@@ -41,6 +57,13 @@ router.post('/login', async (req, res) => {
   const lng = parseCoord(req.body.lng, -180, 180);
   if (lat === null || lng === null) {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
+  }
+  const accuracyMeters = parseAccuracy(req.body.accuracy_meters);
+  if (accuracyMeters === null) {
+    return res.status(400).json({ error: 'accuracy_meters must be a valid non-negative number' });
+  }
+  if (accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
+    return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
   }
 
   const idempotencyKey = req.get('Idempotency-Key') || null;
@@ -102,6 +125,13 @@ router.post('/logout', async (req, res) => {
   const lng = parseCoord(req.body.lng, -180, 180);
   if (lat === null || lng === null) {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
+  }
+  const accuracyMeters = parseAccuracy(req.body.accuracy_meters);
+  if (accuracyMeters === null) {
+    return res.status(400).json({ error: 'accuracy_meters must be a valid non-negative number' });
+  }
+  if (accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
+    return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
   }
 
   const idempotencyKey = req.get('Idempotency-Key') || null;
@@ -216,23 +246,36 @@ router.post('/logout', async (req, res) => {
       finalLegOriginLng = parseFloat(att.login_lng);
     }
 
+    // No straight-line fallback — Google Routes API only. A rep's day
+    // logout now genuinely depends on Google being reachable; the client
+    // shows "Request timed out — Retry" and the idempotency key above
+    // makes a retry safe to resend.
     let finalLegDistanceKm = null;
     let finalLegIsRouted = false;
     if (Number.isFinite(finalLegOriginLat) && Number.isFinite(finalLegOriginLng)) {
+      let route;
       try {
-        const route = await computeRoute({ originLat: finalLegOriginLat, originLng: finalLegOriginLng, destLat: lat, destLng: lng });
-        if (route.distanceMeters != null) {
-          finalLegDistanceKm = route.distanceMeters / 1000;
-          finalLegIsRouted = true;
-        } else {
-          finalLegDistanceKm = haversineKm(finalLegOriginLat, finalLegOriginLng, lat, lng);
-        }
+        route = await computeRoute({ originLat: finalLegOriginLat, originLng: finalLegOriginLng, destLat: lat, destLng: lng });
       } catch (routeErr) {
-        logger.warn('Routes API failed for final leg, using haversine fallback', { error: routeErr.message });
-        finalLegDistanceKm = haversineKm(finalLegOriginLat, finalLegOriginLng, lat, lng);
+        logger.warn('Routes API failed for final leg', { error: routeErr.message });
+        return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
       }
+      if (route.distanceMeters == null) {
+        logger.warn('Routes API returned no distance for final leg');
+        return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
+      }
+      finalLegDistanceKm = route.distanceMeters / 1000;
+      finalLegIsRouted = true;
     }
 
+    // AND logout_time IS NULL re-checks what the SELECT at the top of this
+    // handler already read, the same way the dealer-visit auto-close UPDATE
+    // above does — without it, two near-simultaneous day-logout requests
+    // (a double-tap, or an offline-queued retry racing a request that just
+    // succeeded) could both pass that earlier read-only check and both
+    // reach this UPDATE, the second one silently overwriting the first
+    // logout's GPS/duration/distance and firing a second
+    // notifyUnvisitedAssignments below for what is really one logout.
     const result = await pool.query(
       `UPDATE attendance
        SET logout_time = NOW(),
@@ -242,11 +285,26 @@ router.post('/logout', async (req, res) => {
            total_distance_km = COALESCE(total_distance_km, 0) + COALESCE($5, 0),
            final_leg_distance_km = $5,
            final_leg_is_routed = $6
-       WHERE id = $4
+       WHERE id = $4 AND logout_time IS NULL
        RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes,
                  final_leg_distance_km, final_leg_is_routed`,
       [lat, lng, durationMins, attendance_id, finalLegDistanceKm, finalLegIsRouted]
     );
+
+    if (result.rows.length === 0) {
+      // Lost the race — a concurrent request already completed this
+      // logout. Same reconciliation response as the earlier read-only
+      // check (lines above), so an offline-queued retry adopts server
+      // truth instead of double-processing.
+      const authoritative = await pool.query(
+        `SELECT id, logout_time FROM attendance WHERE id = $1`,
+        [attendance_id]
+      );
+      return res.status(409).json({
+        error: 'Already logged out today',
+        attendance: authoritative.rows[0],
+      });
+    }
 
     // Fetch visit summary for the day-end summary screen
     const visitsResult = await pool.query(

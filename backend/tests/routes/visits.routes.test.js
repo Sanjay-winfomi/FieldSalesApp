@@ -1,12 +1,24 @@
 jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
+jest.mock('../../src/utils/managerNotifications', () => ({ createManagerNotification: jest.fn() }));
+jest.mock('../../src/services/googleRoutesService', () => ({ computeRoute: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
+const { createManagerNotification } = require('../../src/utils/managerNotifications');
+const { computeRoute } = require('../../src/services/googleRoutesService');
 const { makeApp } = require('../helpers/testApp');
 
 const visitsRouter = require('../../src/routes/visits.routes');
 
 const REP = { id: 1, role: 'rep', username: 'arun' };
 const MANAGER = { id: 2, role: 'manager', username: 'priya' };
+
+beforeEach(() => {
+  // Default: every /login test that reaches the dealer-to-dealer leg
+  // computation gets a successful Google Routes API response, since
+  // haversine no longer backs it up on failure. Individual tests override
+  // this to exercise the failure path.
+  computeRoute.mockResolvedValue({ distanceMeters: 1000 });
+});
 
 // POST /api/x/login runs inside a transaction via pool.connect(), not
 // pool.query() directly — this stub client's own `query` mock is what the
@@ -75,6 +87,29 @@ describe('POST /api/x/login', () => {
     expect(res.body.visit.id).toBe(55);
     expect(res.body.visit.dealer_name).toBe('Dealer A');
     expect(client.release).toHaveBeenCalled();
+  });
+
+  test('502 with a retry message when the Routes API fails, instead of falling back to haversine', async () => {
+    computeRoute.mockRejectedValueOnce(new Error('upstream failed'));
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 1, login_lat: 11, login_lng: 77 }] }) // attendance (FOR UPDATE)
+      .mockResolvedValueOnce({ rows: [] }) // no open visit
+      .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Dealer A', latitude: 11, longitude: 77, radius_meters: 200 }] }) // dealer
+      .mockResolvedValueOnce({ rows: [] }) // last visit (none)
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app)
+      .post('/api/x/login')
+      .send({ attendance_id: 1, dealer_id: 1, lat: 11, lng: 77, accuracy_meters: 10 });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('route_computation_failed');
+    expect(res.body.message).toBe('Request timed out — Retry');
+    expect(client.release).toHaveBeenCalled();
+    // No visit was inserted — the transaction rolled back before that INSERT.
+    expect(client.query.mock.calls.some(([sql]) => /INSERT INTO client_visits/.test(sql))).toBe(false);
   });
 
   test('404 when the dealer does not exist', async () => {
@@ -326,6 +361,91 @@ describe('POST /api/x/:id/location-check', () => {
     const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
     expect(res.status).toBe(200);
     expect(pool.query).toHaveBeenCalledTimes(4); // no new exception_log insert
+  });
+
+  test('a staged alert is not double-sent when a concurrent request already claimed the stage', async () => {
+    const leftAt = new Date(Date.now() - 15 * 60 * 1000).toISOString(); // 15 min outside — stage 1 is due
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 5, log_out_alert_sent: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 6, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9, left_at: leftAt, alert_count: 0, max_distance_m: 100 }] }) // open excursion, stage 1 due
+      // The CAS UPDATE finds rowCount 0 — a concurrent request already
+      // advanced alert_count away from the value this request read.
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
+
+    expect(res.status).toBe(200);
+    expect(createManagerNotification).not.toHaveBeenCalled();
+    expect(res.body.rep_notification).toBeNull();
+  });
+
+  test('a staged alert IS sent when this request wins the CAS claim', async () => {
+    const leftAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 5, log_out_alert_sent: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 100, employee_name: 'Arun',
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'outside', outside_radius_count: 6, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9, left_at: leftAt, alert_count: 0, max_distance_m: 100 }] })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // this request's CAS wins
+
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 12, lng: 78 });
+
+    expect(res.status).toBe(200);
+    expect(createManagerNotification).toHaveBeenCalledWith(expect.objectContaining({ type: 'left_dealer' }));
+  });
+
+  test('the "returned" notification is not double-sent when a concurrent request already closed the excursion', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 3, log_out_alert_sent: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200, employee_name: 'Arun',
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'inside', outside_radius_count: 3, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9, left_at: new Date().toISOString(), alert_count: 2, max_distance_m: 500 }] }) // open excursion, alerts already fired
+      // The claim UPDATE finds rowCount 0 — a concurrent request already
+      // closed this excursion (returned_at is no longer NULL).
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 11, lng: 77 });
+
+    expect(res.status).toBe(200);
+    expect(createManagerNotification).not.toHaveBeenCalled();
+    expect(res.body.rep_notification).toBeNull();
+  });
+
+  test('the "returned" notification IS sent when this request wins the claim', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 55, dealer_id: 1, logout_time: null, outside_radius_count: 3, log_out_alert_sent: true,
+          dealer_name: 'Dealer A', dealer_lat: 11, dealer_lng: 77, radius_meters: 200, employee_name: 'Arun',
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 55, last_location_status: 'inside', outside_radius_count: 3, log_out_alert_sent: true, interrupted: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9, left_at: new Date().toISOString(), alert_count: 2, max_distance_m: 500 }] })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // this request wins the claim
+
+    const app = makeApp(visitsRouter, { basePath: '/api/x', employee: REP });
+    const res = await request(app).post('/api/x/55/location-check').send({ lat: 11, lng: 77 });
+
+    expect(res.status).toBe(200);
+    expect(createManagerNotification).toHaveBeenCalledWith(expect.objectContaining({ type: 'returned' }));
+    expect(res.body.rep_notification).toEqual(expect.objectContaining({ title: 'Return inside dealer' }));
   });
 });
 

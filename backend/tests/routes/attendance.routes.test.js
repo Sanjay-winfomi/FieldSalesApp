@@ -1,9 +1,19 @@
 jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/services/googleRoutesService', () => ({ computeRoute: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
+const { computeRoute } = require('../../src/services/googleRoutesService');
 const { makeApp } = require('../helpers/testApp');
 
 const attendanceRouter = require('../../src/routes/attendance.routes');
+
+beforeEach(() => {
+  // Default: every /logout test that reaches the final-leg computation gets
+  // a successful Google Routes API response, since haversine no longer
+  // backs it up on failure. Individual tests override this to exercise the
+  // failure path.
+  computeRoute.mockResolvedValue({ distanceMeters: 1000 });
+});
 
 describe('POST /api/x/login', () => {
   afterEach(() => jest.resetAllMocks());
@@ -28,6 +38,33 @@ describe('POST /api/x/login', () => {
     expect(res.body.attendance.id).toBe(5);
   });
 
+  test('400 when accuracy_meters is present but invalid', async () => {
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ lat: 11, lng: 77, accuracy_meters: -5 });
+    expect(res.status).toBe(400);
+  });
+
+  test('422 when accuracy_meters exceeds the threshold', async () => {
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ lat: 11, lng: 77, accuracy_meters: 500 });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('gps_accuracy_exceeded');
+  });
+
+  test('201 when accuracy_meters is omitted (optional, for backward-compat with older queued actions)', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77 }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ lat: 11, lng: 77 });
+    expect(res.status).toBe(201);
+  });
+
+  test('201 when accuracy_meters is present and within the threshold', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77 }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ lat: 11, lng: 77, accuracy_meters: 12 });
+    expect(res.status).toBe(201);
+  });
+
   test('409 with the existing attendance_id when already logged in today', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [] }) // INSERT ... ON CONFLICT DO NOTHING -> no rows
@@ -46,6 +83,13 @@ describe('POST /api/x/logout', () => {
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ lat: 11, lng: 77 });
     expect(res.status).toBe(400);
+  });
+
+  test('422 when accuracy_meters exceeds the threshold', async () => {
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77, accuracy_meters: 500 });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('gps_accuracy_exceeded');
   });
 
   test('404 when the attendance record does not belong to this employee', async () => {
@@ -76,6 +120,36 @@ describe('POST /api/x/logout', () => {
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(200);
     expect(res.body.summary.visits_count).toBe(4);
+  });
+
+  test('502 with a retry message when the Routes API fails for the final leg, instead of falling back to haversine', async () => {
+    computeRoute.mockRejectedValueOnce(new Error('upstream failed'));
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+      .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
+      .mockResolvedValueOnce({ rows: [] }); // no closed dealer visits either
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('route_computation_failed');
+    expect(res.body.message).toBe('Request timed out — Retry');
+    // The day was never actually logged out — no UPDATE attendance call.
+    expect(pool.query.mock.calls.some(([sql]) => /UPDATE attendance/.test(sql))).toBe(false);
+  });
+
+  test('409 when a concurrent logout request wins the race to close the day first', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+      .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
+      .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either
+      // The UPDATE ... WHERE logout_time IS NULL matches zero rows — a
+      // concurrent request already completed the logout in between.
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 5, logout_time: '2026-07-27T13:00:01Z' }] }); // authoritative re-fetch
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
+    expect(res.status).toBe(409);
+    expect(res.body.attendance).toEqual({ id: 5, logout_time: '2026-07-27T13:00:01Z' });
   });
 
   test('auto-closes a still-open dealer visit when the day ends', async () => {

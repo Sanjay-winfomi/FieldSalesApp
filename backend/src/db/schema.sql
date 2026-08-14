@@ -304,6 +304,11 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_exception_log_employee    ON exception_log (employee_id);
 CREATE INDEX IF NOT EXISTS idx_exception_log_created_at  ON exception_log (created_at);
+-- dealer_id/visit_id both carry ON DELETE CASCADE (see section 4a below) —
+-- without an index here, deleting a dealer or a visit forces a full table
+-- scan of exception_log to find cascade-affected rows.
+CREATE INDEX IF NOT EXISTS idx_exception_log_dealer_id   ON exception_log (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_exception_log_visit_id    ON exception_log (visit_id);
 
 -- ============================================================
 -- 6. notes
@@ -343,6 +348,8 @@ CREATE TABLE IF NOT EXISTS reminders (
 
 CREATE INDEX IF NOT EXISTS idx_reminders_employee_id   ON reminders (employee_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_reminder_date ON reminders (reminder_date);
+-- dealer_id cascades (retrofitted below) — unindexed otherwise.
+CREATE INDEX IF NOT EXISTS idx_reminders_dealer_id      ON reminders (dealer_id);
 
 -- ============================================================
 -- 8. idempotency_keys
@@ -382,6 +389,11 @@ CREATE TABLE IF NOT EXISTS visit_radius_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_visit_radius_events_visit_id ON visit_radius_events (visit_id);
+-- dealer_id/employee_id both cascade (dealer_id retrofitted to CASCADE
+-- below, employee_id CASCADE from creation) — unindexed FK columns force a
+-- full table scan on every dealer/employee delete to find cascade rows.
+CREATE INDEX IF NOT EXISTS idx_visit_radius_events_dealer_id ON visit_radius_events (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_visit_radius_events_employee_id ON visit_radius_events (employee_id);
 -- UNIQUE (not just an index): a visit has at most one open excursion at a
 -- time. visitMonitor.js's foreground poll and geofenceTask.js's background
 -- geofence event both call location-check independently and can land within
@@ -413,6 +425,14 @@ CREATE TABLE IF NOT EXISTS manager_notifications (
 
 CREATE INDEX IF NOT EXISTS idx_manager_notifications_created_at ON manager_notifications (created_at);
 CREATE INDEX IF NOT EXISTS idx_manager_notifications_unread ON manager_notifications (read_at) WHERE read_at IS NULL;
+-- dealer_id (retrofitted to CASCADE below), employee_id, and visit_id all
+-- cascade — this is one of the highest-write-volume tables in the app, so
+-- an unindexed FK here is the most expensive version of the missing-
+-- cascade-index problem. (followup_request_id, added further below, is
+-- indexed next to its own ALTER TABLE.)
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_dealer_id ON manager_notifications (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_employee_id ON manager_notifications (employee_id);
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_visit_id ON manager_notifications (visit_id);
 
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (created_at);
 
@@ -447,6 +467,29 @@ BEGIN
   END LOOP;
 END $$;
 
+-- manager_notifications.employee_id was originally CASCADE (see its CREATE
+-- TABLE above), inconsistent with the SET NULL pattern deliberately used
+-- everywhere else in this schema for "an actor being deleted shouldn't
+-- destroy history that mentions them" (dealer_assignments.assigned_by,
+-- dealer_followup_requests.resolved_by). Deleting an employee is rare —
+-- employees.routes.js's DELETE /:id steers admins toward deactivation
+-- instead — but if it ever happens, CASCADE here would silently erase every
+-- exception review, excursion alert, and sync-failure report that ever
+-- named that employee, instead of just clearing the link and keeping the
+-- notification. Idempotent: skipped once already SET NULL.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'manager_notifications'::regclass AND confrelid = 'employees'::regclass
+      AND contype = 'f' AND confdeltype = 'c'
+  ) THEN
+    ALTER TABLE manager_notifications DROP CONSTRAINT manager_notifications_employee_id_fkey;
+    ALTER TABLE manager_notifications ADD CONSTRAINT manager_notifications_employee_id_fkey
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
 -- ============================================================
 -- 13. dealer_assignments
 -- ============================================================
@@ -477,6 +520,11 @@ CREATE TABLE IF NOT EXISTS dealer_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_dealer_assignments_employee_date ON dealer_assignments (employee_id, assignment_date);
 CREATE INDEX IF NOT EXISTS idx_dealer_assignments_date ON dealer_assignments (assignment_date);
+-- dealer_id cascades, assigned_by SET NULL — neither is covered by the
+-- composite (employee_id, assignment_date) index above (it doesn't lead
+-- with either column), so both are unindexed for a dealer/employee delete.
+CREATE INDEX IF NOT EXISTS idx_dealer_assignments_dealer_id ON dealer_assignments (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_dealer_assignments_assigned_by ON dealer_assignments (assigned_by);
 
 -- ============================================================
 -- 14. dealer_navigations
@@ -518,6 +566,9 @@ CREATE TABLE IF NOT EXISTS dealer_navigations (
 
 CREATE INDEX IF NOT EXISTS idx_dealer_navigations_employee_started ON dealer_navigations (employee_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_dealer_navigations_assignment ON dealer_navigations (assignment_id);
+-- dealer_id is not covered by the (employee_id, started_at) composite above
+-- (doesn't lead with it) and would otherwise be unindexed for a dealer delete.
+CREATE INDEX IF NOT EXISTS idx_dealer_navigations_dealer_id ON dealer_navigations (dealer_id);
 
 -- ============================================================
 -- 15. dealer_followup_requests
@@ -557,9 +608,16 @@ ALTER TABLE dealer_followup_requests ADD COLUMN IF NOT EXISTS approved_date DATE
 
 CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_status ON dealer_followup_requests (status);
 CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_employee ON dealer_followup_requests (employee_id);
+-- dealer_id cascades; assignment_id/resolved_by SET NULL — all three are
+-- unindexed FK columns that would otherwise force a full table scan on a
+-- dealer delete, an assignment delete, or an employee delete.
+CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_dealer ON dealer_followup_requests (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_assignment ON dealer_followup_requests (assignment_id);
+CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_resolved_by ON dealer_followup_requests (resolved_by);
 
 -- Lets a manager_notifications row for a followup_request carry Approve/
 -- Reject actions directly in the feed instead of just being informational.
 -- SET NULL, not CASCADE: deleting/resolving the request shouldn't delete
 -- the notification history of it having happened.
 ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS followup_request_id INTEGER REFERENCES dealer_followup_requests(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_manager_notifications_followup_request_id ON manager_notifications (followup_request_id);

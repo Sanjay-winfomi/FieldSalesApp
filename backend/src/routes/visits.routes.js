@@ -208,24 +208,28 @@ router.post('/login', async (req, res) => {
 
     // Road distance for this leg (previous dealer's logout, or the day's
     // login/home point if this is the first dealer today, -> this dealer)
-    // via Google Routes API — falls back to the old haversine straight-line
-    // figure if the API call fails, so a rep's check-in is never blocked by
-    // an upstream Google outage. distanceIsRouted tells the mobile Distance
-    // tab which figure it's looking at.
+    // via Google Routes API only — no straight-line fallback. A rep's
+    // check-in now genuinely depends on Google being reachable; the client
+    // shows "Request timed out — Retry" and the idempotency key above makes
+    // a retry safe to resend.
     let distFromPrev;
-    let distanceIsRouted = false;
+    const distanceIsRouted = true;
+    let route;
     try {
-      const route = await computeRoute({ originLat: prevLat, originLng: prevLng, destLat: lat, destLng: lng });
-      if (route.distanceMeters != null) {
-        distFromPrev = route.distanceMeters / 1000;
-        distanceIsRouted = true;
-      } else {
-        distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
-      }
+      route = await computeRoute({ originLat: prevLat, originLng: prevLng, destLat: lat, destLng: lng });
     } catch (routeErr) {
-      logger.warn('Routes API failed for dealer-to-dealer leg, using haversine fallback', { error: routeErr.message });
-      distFromPrev = haversineKm(prevLat, prevLng, lat, lng);
+      logger.warn('Routes API failed for dealer-to-dealer leg', { error: routeErr.message });
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
     }
+    if (route.distanceMeters == null) {
+      logger.warn('Routes API returned no distance for dealer-to-dealer leg');
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
+    }
+    distFromPrev = route.distanceMeters / 1000;
 
     // Create visit record
     const visitResult = await client.query(
@@ -608,14 +612,31 @@ router.post('/:id/location-check', async (req, res) => {
         const minutesOutside = (Date.now() - new Date(openEvent.left_at).getTime()) / 60000;
         const dueStage = Math.floor(minutesOutside / RADIUS_ALERT_STAGE_MINUTES);
         const newMaxDistance = Math.max(openEvent.max_distance_m ?? 0, distanceM ?? 0);
-        let newAlertCount = openEvent.alert_count;
+        const stageIsDue = dueStage > openEvent.alert_count;
+        const newAlertCount = stageIsDue ? openEvent.alert_count + 1 : openEvent.alert_count;
 
-        if (dueStage > openEvent.alert_count) {
+        // CAS on alert_count (read above, re-checked here): without this,
+        // two near-simultaneous pings (the foreground poll racing the
+        // background geofence event — the exact scenario the sibling
+        // outside_radius_count logic above already guards against) can both
+        // read the same alert_count, both decide the same stage is newly
+        // due, and both fire the manager/rep notification for it before
+        // either has written its own UPDATE. Only the request whose CAS
+        // actually lands (rowCount > 0) is the one that "claims" this stage
+        // and is allowed to notify; the loser's write silently no-ops and
+        // the next poll picks up from the now-current state.
+        const claim = await pool.query(
+          `UPDATE visit_radius_events SET alert_count = $1, max_distance_m = $2
+           WHERE id = $3 AND alert_count = $4`,
+          [newAlertCount, newMaxDistance, openEvent.id, openEvent.alert_count]
+        );
+        const claimed = claim.rowCount > 0;
+
+        if (stageIsDue && claimed) {
           // Fire exactly the next stage, one at a time, even if a long gap
           // between checks means multiple stages became "due" at once —
           // avoids bursting several alerts in one response.
-          const stage = openEvent.alert_count + 1;
-          newAlertCount = stage;
+          const stage = newAlertCount;
           const notifyManager = stage === 1 || stage >= 3;
           const notifyRep = stage >= 2;
 
@@ -639,18 +660,21 @@ router.post('/:id/location-check', async (req, res) => {
             };
           }
         }
-
-        await pool.query(
-          `UPDATE visit_radius_events SET alert_count = $1, max_distance_m = $2 WHERE id = $3`,
-          [newAlertCount, newMaxDistance, openEvent.id]
-        );
       }
     } else if (openEvent) {
-      // Back inside radius — close the excursion. Only notify if at least
-      // one alert stage actually fired (avoids a notification for a single
-      // brief GPS-jitter blip that never reached the 10-minute mark).
-      await pool.query(`UPDATE visit_radius_events SET returned_at = NOW() WHERE id = $1`, [openEvent.id]);
-      if (openEvent.alert_count > 0) {
+      // Back inside radius — close the excursion. `AND returned_at IS NULL`
+      // makes this a claim, not just an update: if two near-simultaneous
+      // pings both see the excursion still open, only the one whose UPDATE
+      // actually affects a row (rowCount > 0) gets to send the "returned"
+      // notification — the loser's write no-ops instead of both firing it.
+      // Only notify at all if at least one alert stage actually fired
+      // (avoids a notification for a single brief GPS-jitter blip that
+      // never reached the 10-minute mark).
+      const closed = await pool.query(
+        `UPDATE visit_radius_events SET returned_at = NOW() WHERE id = $1 AND returned_at IS NULL`,
+        [openEvent.id]
+      );
+      if (closed.rowCount > 0 && openEvent.alert_count > 0) {
         await createManagerNotification({
           type: 'returned',
           title: 'Representative returned',
