@@ -84,15 +84,30 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   };
 
   const openDatePicker = () => {
-    // Without this, tapping the date selector while the Reason field still
-    // has focus made the soft keyboard's own dismiss animation (triggered by
-    // the focus change) and the native date dialog's open animation race
-    // each other — both visibly competing for the same space at once, which
-    // read as the calendar itself flickering. Dismissing explicitly, before
-    // the dialog opens, makes the two transitions sequential instead.
-    Keyboard.dismiss();
-    setPendingDate(date || new Date());
-    setShowDatePicker(true);
+    const showPicker = () => {
+      setPendingDate(date || new Date());
+      setShowDatePicker(true);
+    };
+
+    // Keyboard.dismiss() only *requests* the dismiss — it returns
+    // immediately, before the keyboard's own ~250ms hide animation has
+    // actually finished. Calling setShowDatePicker(true) right after it (the
+    // previous fix) still opened the native date dialog while the keyboard
+    // was mid-close, just a few milliseconds earlier than before — same
+    // race, same visible flicker. Waiting for a real keyboardDidHide event
+    // (or skipping the wait entirely when the keyboard was never open)
+    // makes the two transitions genuinely sequential instead of assuming a
+    // fixed delay is enough.
+    if (Keyboard.isVisible?.()) {
+      const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
+      const sub = Keyboard.addListener(hideEvent, () => {
+        sub.remove();
+        showPicker();
+      });
+      Keyboard.dismiss();
+    } else {
+      showPicker();
+    }
   };
 
   const handleAndroidDateChange = (event, selected) => {

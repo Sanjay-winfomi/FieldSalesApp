@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { StyleSheet, View, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -18,7 +19,7 @@ import { configureGeofenceNotificationChannel, configureArrivalNotificationChann
 import { AppStateContext, PendingSyncContext } from './src/context/AppStateContext';
 import MainTabs from './src/navigation/MainTabs';
 import { colors } from './src/theme';
-import { ThemedAlertHost } from './src/components';
+import { ThemedAlertHost, ErrorBoundary } from './src/components';
 import { showAlert } from './src/services/themedAlert';
 
 // Screen Imports
@@ -132,6 +133,16 @@ export default function App() {
     configureNotificationHandler();
     configureGeofenceNotificationChannel();
     configureArrivalNotificationChannel();
+  }, []);
+
+  // Reinforces app.json's expo-system-ui backgroundColor config at runtime —
+  // that config sets the native root window's background at build time, but
+  // this makes sure it's actually applied every time this component mounts
+  // (cold launch and, since JS doesn't fully unmount on backgrounding,
+  // effectively also covers the app's whole lifetime) rather than depending
+  // solely on the native config being picked up correctly on first install.
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(colors.background).catch(() => {});
   }, []);
 
   // Tapping a "You've arrived at X — tap to log in" notification (sent by
@@ -344,9 +355,18 @@ export default function App() {
     if (!employee) return;
 
     const checkPermission = async () => {
-      const { granted, canAskAgain } = await getLocationPermissionStatus();
-      setLocationPermissionDenied(!granted);
-      setLocationPermissionCanAskAgain(canAskAgain);
+      // Without this, a throw here (e.g. a transient OS-level permission
+      // API failure) would be an unhandled promise rejection — since this
+      // runs from an AppState listener that doesn't await or catch its
+      // result, that failure would otherwise be silently swallowed by the
+      // JS runtime instead of at least being logged.
+      try {
+        const { granted, canAskAgain } = await getLocationPermissionStatus();
+        setLocationPermissionDenied(!granted);
+        setLocationPermissionCanAskAgain(canAskAgain);
+      } catch (error) {
+        console.error('Failed to check location permission on foreground:', error);
+      }
     };
 
     checkPermission();
@@ -374,7 +394,17 @@ export default function App() {
     if (!employee) return;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState !== 'active') return;
-      const pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+      // A throw here would propagate synchronously out of the AppState
+      // listener itself (not just as an unhandled promise rejection), so
+      // this is wrapped defensively even though assignedDealersRef.current
+      // is always an array in practice.
+      let pending;
+      try {
+        pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+      } catch (error) {
+        console.error('Failed to compute pending assignments on foreground:', error);
+        return;
+      }
       if (pending.length === 0) return;
       // getApproximateLocation (Balanced accuracy, one attempt, ~8s budget),
       // not getCurrentLocation (GPS-only Highest accuracy, up to 3 attempts
@@ -684,6 +714,7 @@ export default function App() {
             of this setting, so it's unaffected there. */}
         <StatusBar style="dark" />
         <ThemedAlertHost />
+        <ErrorBoundary>
         <NavigationContainer ref={navigationRef}>
           <AppStateContext.Provider value={appStateValue}>
           <PendingSyncContext.Provider value={pendingSyncValue}>
@@ -815,6 +846,7 @@ export default function App() {
           </PendingSyncContext.Provider>
           </AppStateContext.Provider>
         </NavigationContainer>
+        </ErrorBoundary>
       </View>
     </SafeAreaProvider>
   );
