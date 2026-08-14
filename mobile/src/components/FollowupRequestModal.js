@@ -110,9 +110,13 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
     }
   };
 
-  const handleAndroidDateChange = (event, selected) => {
+  const handlePickerChange = (event, selected) => {
+    if (selected) setPendingDate(selected);
+  };
+
+  const confirmPickedDate = () => {
+    setDate(pendingDate);
     setShowDatePicker(false);
-    if (event.type === 'set' && selected) setDate(selected);
   };
 
   const handleSave = async () => {
@@ -198,33 +202,25 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
           </View>
         </Animated.View>
 
-        {showDatePicker && Platform.OS === 'android' && (
-          <DateTimePicker
-            value={pendingDate}
-            mode="date"
-            display="default"
-            minimumDate={new Date()}
-            onChange={handleAndroidDateChange}
-          />
-        )}
-
-        {Platform.OS === 'ios' && showDatePicker && (
-          <View style={styles.iosPickerBackdrop}>
-            <View style={styles.iosPickerSheet}>
+        {showDatePicker && (
+          // Deliberately never uses display="default"/"calendar" on Android:
+          // that renders as a separate native DatePickerDialog window, and
+          // under Expo SDK 54's forced Android edge-to-edge, that second
+          // window doesn't inherit the main window's inset handling — it
+          // briefly redraws with default system-bar colors as it opens,
+          // which is what showed up as a black/white flash. A spinner
+          // rendered inside our own in-app sheet (same approach as iOS
+          // below) never opens a second window, so there's nothing to flash.
+          <View style={styles.pickerBackdrop}>
+            <View style={styles.pickerSheet}>
               <DateTimePicker
                 value={pendingDate}
                 mode="date"
                 display="spinner"
                 minimumDate={new Date()}
-                onChange={(event, selected) => selected && setPendingDate(selected)}
+                onChange={handlePickerChange}
               />
-              <PrimaryButton
-                title="Done"
-                onPress={() => {
-                  setDate(pendingDate);
-                  setShowDatePicker(false);
-                }}
-              />
+              <PrimaryButton title="Done" onPress={confirmPickedDate} />
             </View>
           </View>
         )}
@@ -273,11 +269,11 @@ const styles = StyleSheet.create({
   },
   counter: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.lg, textAlign: 'right' },
   counterShort: { color: colors.dangerDark, fontWeight: '600' },
-  iosPickerBackdrop: {
+  pickerBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end',
   },
-  iosPickerSheet: {
+  pickerSheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.input,
     borderTopRightRadius: radius.input,

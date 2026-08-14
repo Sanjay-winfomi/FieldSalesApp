@@ -6,8 +6,10 @@ jest.mock('../../services/syncManager', () => ({
 jest.mock('@react-native-community/datetimepicker', () => {
   const React = require('react');
   const { Pressable, Text } = require('react-native');
-  // Android-mode stub: tapping it fires onChange with a fixed future date,
-  // so tests can deterministically "pick a date" without a real native picker.
+  // Stub: tapping it fires onChange with a fixed future date. The real
+  // component now renders this inside its own in-app sheet (spinner mode,
+  // with a separate "Done" button confirming the pick) on both platforms,
+  // so picking a date here no longer closes anything by itself.
   return function MockDateTimePicker({ onChange }) {
     return React.createElement(
       Pressable,
@@ -27,9 +29,6 @@ import { enqueueAction, isNetworkError } from '../../services/syncManager';
 import { showAlert } from '../../services/themedAlert';
 import FollowupRequestModal from '../FollowupRequestModal';
 
-// The component only renders <DateTimePicker> on Android inline (iOS uses a
-// separate spinner-sheet branch) — force Android so the mock above is
-// actually mounted and tappable in these tests.
 Platform.OS = 'android';
 
 const ASSIGNMENT = { id: 7, dealer_id: 15, dealer_name: 'Dealer A' };
@@ -40,6 +39,8 @@ async function fillAndSubmit({ getByLabelText, getByText, getByPlaceholderText, 
   fireEvent.press(getByLabelText('Select follow-up date'));
   const picker = await findByTestId('mock-date-picker');
   fireEvent.press(picker);
+  await flush();
+  fireEvent.press(getByText('Done'));
   await waitFor(() => expect(queryByTestId('mock-date-picker')).toBeNull());
   await flush();
   fireEvent.changeText(getByPlaceholderText(/dealer asked to meet/i), reason);
