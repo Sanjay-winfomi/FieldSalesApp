@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
@@ -25,16 +25,24 @@ export default function NoteEditorScreen({ navigation, route }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Guards every post-await setState against one of these resolving after
+  // the rep has already navigated away (see NotesScreen.js for the same
+  // pattern/reasoning).
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
   const fetchNote = useCallback(async () => {
     try {
       const res = await api.get(`/notes/${noteId}`);
+      if (!isMountedRef.current) return;
       setContent(res.data.note.content);
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to fetch note:', err);
       showAlert('Error', 'Could not load this note.');
       navigation.goBack();
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }, [noteId, navigation]);
 
@@ -62,10 +70,12 @@ export default function NoteEditorScreen({ navigation, route }) {
         // depends on it; an edit already has the real noteId, so the queued
         // PUT can target it directly once connectivity returns.
         await enqueueAction(isEditing ? 'put' : 'post', isEditing ? `/notes/${noteId}` : '/notes', { content });
+        if (!isMountedRef.current) return;
         showAlert('Offline Mode', 'Note saved locally and will sync when online.');
         navigation.goBack();
         return;
       }
+      if (!isMountedRef.current) return;
       const serverError = err.response?.data?.error;
       if (serverError === 'content_too_short') {
         showAlert('Note too short', `Notes need at least ${MIN_CONTENT_LENGTH} characters.`);
@@ -74,7 +84,7 @@ export default function NoteEditorScreen({ navigation, route }) {
         showAlert('Error', 'Could not save this note. Please try again.');
       }
     } finally {
-      setSaving(false);
+      if (isMountedRef.current) setSaving(false);
     }
   };
 
@@ -88,10 +98,13 @@ export default function NoteEditorScreen({ navigation, route }) {
           setDeleting(true);
           try {
             await api.delete(`/notes/${noteId}`);
+            if (!isMountedRef.current) return;
             navigation.goBack();
           } catch (err) {
+            if (!isMountedRef.current) return;
             if (isNetworkError(err)) {
               await enqueueAction('delete', `/notes/${noteId}`);
+              if (!isMountedRef.current) return;
               showAlert('Offline Mode', 'Delete saved locally and will sync when online.');
               navigation.goBack();
               return;

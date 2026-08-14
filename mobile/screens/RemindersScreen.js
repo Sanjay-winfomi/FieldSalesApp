@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Plus, BellRing, ChevronRight } from 'lucide-react-native';
 import { api } from '../src/services/api';
@@ -32,12 +32,19 @@ export default function RemindersScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  // See NotesScreen.js for why: guards every post-await setState against a
+  // fetch/delete resolving after the rep has already navigated away.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
   const fetchReminders = useCallback(async () => {
     try {
       const res = await api.get('/reminders');
+      if (!isMountedRef.current) return;
       setReminders(res.data.reminders || []);
       setError('');
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to fetch reminders:', err);
       setError('Could not load reminders.');
     }
@@ -46,7 +53,9 @@ export default function RemindersScreen({ navigation }) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       setLoading(true);
-      fetchReminders().finally(() => setLoading(false));
+      fetchReminders().finally(() => {
+        if (isMountedRef.current) setLoading(false);
+      });
     });
     return unsubscribe;
   }, [navigation, fetchReminders]);
@@ -54,7 +63,7 @@ export default function RemindersScreen({ navigation }) {
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchReminders();
-    setRefreshing(false);
+    if (isMountedRef.current) setRefreshing(false);
   };
 
   const handleDelete = (reminder) => {
@@ -70,10 +79,13 @@ export default function RemindersScreen({ navigation }) {
               notifIdDayOf: reminder.notif_id_day_of,
             });
             await api.delete(`/reminders/${reminder.id}`);
+            if (!isMountedRef.current) return;
             setReminders((prev) => prev.filter((r) => r.id !== reminder.id));
           } catch (err) {
+            if (!isMountedRef.current) return;
             if (isNetworkError(err)) {
               await enqueueAction('delete', `/reminders/${reminder.id}`);
+              if (!isMountedRef.current) return;
               setReminders((prev) => prev.filter((r) => r.id !== reminder.id));
               showAlert('Offline Mode', 'Delete saved locally and will sync when online.');
               return;

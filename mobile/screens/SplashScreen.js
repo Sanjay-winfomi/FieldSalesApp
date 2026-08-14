@@ -40,11 +40,16 @@ export default function SplashScreen() {
           Animated.timing(value, { toValue: 1, duration: 400, useNativeDriver: true }),
           Animated.timing(value, { toValue: 0.3, duration: 400, useNativeDriver: true }),
         ])
-      ).start();
+      );
 
-    pulse(dot1, 0);
-    pulse(dot2, 150);
-    pulse(dot3, 300);
+    const loops = [pulse(dot1, 0), pulse(dot2, 150), pulse(dot3, 300)];
+    loops.forEach((loop) => loop.start());
+
+    // Without this, these three Animated.loop()s keep animating forever on
+    // the native UI thread even after this screen unmounts (~500ms after
+    // mount, once Splash hands off to Login/MainTabs) — a permanent
+    // background tax for the remaining lifetime of the app process.
+    return () => loops.forEach((loop) => loop.stop());
   }, []);
 
   return (

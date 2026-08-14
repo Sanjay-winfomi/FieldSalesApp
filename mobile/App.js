@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission, getCurrentLocation } from './src/services/location';
+import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission, getApproximateLocation } from './src/services/location';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -376,7 +376,15 @@ export default function App() {
       if (nextState !== 'active') return;
       const pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
       if (pending.length === 0) return;
-      getCurrentLocation().then((loc) => {
+      // getApproximateLocation (Balanced accuracy, one attempt, ~8s budget),
+      // not getCurrentLocation (GPS-only Highest accuracy, up to 3 attempts
+      // at 15s each) — this fires on every single foreground resume for as
+      // long as an assignment is pending, i.e. many times across a work day,
+      // and checkArrivalNow only needs to be accurate enough to compare
+      // against a dealer's ~200m geofence radius. The Highest-accuracy GPS
+      // lock this used to request on every app-switch was a major source of
+      // battery drain/heat with no accuracy benefit for this check.
+      getApproximateLocation().then((loc) => {
         if (loc) checkArrivalNow(loc.lat, loc.lng);
       });
     });

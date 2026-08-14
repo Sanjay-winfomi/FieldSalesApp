@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Plus, NotebookPen, ChevronRight } from 'lucide-react-native';
 import { api } from '../src/services/api';
@@ -26,12 +26,22 @@ export default function NotesScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  // Without this, a fetch that resolves after the rep has already navigated
+  // away (e.g. a slow request racing a quick back-navigation) would still
+  // call setState on an unmounted screen — a React warning today, and a
+  // real risk of the stale response clobbering whatever the next screen set
+  // up, once enough of these are in flight at once during a long session.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
   const fetchNotes = useCallback(async () => {
     try {
       const res = await api.get('/notes');
+      if (!isMountedRef.current) return;
       setNotes(res.data.notes || []);
       setError('');
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to fetch notes:', err);
       setError('Could not load notes.');
     }
@@ -40,7 +50,9 @@ export default function NotesScreen({ navigation }) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       setLoading(true);
-      fetchNotes().finally(() => setLoading(false));
+      fetchNotes().finally(() => {
+        if (isMountedRef.current) setLoading(false);
+      });
     });
     return unsubscribe;
   }, [navigation, fetchNotes]);
@@ -48,7 +60,7 @@ export default function NotesScreen({ navigation }) {
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchNotes();
-    setRefreshing(false);
+    if (isMountedRef.current) setRefreshing(false);
   };
 
   return (

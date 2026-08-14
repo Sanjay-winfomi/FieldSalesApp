@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { StyleSheet, View, ScrollView, RefreshControl } from 'react-native';
 import { MapPin } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
-import { getCurrentLocation, haversineMeters } from '../src/services/location';
+import { getApproximateLocation, haversineMeters } from '../src/services/location';
 import { api } from '../src/services/api';
 import { AppHeader, EmptyState, FadeSlideIn, AssignedDealerCard, FollowupRequestModal } from '../src/components';
 import { colors, spacing } from '../src/theme';
@@ -21,6 +21,9 @@ export default function TodaysVisitsScreen({ navigation }) {
   // estimate before the rep taps Navigate (which computes the real driving
   // distance via the Google Routes API). Best-effort: if it fails/denies,
   // cards just fall back to showing no distance, same as they always did.
+  // Deliberately the cheap Balanced-accuracy fetch (getApproximateLocation),
+  // not the strict GPS-only one used for actual login/logout — this refires
+  // on every focus of this screen and only ever backs a rough estimate.
   const [coords, setCoords] = useState(null);
   // dealer_id -> { km?, loading?, error? } — set only when the rep taps
   // "Get accurate distance" on a card (never fetched automatically, unlike
@@ -28,7 +31,19 @@ export default function TodaysVisitsScreen({ navigation }) {
   // Google Maps API call per tap).
   const [preciseDistances, setPreciseDistances] = useState({});
 
-  const handleFetchAccurateDistance = async (assignment) => {
+  // Guards the post-await setState below against this request resolving
+  // after the rep has already navigated away (see NotesScreen.js for the
+  // same pattern/reasoning) — a real possibility here since this is a
+  // real network call the rep can trigger and then immediately leave.
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
+  // useCallback (not a plain function redefined every render) so this stays
+  // the same reference across renders that don't touch `coords` — passed as
+  // a prop to the memoized AssignedDealerCard below, a fresh function
+  // reference on every render would defeat that memo entirely (React.memo's
+  // shallow prop comparison would see a "changed" prop every time).
+  const handleFetchAccurateDistance = useCallback(async (assignment) => {
     if (!coords || assignment.dealer_lat == null || assignment.dealer_lng == null) return;
     setPreciseDistances((prev) => ({ ...prev, [assignment.dealer_id]: { loading: true } }));
     try {
@@ -36,16 +51,24 @@ export default function TodaysVisitsScreen({ navigation }) {
         origin_lat: coords.lat, origin_lng: coords.lng,
         dest_lat: assignment.dealer_lat, dest_lng: assignment.dealer_lng,
       });
+      if (!isMountedRef.current) return;
       setPreciseDistances((prev) => ({ ...prev, [assignment.dealer_id]: { km: res.data.distanceMeters / 1000 } }));
     } catch {
+      if (!isMountedRef.current) return;
       setPreciseDistances((prev) => ({ ...prev, [assignment.dealer_id]: { error: true } }));
     }
-  };
+  }, [coords]);
+
+  // Same reasoning as handleFetchAccurateDistance above — one stable
+  // function shared by every card instead of a fresh inline arrow per
+  // render (AssignedDealerCard already calls this with the right
+  // assignment itself, so this never needs to close over per-item state).
+  const handleNavigate = useCallback((a) => onSelectAssignment(a, navigation), [onSelectAssignment, navigation]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchAssignedDealers();
-      getCurrentLocation().then(setCoords);
+      getApproximateLocation().then(setCoords);
     });
     return unsubscribe;
   }, [navigation, fetchAssignedDealers]);
@@ -87,7 +110,7 @@ export default function TodaysVisitsScreen({ navigation }) {
                 estimatedDistanceKm={estimatedDistanceKmByDealerId[assignment.dealer_id] ?? null}
                 preciseDistanceKm={preciseDistances[assignment.dealer_id]?.km ?? null}
                 fetchingPreciseDistance={!!preciseDistances[assignment.dealer_id]?.loading}
-                onNavigate={(a) => onSelectAssignment(a, navigation)}
+                onNavigate={handleNavigate}
                 onRequestFollowup={setFollowupAssignment}
                 onFetchAccurateDistance={coords ? handleFetchAccurateDistance : undefined}
               />

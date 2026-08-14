@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl } from 'react-native';
 import { Timer, Store } from 'lucide-react-native';
 import { fetchActivityData, groupActivityByDay, formatDuration } from '../src/utils/activityHistory';
@@ -25,13 +25,21 @@ export default function WorkingHoursScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  // Guards every post-await setState against this fetch resolving after
+  // the rep has already navigated away (see NotesScreen.js for the same
+  // pattern/reasoning).
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
+
   const fetchHistory = useCallback(async () => {
     try {
       const { attendanceDays: days, visits: v } = await fetchActivityData();
+      if (!isMountedRef.current) return;
       setAttendanceDays(days);
       setVisits(v);
       setError('');
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to fetch working-hours history:', err);
       setError('Could not load working-hours history.');
     }
@@ -40,7 +48,9 @@ export default function WorkingHoursScreen({ navigation }) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       setLoading(true);
-      fetchHistory().finally(() => setLoading(false));
+      fetchHistory().finally(() => {
+        if (isMountedRef.current) setLoading(false);
+      });
     });
     return unsubscribe;
   }, [navigation, fetchHistory]);
@@ -48,7 +58,7 @@ export default function WorkingHoursScreen({ navigation }) {
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchHistory();
-    setRefreshing(false);
+    if (isMountedRef.current) setRefreshing(false);
   };
 
   const sections = useMemo(() => groupActivityByDay(attendanceDays, visits), [attendanceDays, visits]);

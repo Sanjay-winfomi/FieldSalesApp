@@ -1,12 +1,12 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { AppStateContext } from '../../src/context/AppStateContext';
-import { getCurrentLocation } from '../../src/services/location';
+import { getApproximateLocation } from '../../src/services/location';
 import { api } from '../../src/services/api';
 import TodaysVisitsScreen from '../TodaysVisitsScreen';
 
 jest.mock('../../src/services/location', () => ({
-  getCurrentLocation: jest.fn(() => Promise.resolve(null)),
+  getApproximateLocation: jest.fn(() => Promise.resolve(null)),
   haversineMeters: jest.requireActual('../../src/services/location').haversineMeters,
 }));
 
@@ -71,7 +71,7 @@ describe('TodaysVisitsScreen', () => {
   });
 
   test('shows an estimated distance once a GPS fix arrives, for a dealer with no routed distance yet', async () => {
-    getCurrentLocation.mockResolvedValueOnce({ lat: 11.0098, lng: 76.9558, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValueOnce({ lat: 11.0098, lng: 76.9558, accuracyMeters: 10 });
     const assignmentWithCoords = { ...ASSIGNMENT_A, dealer_lat: 11.0234, dealer_lng: 77.0012 };
     let focusHandler;
     const navigation = {
@@ -95,7 +95,7 @@ describe('TodaysVisitsScreen', () => {
   });
 
   test('tapping "Get accurate distance" fetches a real Google Maps distance and replaces the estimate', async () => {
-    getCurrentLocation.mockResolvedValueOnce({ lat: 11.0098, lng: 76.9558, accuracyMeters: 10 });
+    getApproximateLocation.mockResolvedValueOnce({ lat: 11.0098, lng: 76.9558, accuracyMeters: 10 });
     api.post.mockResolvedValueOnce({ data: { distanceMeters: 4800, durationSeconds: 500, durationInTrafficSeconds: 540 } });
     const assignmentWithCoords = { ...ASSIGNMENT_A, dealer_lat: 11.0234, dealer_lng: 77.0012 };
     let focusHandler;

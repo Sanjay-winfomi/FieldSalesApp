@@ -43,7 +43,7 @@ function formatEta(isoString) {
  * with the assignment, for a real Google Maps distance without implying a
  * navigation attempt started (unlike tapping Navigate itself).
  */
-export default function AssignedDealerCard({
+function AssignedDealerCard({
   assignment, estimatedDistanceKm, preciseDistanceKm, fetchingPreciseDistance,
   onNavigate, onRequestFollowup, onFetchAccurateDistance,
 }) {
@@ -187,3 +187,12 @@ const styles = StyleSheet.create({
   },
   followupLinkText: { fontSize: 12, fontWeight: '600', color: colors.primary },
 });
+
+// Rendered once per assigned dealer in TodaysVisitsScreen's list — without
+// memo, any state change there (e.g. a GPS estimate updating, or a precise
+// distance arriving for a DIFFERENT dealer) re-rendered every card in the
+// list, not just the one whose own props actually changed. Only pays off
+// because the parent also passes stable (useCallback'd) onNavigate/
+// onFetchAccurateDistance instead of a fresh inline function each render —
+// see TodaysVisitsScreen.js.
+export default React.memo(AssignedDealerCard);

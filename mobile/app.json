@@ -11,9 +11,11 @@
       "bundleIdentifier": "com.winfomi.fieldtrack",
       "infoPlist": {
         "UIBackgroundModes": [
+          "location",
           "location"
         ]
-      }
+      },
+      "config": {}
     },
     "android": {
       "package": "com.winfomi.fieldtrack",
@@ -29,8 +31,17 @@
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION"
-      ]
+      ],
+      "config": {
+        "googleMaps": {}
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -68,6 +79,12 @@
       "eas": {
         "projectId": "bf38c17c-1a63-4e81-ac28-3b8410400462"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/bf38c17c-1a63-4e81-ac28-3b8410400462"
     }
   }
 }
