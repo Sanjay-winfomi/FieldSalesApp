@@ -10,14 +10,18 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-kvmt.onrender.com/api"
+        "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-kvmt.onrender.com/api",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "SENTRY_DISABLE_NATIVE_DEBUG_UPLOAD": "true"
       },
       "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-kvmt.onrender.com/api"
+        "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-kvmt.onrender.com/api",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "SENTRY_DISABLE_NATIVE_DEBUG_UPLOAD": "true"
       },
       "channel": "production"
     }
