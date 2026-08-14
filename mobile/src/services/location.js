@@ -73,11 +73,28 @@ export const getLocationPermissionStatus = async () => {
  * that loop at the source.
  * @returns {Promise<boolean>} whether foreground permission is granted
  */
+// Shared by every in-flight ensureForegroundPermission() call. Without this,
+// two callers that both start while permission is still undecided (e.g. app
+// cold-start firing both an AppState listener and a screen's mount effect
+// within the same tick) would each independently read "not granted yet" and
+// each call requestForegroundPermissionsAsync() themselves — two concurrent
+// calls into the same OS permission Activity, which is exactly the kind of
+// overlapping request the flash fix above was trying to eliminate. Once
+// permission is actually granted, every caller short-circuits at the first
+// await below and this is never touched.
+let pendingPermissionRequest = null;
+
 async function ensureForegroundPermission() {
   const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
   if (status === 'granted') return true;
   if (!canAskAgain) return false;
-  const { status: requested } = await Location.requestForegroundPermissionsAsync();
+
+  if (!pendingPermissionRequest) {
+    pendingPermissionRequest = Location.requestForegroundPermissionsAsync().finally(() => {
+      pendingPermissionRequest = null;
+    });
+  }
+  const { status: requested } = await pendingPermissionRequest;
   return requested === 'granted';
 }
 

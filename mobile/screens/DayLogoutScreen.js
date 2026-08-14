@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { Clock, TrendingUp } from 'lucide-react-native';
-import { getCurrentLocation, getReadableAddress } from '../src/services/location';
+import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
@@ -60,6 +60,7 @@ export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
         attendance_id: attendance.id,
         lat: coords.lat,
         lng: coords.lng,
+        accuracy_meters: coords.accuracyMeters,
       };
 
       let updatedAttendance = null;
@@ -74,6 +75,9 @@ export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
             ...attendance,
             logout_time: new Date().toISOString(),
           };
+        } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
+          showAlert('GPS Too Imprecise', 'Your GPS accuracy is too low to log out. Move to an open area for a stronger signal.');
+          return;
         } else {
           throw error;
         }
@@ -93,6 +97,11 @@ export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
   const distanceKm = attendance
     ? parseFloat(attendance.total_distance_km || 0).toFixed(1)
     : '0.0';
+
+  const accuracyOk = !!coords && coords.accuracyMeters != null && coords.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS;
+  const accuracyMessage = coords && !accuracyOk
+    ? `GPS accuracy is ±${Math.round(coords.accuracyMeters)}m — move to an open area for a stronger signal.`
+    : locationStatus;
 
   return (
     <View style={styles.screen}>
@@ -118,11 +127,14 @@ export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
           </Card>
 
           <LocationCard address={address} coords={coords} statusMessage={locationStatus} />
+          {coords && !accuracyOk && (
+            <Text style={styles.accuracyWarning}>{accuracyMessage}</Text>
+          )}
 
           <PrimaryButton
             title="Logout for the day"
             onPress={handleLogout}
-            disabled={!coords}
+            disabled={!coords || !accuracyOk}
             loading={loading}
             variant="danger"
           />
@@ -141,4 +153,5 @@ const styles = StyleSheet.create({
   summaryLabel: { ...typography.body, color: colors.textSecondary },
   summaryValue: { ...typography.bodyMedium, color: colors.text },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  accuracyWarning: { ...typography.caption, color: colors.primary, textAlign: 'center', marginBottom: spacing.sm },
 });

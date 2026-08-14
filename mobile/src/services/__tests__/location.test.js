@@ -15,7 +15,7 @@ jest.mock('react-native', () => ({
 }));
 
 import * as Location from 'expo-location';
-import { getCurrentLocation, getLocationPermissionStatus } from '../location';
+import { getCurrentLocation, getApproximateLocation, getLocationPermissionStatus } from '../location';
 
 describe('getCurrentLocation', () => {
   afterEach(() => jest.clearAllMocks());
@@ -65,6 +65,51 @@ describe('getCurrentLocation', () => {
 
     expect(result.accuracyMeters).toBe(5);
     expect(Location.getCurrentPositionAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('concurrent permission requests', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('two overlapping calls while permission is undecided share a single OS prompt', async () => {
+    // Both getCurrentLocation() and getApproximateLocation() read the
+    // cached permission status first; while it's still "denied but
+    // askable" (the window before the user answers), both should collapse
+    // onto the SAME requestForegroundPermissionsAsync() call instead of
+    // each firing their own — the race this single-flight guard closes.
+    Location.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied', canAskAgain: true });
+    let resolveRequest;
+    Location.requestForegroundPermissionsAsync.mockImplementation(
+      () => new Promise((resolve) => { resolveRequest = resolve; })
+    );
+    Location.getCurrentPositionAsync.mockResolvedValue({ coords: { latitude: 11, longitude: 77, accuracy: 5 } });
+
+    const callA = getCurrentLocation();
+    const callB = getApproximateLocation();
+
+    // Let both calls run past their getForegroundPermissionsAsync() await
+    // and reach the request step before resolving it.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+
+    resolveRequest({ status: 'granted' });
+    const [resultA, resultB] = await Promise.all([callA, callB]);
+    expect(resultA.accuracyMeters).toBe(5);
+    expect(resultB.accuracyMeters).toBe(5);
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  test('a later call, after permission settles, requests again if still needed', async () => {
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
+    Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied' });
+    await getCurrentLocation();
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+
+    Location.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
+    Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied' });
+    await getCurrentLocation();
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, View, Text, TextInput, Pressable, Platform, Keyboard, Animated, StyleSheet } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { Calendar } from 'react-native-calendars';
 import { X, CalendarDays } from 'lucide-react-native';
 import { api } from '../services/api';
 import { enqueueAction, isNetworkError } from '../services/syncManager';
@@ -51,6 +51,21 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   // what read as a "flicker" rather than a smooth keyboard-avoiding motion.
   const keyboardOffset = useRef(new Animated.Value(0)).current;
 
+  // openDatePicker below registers a one-shot keyboardDidHide/keyboardWillHide
+  // listener that isn't inside a useEffect (it's created imperatively, per
+  // tap) — tracked here so handleClose/unmount can remove it if the modal
+  // closes before the keyboard actually finishes hiding. Without this, that
+  // stray listener still fires afterward and calls setShowDatePicker(true)
+  // on the (closed, but not unmounted — Modal just toggles `visible`)
+  // component, so the date picker sheet could appear already open the next
+  // time the modal is reopened.
+  const pendingKeyboardHideSubRef = useRef(null);
+  const clearPendingKeyboardHideSub = () => {
+    pendingKeyboardHideSubRef.current?.remove();
+    pendingKeyboardHideSubRef.current = null;
+  };
+  useEffect(() => clearPendingKeyboardHideSub, []);
+
   useEffect(() => {
     const showEvent = Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow';
     const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
@@ -73,6 +88,7 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
   const canSave = !!date && trimmedLength >= MIN_REASON_LENGTH && !saving;
 
   const reset = () => {
+    clearPendingKeyboardHideSub();
     setDate(null);
     setReason('');
     setPendingDate(new Date());
@@ -101,17 +117,21 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
     if (Keyboard.isVisible?.()) {
       const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
       const sub = Keyboard.addListener(hideEvent, () => {
-        sub.remove();
+        clearPendingKeyboardHideSub();
         showPicker();
       });
+      pendingKeyboardHideSubRef.current = sub;
       Keyboard.dismiss();
     } else {
       showPicker();
     }
   };
 
-  const handlePickerChange = (event, selected) => {
-    if (selected) setPendingDate(selected);
+  const handleDayPress = (day) => {
+    // Parsed as local midnight (no trailing Z) — day.dateString is a plain
+    // 'YYYY-MM-DD' with no timezone of its own, and parsing it as UTC would
+    // shift the selected day by one in any timezone behind UTC.
+    setPendingDate(new Date(`${day.dateString}T00:00:00`));
   };
 
   const confirmPickedDate = () => {
@@ -203,24 +223,45 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
         </Animated.View>
 
         {showDatePicker && (
-          // Deliberately never uses display="default"/"calendar" on Android:
-          // that renders as a separate native DatePickerDialog window, and
-          // under Expo SDK 54's forced Android edge-to-edge, that second
-          // window doesn't inherit the main window's inset handling — it
-          // briefly redraws with default system-bar colors as it opens,
-          // which is what showed up as a black/white flash. A spinner
-          // rendered inside our own in-app sheet (same approach as iOS
-          // below) never opens a second window, so there's nothing to flash.
+          // A real inline calendar grid (react-native-calendars), not
+          // @react-native-community/datetimepicker's native OS dialog.
+          // That library's Android <DateTimePicker> always opens a genuine
+          // native Dialog window no matter what `display` value is passed
+          // ('spinner'/'calendar'/'default' only change the widget style
+          // *inside* that same dialog) — it never actually renders inline in
+          // our own sheet below, which is why it showed up as a jarring,
+          // unstyled system box floating disconnected from the rest of this
+          // modal. Rendering the calendar ourselves fixes both the look
+          // (fully themeable to match the app) and the earlier flash risk
+          // (there's no second native window to flash at all) in one move,
+          // and behaves identically on both platforms instead of needing a
+          // separate native-dialog-vs-inline-spinner branch per OS.
           <View style={styles.pickerBackdrop}>
             <View style={styles.pickerSheet}>
-              <DateTimePicker
-                value={pendingDate}
-                mode="date"
-                display="spinner"
-                minimumDate={new Date()}
-                onChange={handlePickerChange}
+              <Calendar
+                current={toDateString(pendingDate)}
+                minDate={toDateString(new Date())}
+                markedDates={{
+                  [toDateString(pendingDate)]: { selected: true, selectedColor: colors.primary },
+                }}
+                onDayPress={handleDayPress}
+                theme={{
+                  backgroundColor: colors.card,
+                  calendarBackground: colors.card,
+                  textSectionTitleColor: colors.textSecondary,
+                  selectedDayBackgroundColor: colors.primary,
+                  selectedDayTextColor: colors.textInverse,
+                  todayTextColor: colors.primary,
+                  dayTextColor: colors.text,
+                  textDisabledColor: colors.disabledText,
+                  monthTextColor: colors.text,
+                  arrowColor: colors.primary,
+                  textDayFontFamily: typography.body.fontFamily,
+                  textMonthFontFamily: typography.cardTitle.fontFamily,
+                  textDayHeaderFontFamily: typography.caption.fontFamily,
+                }}
               />
-              <PrimaryButton title="Done" onPress={confirmPickedDate} />
+              <PrimaryButton title="Done" onPress={confirmPickedDate} style={styles.pickerDoneButton} />
             </View>
           </View>
         )}
@@ -275,8 +316,11 @@ const styles = StyleSheet.create({
   },
   pickerSheet: {
     backgroundColor: colors.card,
-    borderTopLeftRadius: radius.input,
-    borderTopRightRadius: radius.input,
-    padding: spacing.screenHorizontal,
+    borderTopLeftRadius: radius.card,
+    borderTopRightRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
   },
+  pickerDoneButton: { marginTop: spacing.md },
 });

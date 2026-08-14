@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView } from 'react-native';
-import { getCurrentLocation, getReadableAddress } from '../src/services/location';
+import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
@@ -47,16 +47,18 @@ export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation 
     setLoading(true);
     setLocationStatus('Syncing login...');
 
+    const payload = { lat: coords.lat, lng: coords.lng, accuracy_meters: coords.accuracyMeters };
+
     try {
       let attendanceData = null;
       try {
-        const response = await api.post('/attendance/login', coords);
+        const response = await api.post('/attendance/login', payload);
         attendanceData = response.data.attendance;
       } catch (error) {
         if (!error.response) {
           // Network error - enqueue
           const localId = 'offline-' + Date.now();
-          await enqueueAction('post', '/attendance/login', coords, { localId, resolves: 'attendance' });
+          await enqueueAction('post', '/attendance/login', payload, { localId, resolves: 'attendance' });
           showAlert('Offline Mode', 'Login saved locally and will sync when online.');
 
           // Provide mock attendance block so app can progress
@@ -70,6 +72,9 @@ export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation 
         } else if (error.response.status === 409) {
           showAlert('Already logged in', 'You have already logged in for today.');
           if (onAlreadyLoggedIn) await onAlreadyLoggedIn();
+          return;
+        } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
+          showAlert('GPS Too Imprecise', 'Your GPS accuracy is too low to log in. Move to an open area for a stronger signal.');
           return;
         } else {
           throw error;
@@ -89,6 +94,11 @@ export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation 
     }
   };
 
+  const accuracyOk = !!coords && coords.accuracyMeters != null && coords.accuracyMeters <= MAX_ACCEPTABLE_ACCURACY_METERS;
+  const accuracyMessage = coords && !accuracyOk
+    ? `GPS accuracy is ±${Math.round(coords.accuracyMeters)}m — move to an open area for a stronger signal.`
+    : locationStatus;
+
   return (
     <View style={styles.screen}>
       <AppHeader title="Login" onBack={() => navigation.goBack()} />
@@ -97,14 +107,14 @@ export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation 
           <GPSStatusCard
             address={address}
             coords={coords}
-            statusMessage={locationStatus}
+            statusMessage={accuracyMessage}
             accuracyMeters={coords?.accuracyMeters}
           />
 
           <PrimaryButton
             title="Login for the day"
             onPress={handleLogin}
-            disabled={!coords}
+            disabled={!coords || !accuracyOk}
             loading={loading}
             style={styles.submitButton}
           />

@@ -104,8 +104,28 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
   const [errorMessage, setErrorMessage] = useState(null);
   const isMountedRef = useRef(true);
   const pollRef = useRef(null);
+  // Guards against two overlapping checkArrival() calls: getApproximateLocation()
+  // can occasionally run longer than POSITION_POLL_MS (its own internal
+  // timeout + last-known-position fallback), and setInterval doesn't wait
+  // for a slow tick to finish before firing the next one.
+  const pollInFlightRef = useRef(false);
+  // A push onto this screen's own stack (e.g. tapping an arrival
+  // notification to jump straight to Check-In) leaves this screen mounted
+  // underneath instead of unmounting it, so the interval below would
+  // otherwise keep firing GPS/API calls for a screen the rep can no longer
+  // see.
+  const isFocusedRef = useRef(true);
 
   useEffect(() => () => { isMountedRef.current = false; }, []);
+
+  useEffect(() => {
+    const unsubFocus = navigation.addListener?.('focus', () => { isFocusedRef.current = true; });
+    const unsubBlur = navigation.addListener?.('blur', () => { isFocusedRef.current = false; });
+    return () => {
+      unsubFocus?.();
+      unsubBlur?.();
+    };
+  }, [navigation]);
 
   const dealerLat = toFiniteCoord(assignment?.dealer_lat);
   const dealerLng = toFiniteCoord(assignment?.dealer_lng);
@@ -164,7 +184,9 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
       if (isNetworkError(err)) {
         setErrorMessage('No internet connection — a route needs connectivity. Check your connection and retry.');
       } else if (err.response?.status === 502) {
-        setErrorMessage("Couldn't reach Google's directions service. Please retry.");
+        // No straight-line fallback on the server for this leg anymore — a
+        // Google Routes API failure here always means "try again."
+        setErrorMessage(err.response.data?.message || 'Request timed out — Retry');
       } else {
         setErrorMessage('Could not compute a route right now. Please retry.');
       }
@@ -196,13 +218,19 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
     }
 
     const checkArrival = async () => {
-      const loc = await getApproximateLocation();
-      if (!isMountedRef.current || !loc || dealerLat == null || dealerLng == null) return;
-      setCoords(loc);
-      const distanceMeters = haversineMeters(loc.lat, loc.lng, dealerLat, dealerLng);
-      if (distanceMeters <= radiusMeters) {
-        setStatus('arrived');
-        patchStatus('arrived');
+      if (!isFocusedRef.current || pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      try {
+        const loc = await getApproximateLocation();
+        if (!isMountedRef.current || !loc || dealerLat == null || dealerLng == null) return;
+        setCoords(loc);
+        const distanceMeters = haversineMeters(loc.lat, loc.lng, dealerLat, dealerLng);
+        if (distanceMeters <= radiusMeters) {
+          setStatus('arrived');
+          patchStatus('arrived');
+        }
+      } finally {
+        pollInFlightRef.current = false;
       }
     };
 
