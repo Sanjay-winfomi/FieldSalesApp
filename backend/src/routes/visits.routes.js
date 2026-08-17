@@ -540,21 +540,21 @@ router.post('/:id/location-check', async (req, res) => {
          FROM client_visits WHERE id = $3
        )
        UPDATE client_visits cv
-       SET last_location_status     = $1,
+       SET last_location_status     = $1::text,
            last_location_check_at   = NOW(),
            last_location_distance_m = $2,
-           outside_radius_count     = CASE WHEN $1 = 'inside' THEN old.outside_radius_count ELSE old.outside_radius_count + 1 END,
+           outside_radius_count     = CASE WHEN $1::text = 'inside' THEN old.outside_radius_count ELSE old.outside_radius_count + 1 END,
            log_out_alert_sent       = old.log_out_alert_sent OR (
-             $1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
+             $1::text = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
            ),
            interrupted              = old.interrupted OR (
-             $1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
+             $1::text = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2
            ),
            interrupted_at           = CASE WHEN old.interrupted THEN cv.interrupted_at
-                                           WHEN ($1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN NOW()
+                                           WHEN ($1::text = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN NOW()
                                            ELSE cv.interrupted_at END,
            interrupted_distance_m   = CASE WHEN old.interrupted THEN old.interrupted_distance_m
-                                           WHEN ($1 = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN $2
+                                           WHEN ($1::text = 'outside' AND NOT old.log_out_alert_sent AND (old.outside_radius_count + 1) >= 2) THEN $2
                                            ELSE old.interrupted_distance_m END
        FROM old
        WHERE cv.id = $3

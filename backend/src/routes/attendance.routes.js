@@ -302,8 +302,8 @@ router.post('/logout', async (req, res) => {
            logout_lat  = $1,
            logout_lng  = $2,
            total_duration_minutes = $3,
-           total_distance_km = COALESCE(total_distance_km, 0) + COALESCE($5, 0),
-           final_leg_distance_km = $5,
+           total_distance_km = COALESCE(total_distance_km, 0) + COALESCE($5::double precision, 0),
+           final_leg_distance_km = $5::double precision,
            final_leg_is_routed = $6
        WHERE id = $4 AND logout_time IS NULL
        RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes,

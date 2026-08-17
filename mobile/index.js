@@ -1,5 +1,5 @@
 import { registerRootComponent } from 'expo';
-import { Alert, Text, TextInput } from 'react-native';
+import { Text, TextInput } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { initCrashReporter, captureException } from './src/services/crashReporter';
 
@@ -19,20 +19,21 @@ Text.defaultProps.allowFontScaling = false;
 TextInput.defaultProps = TextInput.defaultProps || {};
 TextInput.defaultProps.allowFontScaling = false;
 
-// TEMPORARY diagnostic: production (release) builds normally crash silently
-// on an unhandled JS exception with no on-screen trace, which is why the app
-// was force-quitting with no way to tell what broke. Surfacing it via the
-// native Alert (not the themed one — that depends on React having already
-// rendered, which a startup-time crash may never reach) turns the very next
-// crash into a screenshot-able error message instead of a silent close.
-// Remove once the root cause is found and fixed.
+// Global JS exception handler — reports every uncaught error to Sentry
+// before falling through to React Native's default handling (which shows
+// the dev red-box in development, or crashes/restarts in production). This
+// used to also surface a raw native Alert with the stack trace as a
+// stopgap while the app's root cause of unexplained restarts (an OS-level
+// MIUI background kill, not a JS crash — see visitForegroundService.js/
+// miui.js) was still unidentified. That's since been root-caused and
+// mitigated, and crash reporting itself is now fully wired (this handler,
+// the ErrorBoundary, and every AppState/TaskManager callback all report to
+// captureException — see crashReporter.js), so the diagnostic Alert was
+// removed: it was surfacing raw stack traces to real production users on
+// every crash instead of just reporting silently to Sentry.
 const defaultGlobalHandler = global.ErrorUtils.getGlobalHandler();
 global.ErrorUtils.setGlobalHandler((error, isFatal) => {
   captureException(error, { area: 'global-handler', isFatal });
-  Alert.alert(
-    isFatal ? 'Fatal error' : 'Error',
-    `${error?.name || 'Error'}: ${error?.message || String(error)}\n\n${error?.stack || ''}`.slice(0, 1800)
-  );
   defaultGlobalHandler(error, isFatal);
 });
 

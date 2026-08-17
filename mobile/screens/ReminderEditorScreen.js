@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Pressable, Platform, KeyboardAvoidingView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronDown, CalendarDays } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
@@ -10,6 +11,14 @@ import { AppHeader, PrimaryButton, DealerPickerModal, DatePickerSheet, FadeSlide
 import { colors, typography, spacing, radius, serifFontFamily } from '../src/theme';
 
 const MIN_NOTE_LENGTH = 20;
+
+// A killed-and-restarted process (an OS-level background kill, not a JS
+// crash — see visitForegroundService.js/miui.js for the actual mitigation
+// for that) would otherwise lose whatever dealer/date/note the rep had
+// picked, since a note below the 20-character minimum never reaches the
+// server. Only one draft slot — this screen is create-only, never editing
+// an existing reminder.
+const DRAFT_KEY = '@reminder_draft';
 
 function toDateString(date) {
   const year = date.getFullYear();
@@ -36,6 +45,47 @@ export default function ReminderEditorScreen({ navigation }) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [pendingDate, setPendingDate] = useState(new Date());
   const [saving, setSaving] = useState(false);
+
+  // Restore once on mount, before the autosave effect below has a chance to
+  // immediately overwrite the stored draft with the screen's still-empty
+  // initial state.
+  useEffect(() => {
+    AsyncStorage.getItem(DRAFT_KEY).then((json) => {
+      if (!json) return;
+      try {
+        const draft = JSON.parse(json);
+        if (draft.dealer) setDealer(draft.dealer);
+        if (draft.date) setDate(new Date(draft.date));
+        if (draft.note) setNote(draft.note);
+      } catch {
+        // Corrupt draft — nothing to restore.
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced autosave — writes on every pause rather than every keystroke
+  // or selection, so a kill loses at most a moment's typing.
+  const draftSaveTimerRef = useRef(null);
+  useEffect(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = setTimeout(() => {
+      if (dealer || date || note.trim().length > 0) {
+        AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ dealer, date: date?.toISOString(), note })).catch(() => {});
+      }
+    }, 800);
+    return () => clearTimeout(draftSaveTimerRef.current);
+  }, [dealer, date, note]);
+
+  const clearDraft = () => AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
+
+  const handleBack = () => {
+    // A deliberate back-out reads as "I'm done with this" — clearing here
+    // (rather than only on save) means an abandoned draft doesn't
+    // resurface and surprise the rep the next time they open this screen.
+    clearDraft();
+    navigation.goBack();
+  };
 
   const trimmedLength = note.trim().length;
   const canSave = !!dealer && !!date && trimmedLength >= MIN_NOTE_LENGTH && !saving;
@@ -86,6 +136,7 @@ export default function ReminderEditorScreen({ navigation }) {
         });
       }
 
+      clearDraft();
       navigation.goBack();
     } catch (err) {
       if (isNetworkError(err)) {
@@ -107,6 +158,7 @@ export default function ReminderEditorScreen({ navigation }) {
             notif_id_day_of: notifIdDayOf,
           });
         }
+        clearDraft(); // safely queued — the offline sync queue is now the durable copy, not this draft
         showAlert('Offline Mode', 'Reminder saved locally and will sync when online.');
         navigation.goBack();
         return;
@@ -127,7 +179,7 @@ export default function ReminderEditorScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <AppHeader title="New reminder" onBack={() => navigation.goBack()} />
+      <AppHeader title="New reminder" onBack={handleBack} />
 
       <FadeSlideIn style={styles.form}>
         <Text style={styles.label}>Dealer</Text>

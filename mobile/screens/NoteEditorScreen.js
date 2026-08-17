@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
@@ -17,6 +18,14 @@ const MIN_CONTENT_LENGTH = 100;
  * bundled) regardless of the rest of the app's system font, and Save stays
  * disabled until the 100-character minimum — enforced again server-side — is met.
  */
+// A killed-and-restarted process (an OS-level background kill, not a JS
+// crash — see visitForegroundService.js/miui.js for the actual mitigation
+// for that) would otherwise lose whatever the rep was mid-typing, since
+// nothing below the 100-character minimum ever reaches the server. Keyed by
+// noteId (or 'new') so an in-progress edit and an in-progress new note never
+// collide, and multiple existing notes each keep their own draft.
+const draftKey = (noteId) => `@note_draft_${noteId || 'new'}`;
+
 export default function NoteEditorScreen({ navigation, route }) {
   const noteId = route?.params?.noteId;
   const isEditing = !!noteId;
@@ -48,8 +57,48 @@ export default function NoteEditorScreen({ navigation, route }) {
   }, [noteId, navigation]);
 
   useEffect(() => {
-    if (isEditing) fetchNote();
-  }, [isEditing, fetchNote]);
+    // Restoring the draft after the server fetch (rather than instead of
+    // it) means editing an existing note still shows the real server
+    // content immediately, then swaps in any unsaved local edits a moment
+    // later — same order a kill-and-restart would have happened in.
+    const restoreDraft = async () => {
+      try {
+        const draft = await AsyncStorage.getItem(draftKey(noteId));
+        if (draft && isMountedRef.current) setContent(draft);
+      } catch {
+        // Best-effort — a missing/corrupt draft just means nothing to restore.
+      }
+    };
+    (async () => {
+      if (isEditing) await fetchNote();
+      await restoreDraft();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, fetchNote, noteId]);
+
+  // Debounced autosave — writes on every pause in typing, not every
+  // keystroke, so a kill mid-sentence loses at most a moment's typing
+  // instead of everything since the screen opened.
+  const draftSaveTimerRef = useRef(null);
+  useEffect(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = setTimeout(() => {
+      if (content.trim().length > 0) {
+        AsyncStorage.setItem(draftKey(noteId), content).catch(() => {});
+      }
+    }, 800);
+    return () => clearTimeout(draftSaveTimerRef.current);
+  }, [content, noteId]);
+
+  const clearDraft = () => AsyncStorage.removeItem(draftKey(noteId)).catch(() => {});
+
+  const handleBack = () => {
+    // A deliberate back-out reads as "I'm done with this" — clearing here
+    // (rather than only on save) means an abandoned draft doesn't
+    // resurface and surprise the rep the next time they open a new note.
+    clearDraft();
+    navigation.goBack();
+  };
 
   const trimmedLength = content.trim().length;
   const canSave = trimmedLength >= MIN_CONTENT_LENGTH && !saving;
@@ -63,6 +112,7 @@ export default function NoteEditorScreen({ navigation, route }) {
       } else {
         await api.post('/notes', { content });
       }
+      clearDraft();
       navigation.goBack();
     } catch (err) {
       if (isNetworkError(err)) {
@@ -71,6 +121,7 @@ export default function NoteEditorScreen({ navigation, route }) {
         // depends on it; an edit already has the real noteId, so the queued
         // PUT can target it directly once connectivity returns.
         await enqueueAction(isEditing ? 'put' : 'post', isEditing ? `/notes/${noteId}` : '/notes', { content });
+        clearDraft(); // safely queued — the offline sync queue is now the durable copy, not this draft
         if (!isMountedRef.current) return;
         showAlert('Offline Mode', 'Note saved locally and will sync when online.');
         navigation.goBack();
@@ -99,12 +150,14 @@ export default function NoteEditorScreen({ navigation, route }) {
           setDeleting(true);
           try {
             await api.delete(`/notes/${noteId}`);
+            clearDraft();
             if (!isMountedRef.current) return;
             navigation.goBack();
           } catch (err) {
             if (!isMountedRef.current) return;
             if (isNetworkError(err)) {
               await enqueueAction('delete', `/notes/${noteId}`);
+              clearDraft();
               if (!isMountedRef.current) return;
               showAlert('Offline Mode', 'Delete saved locally and will sync when online.');
               navigation.goBack();
@@ -123,7 +176,7 @@ export default function NoteEditorScreen({ navigation, route }) {
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <AppHeader
         title={isEditing ? 'Edit note' : 'New note'}
-        onBack={() => navigation.goBack()}
+        onBack={handleBack}
         rightAction={
           isEditing ? (
             <Pressable
