@@ -4,9 +4,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import { initCrashReporter, captureException } from './src/services/crashReporter';
 
 // Before anything else runs — including the ErrorUtils handler just below —
-// so even a startup-time crash is reported, not just crashes that happen
-// once the app is fully up. No-ops safely if EXPO_PUBLIC_SENTRY_DSN isn't
-// configured (see crashReporter.js).
+// so even a startup-time crash is caught, not just crashes that happen once
+// the app is fully up. Local-only (see crashReporter.js) — no external
+// crash-reporting service is wired in.
 initCrashReporter();
 
 // The OS-level "font size" / "display size" accessibility setting differs
@@ -19,18 +19,16 @@ Text.defaultProps.allowFontScaling = false;
 TextInput.defaultProps = TextInput.defaultProps || {};
 TextInput.defaultProps.allowFontScaling = false;
 
-// Global JS exception handler — reports every uncaught error to Sentry
-// before falling through to React Native's default handling (which shows
-// the dev red-box in development, or crashes/restarts in production). This
-// used to also surface a raw native Alert with the stack trace as a
-// stopgap while the app's root cause of unexplained restarts (an OS-level
-// MIUI background kill, not a JS crash — see visitForegroundService.js/
-// miui.js) was still unidentified. That's since been root-caused and
-// mitigated, and crash reporting itself is now fully wired (this handler,
-// the ErrorBoundary, and every AppState/TaskManager callback all report to
-// captureException — see crashReporter.js), so the diagnostic Alert was
-// removed: it was surfacing raw stack traces to real production users on
-// every crash instead of just reporting silently to Sentry.
+// Global JS exception handler — logs every uncaught error locally (see
+// crashReporter.js — no external reporting service is wired in) before
+// falling through to React Native's default handling (which shows the dev
+// red-box in development, or crashes/restarts in production). This used to
+// also surface a raw native Alert with the stack trace as a stopgap while
+// the app's root cause of unexplained restarts (an OS-level MIUI background
+// kill, not a JS crash — see visitForegroundService.js/miui.js) was still
+// unidentified. That's since been root-caused and mitigated, so the
+// diagnostic Alert was removed: it was surfacing raw stack traces to real
+// production users on every crash instead of just logging quietly.
 const defaultGlobalHandler = global.ErrorUtils.getGlobalHandler();
 global.ErrorUtils.setGlobalHandler((error, isFatal) => {
   captureException(error, { area: 'global-handler', isFatal });
