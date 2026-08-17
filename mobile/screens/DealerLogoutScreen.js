@@ -8,6 +8,7 @@ import {
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
+import { getErrorMessage } from '../src/services/apiError';
 import { AppHeader, GPSStatusCard, PrimaryButton, TextField, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
@@ -128,7 +129,7 @@ export default function DealerLogoutScreen({ dealer, activeVisit, onLogout, navi
       }
     } catch (error) {
       console.error('Dealer logout error:', error);
-      showAlert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
+      showAlert('Error', getErrorMessage(error, 'Failed to log out. Please try again.'));
     } finally {
       setLoading(false);
     }

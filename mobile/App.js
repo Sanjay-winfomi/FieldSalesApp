@@ -128,6 +128,10 @@ export default function App() {
       : 'logged_in';
 
   const visitsCount = visits.length;
+  // Dealers still owed a visit today, not visits already completed — starts
+  // at however many dealers the manager assigned and counts down as each is
+  // checked in/out (status flips to 'completed') or cancelled.
+  const pendingVisitsCount = assignedDealers.filter((a) => a.status !== 'completed' && a.status !== 'cancelled').length;
   const distanceTravelled = attendance ? `${parseFloat(attendance.total_distance_km || 0).toFixed(1)} km` : '0.0 km';
 
   // Requests notification permission and sets up the Android notification
@@ -334,9 +338,15 @@ export default function App() {
       },
     });
 
-    if (activeVisit.dealer_latitude != null && activeVisit.dealer_longitude != null) {
+    // Tracked per-effect-run (not a ref shared across visits) so a fresh
+    // attempt for a new activeVisitId always starts unstarted.
+    let geofenceStarted = false;
+    const tryStartGeofence = () => {
+      if (geofenceStarted) return;
+      if (activeVisit.dealer_latitude == null || activeVisit.dealer_longitude == null) return;
       requestBackgroundLocationPermission().then((granted) => {
-        if (granted) {
+        if (granted && !geofenceStarted) {
+          geofenceStarted = true;
           startDealerGeofence(activeVisit, {
             latitude: activeVisit.dealer_latitude,
             longitude: activeVisit.dealer_longitude,
@@ -350,9 +360,22 @@ export default function App() {
           startVisitForegroundService(activeVisit.id);
         }
       });
-    }
+    };
+
+    tryStartGeofence();
+
+    // Without this, a visit that started with background-location
+    // permission denied (or revoked mid-visit) ran its ENTIRE duration with
+    // no OS geofence and no foreground service — this effect otherwise only
+    // reruns when the active visit itself changes, not when permission
+    // changes. Retrying on every foreground resume catches the rep granting
+    // "Always" via Settings partway through the same visit.
+    const permissionRetrySub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') tryStartGeofence();
+    });
 
     return () => {
+      permissionRetrySub.remove();
       stopVisitMonitoring();
       stopDealerGeofence();
       stopVisitForegroundService();
@@ -519,12 +542,18 @@ export default function App() {
   // both screens a fresh function reference each time, unsubscribing and
   // resubscribing their focus listener on every single state refresh for no
   // functional reason.
+  // Returns a Promise that resolves once the debounced fetch actually
+  // completes — existing callers that don't await it (fire-and-forget) are
+  // unaffected, but it lets a caller like TodaysVisitsScreen's pull-to-refresh
+  // spinner track real completion instead of guessing a fixed delay.
   const fetchAssignedDealers = useCallback(() => {
     if (fetchAssignedDealersTimerRef.current) clearTimeout(fetchAssignedDealersTimerRef.current);
-    fetchAssignedDealersTimerRef.current = setTimeout(() => {
-      fetchAssignedDealersTimerRef.current = null;
-      runFetchAssignedDealers();
-    }, 800);
+    return new Promise((resolve) => {
+      fetchAssignedDealersTimerRef.current = setTimeout(() => {
+        fetchAssignedDealersTimerRef.current = null;
+        runFetchAssignedDealers().finally(resolve);
+      }, 800);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -707,6 +736,7 @@ export default function App() {
     visits,
     dayStatus,
     visitsCount,
+    pendingVisitsCount,
     distanceTravelled,
     refreshing,
     locationPermissionDenied,
@@ -721,7 +751,7 @@ export default function App() {
     onSelectAssignment: handleSelectAssignment,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
-    employee, attendance, visits, dayStatus, visitsCount, distanceTravelled,
+    employee, attendance, visits, dayStatus, visitsCount, pendingVisitsCount, distanceTravelled,
     refreshing, locationPermissionDenied, locationPermissionCanAskAgain,
     backgroundLocationDenied, assignedDealers,
   ]);

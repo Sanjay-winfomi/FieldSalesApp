@@ -22,6 +22,7 @@ export { default as EmptyState } from './EmptyState';
 export { default as ErrorBoundary } from './ErrorBoundary';
 export { default as FadeSlideIn } from './FadeSlideIn';
 export { default as DealerPickerModal } from './DealerPickerModal';
+export { default as DatePickerSheet } from './DatePickerSheet';
 export { default as FollowupRequestModal } from './FollowupRequestModal';
 export { default as SyncQueueModal } from './SyncQueueModal';
 export { default as ThemedAlertHost } from './ThemedAlertHost';

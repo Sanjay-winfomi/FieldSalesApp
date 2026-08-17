@@ -96,9 +96,14 @@ router.post('/', requireRole('rep'), async (req, res) => {
     const dealer = dealerResult.rows[0];
 
     if (assignmentId != null) {
+      // Must also match dealer_id (same guard as navigation.routes.js's
+      // /compute) — without it, a rep could pass an assignment_id for a
+      // completely different dealer than dealer_id in this same request,
+      // storing a request whose linked assignment doesn't match what it's
+      // actually about.
       const assignmentResult = await pool.query(
-        'SELECT id FROM dealer_assignments WHERE id = $1 AND employee_id = $2',
-        [assignmentId, employeeId]
+        'SELECT id FROM dealer_assignments WHERE id = $1 AND employee_id = $2 AND dealer_id = $3',
+        [assignmentId, employeeId, dealerId]
       );
       if (assignmentResult.rows.length === 0) {
         return res.status(404).json({ error: 'Assignment not found' });
@@ -169,8 +174,17 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid request id' });
   }
 
+  // A dedicated client + transaction (rather than pool.query per statement)
+  // — without this, two followup requests for the same employee/date
+  // approved concurrently (two managers, or a double-click) could both read
+  // the same MAX(sequence_order) before either INSERT commits, producing two
+  // assignments with duplicate sequence_order and ambiguous visit ordering.
+  // The advisory lock is the same one PUT /api/assignments already takes for
+  // this employee/date, so the two routes properly serialize against each
+  // other too, not just against themselves.
+  const client = await pool.connect();
   try {
-    const existing = await pool.query('SELECT * FROM dealer_followup_requests WHERE id = $1', [id]);
+    const existing = await client.query('SELECT * FROM dealer_followup_requests WHERE id = $1', [id]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Request not found' });
     }
@@ -192,6 +206,15 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
       approvedDate = req.body.approved_date;
     }
 
+    await client.query('BEGIN');
+
+    // Transaction-scoped advisory lock keyed by employee_id + date — see
+    // assignments.routes.js's PUT handler for the identical pattern.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('dealer_assignments:' || $1 || ':' || $2::date))`,
+      [request.employee_id, approvedDate]
+    );
+
     // Claims the pending->approved transition atomically BEFORE creating any
     // assignment — `AND status = 'pending'` means only one of a concurrent
     // approve/reject race can ever win this UPDATE. Without this, two
@@ -201,7 +224,7 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
     // from the "approve" path still got created. Ordering the claim before
     // the assignment INSERT means the loser returns 409 having created
     // nothing, rather than leaving a stray assignment behind either way.
-    const updated = await pool.query(
+    const updated = await client.query(
       `UPDATE dealer_followup_requests
        SET status = 'approved', approved_date = $1, resolved_by = $2, resolved_at = NOW()
        WHERE id = $3 AND status = 'pending'
@@ -209,34 +232,45 @@ router.patch('/:id/approve', requireRole('manager'), async (req, res) => {
       [approvedDate, req.employee.id, id]
     );
     if (updated.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: 'request_already_resolved' });
     }
 
-    const nextSeqResult = await pool.query(
+    const nextSeqResult = await client.query(
       `SELECT COALESCE(MAX(sequence_order), 0) + 1 AS next_seq
        FROM dealer_assignments WHERE employee_id = $1 AND assignment_date = $2::date`,
       [request.employee_id, approvedDate]
     );
     const nextSeq = nextSeqResult.rows[0].next_seq;
 
-    // ON CONFLICT DO UPDATE (a no-op field touch) rather than DO NOTHING —
-    // guarantees RETURNING always gives back a row, including the case
-    // where a manager separately assigned this same dealer+date already;
-    // the request is still approved either way, since the assignment the
-    // rep asked for now exists (existing sequence_order/status untouched).
-    const assignmentResult = await pool.query(
+    // ON CONFLICT DO UPDATE rather than DO NOTHING — guarantees RETURNING
+    // always gives back a row, including when a manager separately assigned
+    // this same dealer+date already. If that existing row was 'cancelled'
+    // (e.g. the manager pre-cancelled it before this request was approved),
+    // reactivate it to 'pending' with a fresh sequence_order — otherwise the
+    // request reads as "approved" while the rep's assignment list still
+    // shows it cancelled. Any other existing status (pending/navigating/
+    // arrived/completed) is left untouched, same as before.
+    const assignmentResult = await client.query(
       `INSERT INTO dealer_assignments (employee_id, dealer_id, assignment_date, sequence_order, assigned_by)
        VALUES ($1, $2, $3::date, $4, $5)
-       ON CONFLICT (employee_id, dealer_id, assignment_date) DO UPDATE SET updated_at = NOW()
+       ON CONFLICT (employee_id, dealer_id, assignment_date) DO UPDATE SET
+         status = CASE WHEN dealer_assignments.status = 'cancelled' THEN 'pending' ELSE dealer_assignments.status END,
+         sequence_order = CASE WHEN dealer_assignments.status = 'cancelled' THEN EXCLUDED.sequence_order ELSE dealer_assignments.sequence_order END,
+         updated_at = NOW()
        RETURNING id`,
       [request.employee_id, request.dealer_id, approvedDate, nextSeq, req.employee.id]
     );
     const assignmentId = assignmentResult.rows[0].id;
 
+    await client.query('COMMIT');
     return res.json({ request: updated.rows[0], assignment_id: assignmentId });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     logger.error('PATCH /api/followup-requests/:id/approve error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 

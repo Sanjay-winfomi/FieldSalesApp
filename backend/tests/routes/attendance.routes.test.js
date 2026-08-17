@@ -1,8 +1,10 @@
-jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
 jest.mock('../../src/services/googleRoutesService', () => ({ computeRoute: jest.fn() }));
+jest.mock('../../src/utils/managerNotifications', () => ({ createManagerNotification: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
 const { computeRoute } = require('../../src/services/googleRoutesService');
+const { createManagerNotification } = require('../../src/utils/managerNotifications');
 const { makeApp } = require('../helpers/testApp');
 
 const attendanceRouter = require('../../src/routes/attendance.routes');
@@ -13,7 +15,15 @@ beforeEach(() => {
   // backs it up on failure. Individual tests override this to exercise the
   // failure path.
   computeRoute.mockResolvedValue({ distanceMeters: 1000 });
+  createManagerNotification.mockResolvedValue();
 });
+
+// POST /api/x/logout runs inside a transaction via pool.connect(), not
+// pool.query() directly — this stub client's own `query` mock is what the
+// route's BEGIN/SELECT.../UPDATE/COMMIT/ROLLBACK calls hit.
+function mockClient() {
+  return { query: jest.fn(), release: jest.fn() };
+}
 
 describe('POST /api/x/login', () => {
   afterEach(() => jest.resetAllMocks());
@@ -93,16 +103,27 @@ describe('POST /api/x/logout', () => {
   });
 
   test('404 when the attendance record does not belong to this employee', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] });
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // attendance (FOR UPDATE) — not found
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('409 with the authoritative record when already logged out', async () => {
-    pool.query.mockResolvedValueOnce({
-      rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3 }],
-    });
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({
+        rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3 }],
+      }) // attendance (FOR UPDATE) — already logged out
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(409);
@@ -110,42 +131,60 @@ describe('POST /api/x/logout', () => {
   });
 
   test('200 logs out successfully with a visit summary', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
       .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either — final leg falls back to login point
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] })
-      .mockResolvedValueOnce({ rows: [{ visits_count: '4' }] });
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] }) // UPDATE attendance
+      .mockResolvedValueOnce({ rows: [{ visits_count: '4' }] }) // visits count
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(200);
     expect(res.body.summary.visits_count).toBe(4);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('502 with a retry message when the Routes API fails for the final leg, instead of falling back to haversine', async () => {
     computeRoute.mockRejectedValueOnce(new Error('upstream failed'));
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
-      .mockResolvedValueOnce({ rows: [] }); // no closed dealer visits either
+      .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('route_computation_failed');
     expect(res.body.message).toBe('Request timed out — Retry');
-    // The day was never actually logged out — no UPDATE attendance call.
-    expect(pool.query.mock.calls.some(([sql]) => /UPDATE attendance/.test(sql))).toBe(false);
+    // The day was never actually logged out — no UPDATE attendance / COMMIT call, and the
+    // transaction was rolled back and its client released instead of leaking.
+    expect(client.query.mock.calls.some(([sql]) => /UPDATE attendance/.test(sql))).toBe(false);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('409 when a concurrent logout request wins the race to close the day first', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
       .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either
       // The UPDATE ... WHERE logout_time IS NULL matches zero rows — a
       // concurrent request already completed the logout in between.
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: 5, logout_time: '2026-07-27T13:00:01Z' }] }); // authoritative re-fetch
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
+    // The lost-race authoritative re-fetch runs on the plain pool (not the
+    // transaction client), since the transaction has already rolled back by then.
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, logout_time: '2026-07-27T13:00:01Z' }] });
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(409);
@@ -153,8 +192,10 @@ describe('POST /api/x/logout', () => {
   });
 
   test('auto-closes a still-open dealer visit when the day ends', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] })
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] }) // attendance (FOR UPDATE)
       .mockResolvedValueOnce({
         rows: [{
           id: 90, dealer_id: 7, login_time: '2026-07-27T10:00:00Z', dealer_name: 'Dealer Z',
@@ -162,21 +203,30 @@ describe('POST /api/x/logout', () => {
         }],
       }) // open dealer visit found
       .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // UPDATE client_visits (auto-close) — this request won the race
-      .mockResolvedValueOnce({ rows: [] }) // createManagerNotification insert
       .mockResolvedValueOnce({ rows: [{ logout_lat: 11, logout_lng: 77 }] }) // final leg origin = the just-auto-closed visit's logout point
-      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] })
-      .mockResolvedValueOnce({ rows: [{ visits_count: '1' }] });
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480 }] }) // UPDATE attendance
+      .mockResolvedValueOnce({ rows: [{ visits_count: '1' }] }) // visits count
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(200);
-    // The UPDATE ...client_visits call is the 3rd pool.query call.
-    expect(pool.query.mock.calls[2][0]).toContain('UPDATE client_visits');
-    expect(pool.query.mock.calls[2][0]).toContain('AND logout_time IS NULL');
-    expect(pool.query.mock.calls[2][1]).toEqual([11, 77, expect.any(Number), false, expect.any(String), 90]);
+    // The UPDATE ...client_visits call is the 4th client.query call (after BEGIN, attendance SELECT, open-visit SELECT).
+    expect(client.query.mock.calls[3][0]).toContain('UPDATE client_visits');
+    expect(client.query.mock.calls[3][0]).toContain('AND logout_time IS NULL');
+    expect(client.query.mock.calls[3][1]).toEqual([11, 77, expect.any(Number), false, expect.any(String), 90]);
+    // The auto-close notification is only sent once the transaction has actually committed.
+    expect(createManagerNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'visit_auto_closed_on_day_logout', dealerId: 7, visitId: 90 })
+    );
   });
 
   test('does not overwrite or notify when a manual dealer logout wins the race to close the visit first', async () => {
-    pool.query.mockImplementation((sql) => {
+    const client = mockClient();
+    client.query.mockImplementation((sql) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return Promise.resolve({ rows: [] });
+      }
       if (/SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km/.test(sql)) {
         return Promise.resolve({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3 }] });
       }
@@ -198,18 +248,24 @@ describe('POST /api/x/logout', () => {
       if (/COUNT\(\*\) AS visits_count/.test(sql)) {
         return Promise.resolve({ rows: [{ visits_count: '1' }] });
       }
-      // notifyUnvisitedAssignments's own queries, the final-leg origin
-      // lookup, and anything else — an empty result is fine for this test's
-      // purposes.
+      // The final-leg origin lookup and anything else — an empty result is
+      // fine for this test's purposes.
       return Promise.resolve({ rows: [] });
     });
+    pool.connect.mockResolvedValueOnce(client);
+    // notifyUnvisitedAssignments's own queries run against the plain pool,
+    // fire-and-forget — an empty result is fine for this test's purposes.
+    pool.query.mockResolvedValue({ rows: [] });
 
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77 });
     expect(res.status).toBe(200);
 
-    const notificationInsertCalls = pool.query.mock.calls.filter(([sql]) => /INSERT INTO manager_notifications/.test(sql));
-    expect(notificationInsertCalls.every(([, params]) => params[0] !== 'visit_auto_closed_on_day_logout')).toBe(true);
+    // The UPDATE lost the race (rowCount 0), so autoClosedVisit stays null
+    // and the auto-close notification must never fire.
+    expect(createManagerNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'visit_auto_closed_on_day_logout' })
+    );
   });
 });
 

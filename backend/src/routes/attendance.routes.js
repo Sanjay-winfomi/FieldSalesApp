@@ -37,7 +37,10 @@ function parseCoord(value, min, max) {
 // distance_from_previous_km/total_distance_km chain, so it's worth
 // rejecting outright rather than silently accepting a wildly imprecise
 // login/logout point.
-const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS || '30');
+// A non-numeric env value would otherwise silently disable this gate
+// entirely (any accuracyMeters > NaN is always false) with no warning.
+const parsedGpsThreshold = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS, 10);
+const GPS_ACCURACY_THRESHOLD_M = Number.isFinite(parsedGpsThreshold) ? parsedGpsThreshold : 30;
 function parseAccuracy(value) {
   if (value === undefined || value === null) return undefined;
   const n = typeof value === 'number' ? value : parseFloat(value);
@@ -136,28 +139,50 @@ router.post('/logout', async (req, res) => {
 
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
+  let client;
+  let autoClosedVisit = null; // set only if the auto-close UPDATE actually won its race — notified after COMMIT
+  let responseBody;
+  let durationMins;
+
   try {
     const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'attendance/logout');
     if (cached) {
       return res.status(cached.response_status).json(cached.response_body);
     }
 
-    const existing = await pool.query(
+    // A dedicated client + transaction — without this, the open-visit
+    // auto-close UPDATE below could commit on its own and then a Google Routes
+    // failure a few statements later would return a 502 for the whole request
+    // while leaving that auto-close permanently in place: the visit shows
+    // closed (with a manager notification already sent) but the day itself
+    // never ended (logout_time still NULL). Wrapping both writes in one
+    // transaction means a route-computation failure rolls back the auto-close
+    // too, so a retry (safe via the idempotency key) sees the visit still open
+    // and re-runs the whole sequence atomically instead of resuming from a
+    // half-applied state.
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const existing = await client.query(
       `SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km
        FROM attendance
-       WHERE id = $1 AND employee_id = $2`,
+       WHERE id = $1 AND employee_id = $2
+       FOR UPDATE`,
       [attendance_id, employeeId]
     );
 
     if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Attendance record not found' });
     }
 
     const att = existing.rows[0];
     if (!att.login_time) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No login time recorded' });
     }
     if (att.logout_time) {
+      await client.query('ROLLBACK');
       // Reconciliation, not a dead end: a retried/offline-queued logout
       // racing an already-succeeded one shouldn't be silently dropped by the
       // client — return the authoritative record so it can adopt server truth.
@@ -169,7 +194,7 @@ router.post('/logout', async (req, res) => {
 
     const loginTime  = new Date(att.login_time);
     const logoutTime = new Date();
-    const durationMins = Math.round((logoutTime - loginTime) / 60000);
+    durationMins = Math.max(0, Math.round((logoutTime - loginTime) / 60000));
 
     // A dealer visit left open when the day ends would otherwise be
     // orphaned forever — no duration, no closure, and any later
@@ -177,7 +202,7 @@ router.post('/logout', async (req, res) => {
     // still active. Auto-close it using this same logout's GPS fix, and
     // flag it for the manager since this is an automatic closure, not the
     // rep's own dealer-logout action.
-    const openVisitResult = await pool.query(
+    const openVisitResult = await client.query(
       `SELECT cv.id, cv.dealer_id, cv.login_time, d.name AS dealer_name,
               d.latitude AS dealer_lat, d.longitude AS dealer_lng, d.radius_meters AS dealer_radius_meters
        FROM client_visits cv
@@ -201,8 +226,9 @@ router.post('/logout', async (req, res) => {
       // but BEFORE this UPDATE runs, and this would then silently overwrite
       // the rep's real GPS/duration/justification with the synthetic
       // auto-close note. rowCount confirms whether this UPDATE actually won
-      // that race — the notification only fires if it did.
-      const autoCloseResult = await pool.query(
+      // that race — the notification only fires if it did (and only after
+      // COMMIT, below).
+      const autoCloseResult = await client.query(
         `UPDATE client_visits
          SET logout_time = NOW(), logout_lat = $1, logout_lng = $2,
              visit_duration_minutes = $3, out_of_radius = $4,
@@ -212,15 +238,7 @@ router.post('/logout', async (req, res) => {
          'Auto-closed: day ended while still logged in at this dealer', openVisit.id]
       );
       if (autoCloseResult.rowCount > 0) {
-        await createManagerNotification({
-          type: 'visit_auto_closed_on_day_logout',
-          title: 'Dealer visit auto-closed at day logout',
-          body: `${req.employee.username} ended their day while still logged in at ${openVisit.dealer_name} — the visit was automatically closed.`,
-          severity: 'warning',
-          employeeId,
-          dealerId: openVisit.dealer_id,
-          visitId: openVisit.id,
-        });
+        autoClosedVisit = openVisit;
       }
     }
 
@@ -229,7 +247,7 @@ router.post('/logout', async (req, res) => {
     // dealer was ever visited today, -> this day-logout point. Without
     // this, total_distance_km only ever covered dealer-to-dealer legs and
     // silently dropped however far the rep travelled after their last stop.
-    const lastVisitResult = await pool.query(
+    const lastVisitResult = await client.query(
       `SELECT logout_lat, logout_lng
        FROM client_visits
        WHERE attendance_id = $1 AND logout_time IS NOT NULL
@@ -258,10 +276,12 @@ router.post('/logout', async (req, res) => {
         route = await computeRoute({ originLat: finalLegOriginLat, originLng: finalLegOriginLng, destLat: lat, destLng: lng });
       } catch (routeErr) {
         logger.warn('Routes API failed for final leg', { error: routeErr.message });
+        await client.query('ROLLBACK');
         return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
       }
       if (route.distanceMeters == null) {
         logger.warn('Routes API returned no distance for final leg');
+        await client.query('ROLLBACK');
         return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
       }
       finalLegDistanceKm = route.distanceMeters / 1000;
@@ -276,7 +296,7 @@ router.post('/logout', async (req, res) => {
     // reach this UPDATE, the second one silently overwriting the first
     // logout's GPS/duration/distance and firing a second
     // notifyUnvisitedAssignments below for what is really one logout.
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE attendance
        SET logout_time = NOW(),
            logout_lat  = $1,
@@ -296,6 +316,7 @@ router.post('/logout', async (req, res) => {
       // logout. Same reconciliation response as the earlier read-only
       // check (lines above), so an offline-queued retry adopts server
       // truth instead of double-processing.
+      await client.query('ROLLBACK');
       const authoritative = await pool.query(
         `SELECT id, logout_time FROM attendance WHERE id = $1`,
         [attendance_id]
@@ -307,17 +328,14 @@ router.post('/logout', async (req, res) => {
     }
 
     // Fetch visit summary for the day-end summary screen
-    const visitsResult = await pool.query(
+    const visitsResult = await client.query(
       `SELECT COUNT(*) AS visits_count FROM client_visits WHERE attendance_id = $1`,
       [attendance_id]
     );
 
-    logDayLogout(req.employee.username, durationMins, result.rows[0].total_distance_km);
-    // Non-blocking: if the rep is ending the day with any assigned dealer
-    // still not visited, let the manager know. Never affects the logout
-    // response either way.
-    notifyUnvisitedAssignments({ employeeId }).catch(() => {});
-    const body = {
+    await client.query('COMMIT');
+
+    responseBody = {
       attendance: result.rows[0],
       summary: {
         visits_count:       parseInt(visitsResult.rows[0].visits_count),
@@ -325,12 +343,35 @@ router.post('/logout', async (req, res) => {
         total_duration_min: durationMins,
       },
     };
-    await saveIdempotentResponse(idempotencyKey, employeeId, 'attendance/logout', 200, body);
-    return res.json(body);
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     logger.error('Attendance logout error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (client) client.release();
   }
+
+  // Side effects that don't need to be part of the transaction above — only
+  // run once the logout (and any auto-close) has actually committed.
+  if (autoClosedVisit) {
+    await createManagerNotification({
+      type: 'visit_auto_closed_on_day_logout',
+      title: 'Dealer visit auto-closed at day logout',
+      body: `${req.employee.username} ended their day while still logged in at ${autoClosedVisit.dealer_name} — the visit was automatically closed.`,
+      severity: 'warning',
+      employeeId,
+      dealerId: autoClosedVisit.dealer_id,
+      visitId: autoClosedVisit.id,
+    });
+  }
+
+  logDayLogout(req.employee.username, durationMins, responseBody.attendance.total_distance_km);
+  // Non-blocking: if the rep is ending the day with any assigned dealer
+  // still not visited, let the manager know. Never affects the logout
+  // response either way.
+  notifyUnvisitedAssignments({ employeeId }).catch(() => {});
+  await saveIdempotentResponse(idempotencyKey, employeeId, 'attendance/logout', 200, responseBody);
+  return res.json(responseBody);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

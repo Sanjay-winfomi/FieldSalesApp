@@ -5,7 +5,7 @@ import { Navigation2, MapPin, Clock, AlertTriangle, X } from 'lucide-react-nativ
 import { getApproximateLocation, haversineMeters } from '../src/services/location';
 import { decodePolyline } from '../src/utils/polyline';
 import { api } from '../src/services/api';
-import { isNetworkError } from '../src/services/syncManager';
+import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { AppHeader, PrimaryButton, LoadingCard, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, radius } from '../src/theme';
 
@@ -204,7 +204,16 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
     try {
       await api.patch(`/navigation/${navigationId}/status`, { status: nextStatus });
     } catch (err) {
-      console.error('Failed to update navigation status:', err.message);
+      // Unlike every other mutating action in the login/logout flows, this
+      // had no offline fallback at all — an 'arrived' patch sent the moment
+      // GPS detects arrival while offline (a common case: reps often lose
+      // signal right as they reach a dealer) would otherwise vanish
+      // silently, so the server/manager side never learns the rep arrived.
+      if (isNetworkError(err)) {
+        await enqueueAction('patch', `/navigation/${navigationId}/status`, { status: nextStatus });
+      } else {
+        console.error('Failed to update navigation status:', err.message);
+      }
     }
   };
 

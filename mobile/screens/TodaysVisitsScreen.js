@@ -17,6 +17,7 @@ import { colors, spacing } from '../src/theme';
 export default function TodaysVisitsScreen({ navigation }) {
   const { assignedDealers, fetchAssignedDealers, onSelectAssignment } = useAppState();
   const [followupAssignment, setFollowupAssignment] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   // One-shot GPS fix used only to show a rough "how far is each dealer"
   // estimate before the rep taps Navigate (which computes the real driving
   // distance via the Google Routes API). Best-effort: if it fails/denies,
@@ -68,10 +69,18 @@ export default function TodaysVisitsScreen({ navigation }) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchAssignedDealers();
-      getApproximateLocation().then(setCoords);
+      getApproximateLocation().then((loc) => {
+        if (isMountedRef.current) setCoords(loc);
+      });
     });
     return unsubscribe;
   }, [navigation, fetchAssignedDealers]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchAssignedDealers();
+    if (isMountedRef.current) setRefreshing(false);
+  }, [fetchAssignedDealers]);
 
   // dealer_id -> straight-line distance in km from the rep's last known
   // position — only used as a fallback for a dealer whose real (routed)
@@ -93,7 +102,7 @@ export default function TodaysVisitsScreen({ navigation }) {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={fetchAssignedDealers} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
       >
         {assignedDealers.length === 0 ? (

@@ -25,8 +25,12 @@ const { businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
 
-const GPS_ACCURACY_THRESHOLD_M = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS || '30');
-const MATCH_TOLERANCE_M         = parseInt(process.env.LOGIN_MATCH_TOLERANCE_METERS || '20');
+// A non-numeric env value would otherwise silently disable this gate
+// entirely (any accuracyMeters > NaN is always false) with no warning.
+const parsedGpsThreshold = parseInt(process.env.GPS_ACCURACY_THRESHOLD_METERS, 10);
+const GPS_ACCURACY_THRESHOLD_M = Number.isFinite(parsedGpsThreshold) ? parsedGpsThreshold : 30;
+const parsedMatchTolerance = parseInt(process.env.LOGIN_MATCH_TOLERANCE_METERS, 10);
+const MATCH_TOLERANCE_M = Number.isFinite(parsedMatchTolerance) ? parsedMatchTolerance : 20;
 const MIN_REASON_LENGTH         = 20;
 
 // Logout-specific reason bounds — required whenever the visit's LOGIN
@@ -108,7 +112,6 @@ router.post('/login', async (req, res) => {
     // second open visit — this route has no other guard against that.
     const cached = await getIdempotentResponse(idempotencyKey, employeeId, 'visits/login');
     if (cached) {
-      client.release();
       return res.status(cached.response_status).json(cached.response_body);
     }
 
@@ -125,7 +128,6 @@ router.post('/login', async (req, res) => {
     );
     if (attResult.rows.length === 0) {
       await client.query('ROLLBACK');
-      client.release();
       return res.status(404).json({ error: 'Attendance record not found, or the day has already ended' });
     }
     const att = attResult.rows[0];
@@ -145,7 +147,6 @@ router.post('/login', async (req, res) => {
     );
     if (openVisitResult.rows.length > 0) {
       await client.query('ROLLBACK');
-      client.release();
       const open = openVisitResult.rows[0];
       return res.status(409).json({
         error: 'visit_already_open',
@@ -160,7 +161,6 @@ router.post('/login', async (req, res) => {
     );
     if (dealerResult.rows.length === 0) {
       await client.query('ROLLBACK');
-      client.release();
       return res.status(404).json({ error: 'Dealer not found' });
     }
     dealer = dealerResult.rows[0];
@@ -179,7 +179,6 @@ router.post('/login', async (req, res) => {
     trimmedReason = typeof reason === 'string' ? reason.trim() : '';
     if (!insideRadius && trimmedReason.length < MIN_REASON_LENGTH) {
       await client.query('ROLLBACK');
-      client.release();
       return res.status(422).json({
         error: 'reason_required',
         distanceMeters: distanceM,
@@ -220,13 +219,11 @@ router.post('/login', async (req, res) => {
     } catch (routeErr) {
       logger.warn('Routes API failed for dealer-to-dealer leg', { error: routeErr.message });
       await client.query('ROLLBACK');
-      client.release();
       return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
     }
     if (route.distanceMeters == null) {
       logger.warn('Routes API returned no distance for dealer-to-dealer leg');
       await client.query('ROLLBACK');
-      client.release();
       return res.status(502).json({ error: 'route_computation_failed', message: 'Request timed out — Retry' });
     }
     distFromPrev = route.distanceMeters / 1000;
@@ -408,7 +405,7 @@ router.post('/logout', async (req, res) => {
 
     const loginTime  = new Date(visit.login_time);
     const logoutTime = new Date();
-    const durationMins = Math.round((logoutTime - loginTime) / 60000);
+    const durationMins = Math.max(0, Math.round((logoutTime - loginTime) / 60000));
     const outOfRadius = !insideRadius;
 
     const updatedVisit = await pool.query(
@@ -865,6 +862,9 @@ router.patch('/exceptions/:id', requireRole('manager'), async (req, res) => {
   const id = parseInt(req.params.id);
   if (!Number.isInteger(id)) {
     return res.status(400).json({ error: 'Invalid exception id' });
+  }
+  if (req.body.reviewed !== undefined && typeof req.body.reviewed !== 'boolean') {
+    return res.status(400).json({ error: 'reviewed must be a boolean' });
   }
   const reviewed = req.body.reviewed !== false;
 

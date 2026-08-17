@@ -62,7 +62,13 @@ export default function WorkingHoursScreen({ navigation }) {
   };
 
   const sections = useMemo(() => groupActivityByDay(attendanceDays, visits), [attendanceDays, visits]);
-  const totalMinutes = useMemo(() => sections.reduce((sum, s) => sum + s.durationMinutes, 0), [sections]);
+  // Today's total only, not the sum of the whole history list below — the
+  // 5am business-day boundary baked into groupActivityByDay's "Today"
+  // bucket is what makes this reset each day rather than keep climbing.
+  const totalMinutes = useMemo(() => {
+    const today = sections.find((s) => s.heading === 'Today');
+    return today ? today.durationMinutes : 0;
+  }, [sections]);
 
   return (
     <View style={styles.screen}>
@@ -84,7 +90,7 @@ export default function WorkingHoursScreen({ navigation }) {
             <Card style={styles.totalCard}>
               <Timer size={22} color={colors.successDark} />
               <Text style={styles.totalValue}>{formatDuration(totalMinutes)}</Text>
-              <Text style={styles.totalLabel}>Total working hours</Text>
+              <Text style={styles.totalLabel}>Today's working hours</Text>
             </Card>
           </FadeSlideIn>
         )}

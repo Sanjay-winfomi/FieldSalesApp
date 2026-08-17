@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { captureException } from './crashReporter';
 
 /**
  * geofenceNotifications.js — pushes a local device notification for dealer
@@ -16,10 +17,20 @@ export async function configureGeofenceNotificationChannel() {
 }
 
 export async function sendGeofenceNotification({ title, body }) {
-  await Notifications.scheduleNotificationAsync({
-    content: { title, body },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(), channelId: 'geofence-alerts' },
-  });
+  // Callers (App.js, geofenceTask.js, assignedDealerGeofence.js) don't
+  // await/catch this — without a try/catch here, a scheduling failure (e.g.
+  // notification permission revoked, missing channel on some OEM skin) would
+  // silently drop a safety-relevant "leaving dealer premises"/"time to log
+  // out" alert with zero log output and zero telemetry.
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(), channelId: 'geofence-alerts' },
+    });
+  } catch (error) {
+    console.error('Failed to schedule geofence notification:', error);
+    captureException(error, { area: 'geofence-notification', title });
+  }
 }
 
 export async function configureArrivalNotificationChannel() {
@@ -49,12 +60,19 @@ export async function configureArrivalNotificationChannel() {
  * @param {number} [assignment.radiusMeters]
  */
 export async function sendArrivalNotification(assignment) {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: `You've arrived at ${assignment.dealerName}`,
-      body: 'Tap to log in',
-      data: { type: 'assignment_arrival', ...assignment },
-    },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(), channelId: 'dealer-arrivals' },
-  });
+  // Same reasoning as sendGeofenceNotification above — callers don't
+  // await/catch this either.
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `You've arrived at ${assignment.dealerName}`,
+        body: 'Tap to log in',
+        data: { type: 'assignment_arrival', ...assignment },
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(), channelId: 'dealer-arrivals' },
+    });
+  } catch (error) {
+    console.error('Failed to schedule arrival notification:', error);
+    captureException(error, { area: 'arrival-notification', dealerId: assignment.dealerId });
+  }
 }

@@ -124,7 +124,12 @@ export function groupActivityByDay(attendanceDays, visits) {
       const distanceKm = section.attendance
         ? parseFloat(section.attendance.total_distance_km || 0)
         : section.visits.reduce((sum, v) => sum + parseFloat(v.distance_from_previous_km || 0), 0);
-      const durationMinutes = section.attendance?.total_duration_minutes || 0;
+      // Same fallback as distanceKm above: a visit record without a matching
+      // attendance row would otherwise read as 0 minutes despite genuinely
+      // having dealer time logged against it.
+      const durationMinutes = section.attendance
+        ? (section.attendance.total_duration_minutes || 0)
+        : section.visits.reduce((sum, v) => sum + (v.visit_duration_minutes || 0), 0);
       // The day's last dealer (or day-login/home point, if none) -> day
       // logout leg — computed server-side via Google Routes API at day
       // logout (see attendance.routes.js). null for a day still in

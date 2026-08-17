@@ -3,6 +3,21 @@ import NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 
 const QUEUE_KEY = '@offline_action_queue';
+// Resolved localId -> real server id, persisted across separate flushQueue()
+// calls (not just kept in a local variable for one call) — without this, a
+// dependent action deferred past the pass where its parent actually resolved
+// (parent synced in call N, dependent isn't reconsidered until call N+1) has
+// no way to learn the parent's real id: a fresh in-memory map starts empty
+// every call, the parent is gone from the queue (it already succeeded), and
+// the dependent isn't in failedLocalIds either — so it silently re-queues
+// itself as "blocked on dependency" forever, every periodic sweep, with no
+// escalation to MAX_RETRIES and no way for the user to ever notice.
+const ID_MAP_KEY = '@offline_id_map';
+// A localId's entry only needs to survive long enough for whatever
+// dependent actions were queued around the same time to catch up — 24h is a
+// generous multiple of the offline queue's own bounded retry window
+// (MAX_RETRIES at MAX_RETRY_DELAY_MS caps out well under that).
+const ID_MAP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_RETRIES = 8;
 // Backoff for genuine-client-error retries (not network-error requeues, which
 // retry on the very next connectivity edge instead) — without this, a
@@ -76,6 +91,23 @@ const getQueue = async () => {
   return queueJson ? JSON.parse(queueJson) : [];
 };
 
+// Loads the persisted localId -> { id, resolvedAt } map, pruning entries
+// older than ID_MAP_RETENTION_MS so this doesn't grow unbounded over the
+// life of the install.
+const getIdMap = async () => {
+  const json = await AsyncStorage.getItem(ID_MAP_KEY);
+  if (!json) return {};
+  const parsed = JSON.parse(json);
+  const now = Date.now();
+  const pruned = {};
+  for (const [localId, entry] of Object.entries(parsed)) {
+    if (entry && now - entry.resolvedAt < ID_MAP_RETENTION_MS) pruned[localId] = entry;
+  }
+  return pruned;
+};
+
+const saveIdMap = (map) => AsyncStorage.setItem(ID_MAP_KEY, JSON.stringify(map));
+
 /**
  * Number of actions still waiting to sync — for a UI indicator.
  */
@@ -109,6 +141,7 @@ export const removeQueuedAction = async (actionId) => {
  */
 export const clearQueue = async () => {
   await AsyncStorage.removeItem(QUEUE_KEY);
+  await AsyncStorage.removeItem(ID_MAP_KEY);
 };
 
 // Fields that may hold a temp 'offline-...' id needing rewrite before send.
@@ -162,7 +195,11 @@ export const flushQueue = async () => {
 
       console.log(`Flushing ${queue.length} offline actions...`);
 
-      const idMap = {};       // localId -> real server id
+      // localId -> { id, resolvedAt }, seeded from previous flush passes (see
+      // ID_MAP_KEY above) so a dependent deferred past the pass its parent
+      // actually resolved in can still find the real id.
+      const idMap = await getIdMap();
+      const persistIdMap = () => saveIdMap(idMap);
       // localIds whose owning action was discarded this pass after
       // exhausting MAX_RETRIES — a dependent action blocked on one of these
       // can NEVER resolve (the parent it needs is never coming), so it must
@@ -193,7 +230,7 @@ export const flushQueue = async () => {
           const val = data[field];
           if (typeof val === 'string' && val.startsWith('offline-')) {
             if (idMap[val]) {
-              data[field] = idMap[val];
+              data[field] = idMap[val].id;
             } else if (failedLocalIds.has(val)) {
               blockedOnFailedDependency = true;
             } else {
@@ -206,7 +243,7 @@ export const flushQueue = async () => {
         if (urlIdMatch) {
           const tempId = urlIdMatch[0];
           if (idMap[tempId]) {
-            url = url.replace(tempId, idMap[tempId]);
+            url = url.replace(tempId, idMap[tempId].id);
           } else if (failedLocalIds.has(tempId)) {
             blockedOnFailedDependency = true;
           } else {
@@ -252,16 +289,17 @@ export const flushQueue = async () => {
             headers: action.idempotencyKey ? { 'Idempotency-Key': action.idempotencyKey } : undefined,
           });
 
-          if (action.localId && action.resolves === 'attendance') {
-            idMap[action.localId] = response.data.attendance?.id;
-          } else if (action.localId && action.resolves === 'visit') {
-            idMap[action.localId] = response.data.visit?.id;
-          } else if (action.localId && action.resolves === 'reminder') {
-            idMap[action.localId] = response.data.reminder?.id;
+          if (action.localId && action.resolves === 'attendance' && response.data.attendance?.id) {
+            idMap[action.localId] = { id: response.data.attendance.id, resolvedAt: Date.now() };
+          } else if (action.localId && action.resolves === 'visit' && response.data.visit?.id) {
+            idMap[action.localId] = { id: response.data.visit.id, resolvedAt: Date.now() };
+          } else if (action.localId && action.resolves === 'reminder' && response.data.reminder?.id) {
+            idMap[action.localId] = { id: response.data.reminder.id, resolvedAt: Date.now() };
           }
 
           console.log(`Synced queued action: ${action.method} ${action.url}`);
           await persistRemaining();
+          await persistIdMap();
         } catch (error) {
           // Only a genuine network failure (offline, DNS, timeout) should retry
           // unbounded — an auth failure (e.g. missing/expired refresh token)
@@ -286,7 +324,7 @@ export const flushQueue = async () => {
             // match the server truth instead of quietly going out of sync.
             const body = error.response.data || {};
             const existingId = body.attendance_id || body.attendance?.id || body.visit?.id;
-            if (action.localId && existingId) idMap[action.localId] = existingId;
+            if (action.localId && existingId) idMap[action.localId] = { id: existingId, resolvedAt: Date.now() };
 
             console.warn(`Reconciling conflicting queued action ${action.id} against server state:`, body.error);
             if (conflictHandler) {
@@ -321,6 +359,7 @@ export const flushQueue = async () => {
             }
           }
           await persistRemaining();
+          await persistIdMap();
         }
       }
     } catch (error) {

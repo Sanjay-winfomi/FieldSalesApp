@@ -5,6 +5,7 @@ import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS 
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
+import { getErrorMessage } from '../src/services/apiError';
 import { AppHeader, LocationCard, PrimaryButton, Card, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
@@ -88,7 +89,7 @@ export default function DayLogoutScreen({ attendance, onLogout, navigation }) {
       }
     } catch (error) {
       console.error('Logout error:', error);
-      showAlert('Error', error.response?.data?.error || 'Failed to log out. Please try again.');
+      showAlert('Error', getErrorMessage(error, 'Failed to log out. Please try again.'));
     } finally {
       setLoading(false);
     }

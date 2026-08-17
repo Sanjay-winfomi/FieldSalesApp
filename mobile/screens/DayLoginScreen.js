@@ -4,6 +4,7 @@ import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS 
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
+import { getErrorMessage } from '../src/services/apiError';
 import { AppHeader, GPSStatusCard, PrimaryButton, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
 
@@ -87,7 +88,7 @@ export default function DayLoginScreen({ onLogin, onAlreadyLoggedIn, navigation 
 
     } catch (error) {
       console.error('Login error:', error);
-      showAlert('Error', 'Failed to log in. Please try again.');
+      showAlert('Error', getErrorMessage(error, 'Failed to log in. Please try again.'));
     } finally {
       setLoading(false);
       setLocationStatus('');

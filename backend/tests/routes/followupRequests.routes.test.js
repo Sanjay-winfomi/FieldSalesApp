@@ -1,4 +1,4 @@
-jest.mock('../../src/db/pool', () => ({ query: jest.fn() }));
+jest.mock('../../src/db/pool', () => ({ query: jest.fn(), connect: jest.fn() }));
 jest.mock('../../src/utils/managerNotifications', () => ({ createManagerNotification: jest.fn() }));
 const request = require('supertest');
 const pool = require('../../src/db/pool');
@@ -13,8 +13,18 @@ const MANAGER = { id: 99, role: 'manager', username: 'priya' };
 const FUTURE_DATE = '2099-01-01';
 const LONG_REASON = 'Dealer asked to come back tomorrow instead';
 
+// PATCH /:id/approve runs its assignment-creating half inside a transaction
+// via pool.connect(), not pool.query() directly — this stub client's own
+// `query` mock is what the route's BEGIN/advisory-lock/UPDATE/INSERT/
+// COMMIT/ROLLBACK calls hit. The initial existence/status read (before any
+// approved_date validation) still goes through the same client since it's
+// the same connection for the whole handler.
+function mockClient() {
+  return { query: jest.fn(), release: jest.fn() };
+}
+
 describe('POST /api/x/', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('400 when dealer_id is missing', async () => {
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
@@ -121,7 +131,7 @@ describe('POST /api/x/', () => {
 });
 
 describe('GET /api/x/', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('403 when a rep tries to list requests', async () => {
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
@@ -146,7 +156,7 @@ describe('GET /api/x/', () => {
 });
 
 describe('PATCH /api/x/:id/approve', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('403 when a rep tries to approve', async () => {
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });
@@ -155,25 +165,35 @@ describe('PATCH /api/x/:id/approve', () => {
   });
 
   test('404 when the request does not exist', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] });
+    const client = mockClient();
+    client.query.mockResolvedValueOnce({ rows: [] }); // existing — not found
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve');
     expect(res.status).toBe(404);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('409 when the request was already resolved', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved' }] });
+    const client = mockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved' }] }); // existing — already resolved
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve');
     expect(res.status).toBe(409);
   });
 
   test('200 creates the assignment at the next sequence position and marks the request approved', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] }) // existing
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // advisory lock
       .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved' }] }) // atomic claim: update request status
       .mockResolvedValueOnce({ rows: [{ next_seq: 3 }] }) // next sequence
-      .mockResolvedValueOnce({ rows: [{ id: 555 }] }); // insert assignment
+      .mockResolvedValueOnce({ rows: [{ id: 555 }] }) // insert assignment
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
 
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve');
@@ -181,52 +201,67 @@ describe('PATCH /api/x/:id/approve', () => {
     expect(res.status).toBe(200);
     expect(res.body.assignment_id).toBe(555);
     expect(res.body.request.status).toBe('approved');
-    expect(pool.query.mock.calls[3][1]).toEqual([REP.id, 5, FUTURE_DATE, 3, MANAGER.id]);
+    expect(client.query.mock.calls[5][1]).toEqual([REP.id, 5, FUTURE_DATE, 3, MANAGER.id]);
+    expect(client.release).toHaveBeenCalled();
   });
 
   test('409 when an approve/reject race already resolved the request between the check and the atomic claim', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] }) // existing (still pending at read time)
-      .mockResolvedValueOnce({ rows: [] }); // atomic claim finds 0 rows — a concurrent request already resolved it
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // advisory lock
+      .mockResolvedValueOnce({ rows: [] }) // atomic claim finds 0 rows — a concurrent request already resolved it
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
 
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve');
 
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('request_already_resolved');
-    // No assignment side effect — only 2 pool.query calls, not 4.
-    expect(pool.query).toHaveBeenCalledTimes(2);
+    // No assignment side effect — the claim UPDATE was the last real write.
+    expect(client.query.mock.calls.some(([sql]) => /INSERT INTO dealer_assignments/.test(sql))).toBe(false);
   });
 
   const OVERRIDE_DATE = '2099-02-02';
 
   test('a manager-supplied approved_date is used for the assignment instead of the rep\'s requested_date', async () => {
-    pool.query
+    const client = mockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] })
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // advisory lock
       .mockResolvedValueOnce({ rows: [{ id: 20, status: 'approved', approved_date: OVERRIDE_DATE }] })
       .mockResolvedValueOnce({ rows: [{ next_seq: 1 }] })
-      .mockResolvedValueOnce({ rows: [{ id: 555 }] });
+      .mockResolvedValueOnce({ rows: [{ id: 555 }] })
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
 
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve').send({ approved_date: OVERRIDE_DATE });
 
     expect(res.status).toBe(200);
     expect(res.body.request.approved_date).toBe(OVERRIDE_DATE);
-    expect(pool.query.mock.calls[1][1]).toEqual([OVERRIDE_DATE, MANAGER.id, 20]);
+    expect(client.query.mock.calls[3][1]).toEqual([OVERRIDE_DATE, MANAGER.id, 20]);
     // next-sequence lookup and the assignment insert both use the override date.
-    expect(pool.query.mock.calls[2][1]).toEqual([REP.id, OVERRIDE_DATE]);
-    expect(pool.query.mock.calls[3][1]).toEqual([REP.id, 5, OVERRIDE_DATE, 1, MANAGER.id]);
+    expect(client.query.mock.calls[4][1]).toEqual([REP.id, OVERRIDE_DATE]);
+    expect(client.query.mock.calls[5][1]).toEqual([REP.id, 5, OVERRIDE_DATE, 1, MANAGER.id]);
   });
 
   test('400 when approved_date is not a valid date', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    const client = mockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve').send({ approved_date: 'not-a-date' });
     expect(res.status).toBe(400);
   });
 
   test('422 when approved_date is in the past', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    const client = mockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: 20, employee_id: REP.id, dealer_id: 5, requested_date: FUTURE_DATE, status: 'pending' }] });
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: MANAGER });
     const res = await request(app).patch('/api/x/20/approve').send({ approved_date: '2020-01-01' });
     expect(res.status).toBe(422);
@@ -235,7 +270,7 @@ describe('PATCH /api/x/:id/approve', () => {
 });
 
 describe('PATCH /api/x/:id/reject', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => jest.resetAllMocks());
 
   test('403 when a rep tries to reject', async () => {
     const app = makeApp(followupRequestsRouter, { basePath: '/api/x', employee: REP });

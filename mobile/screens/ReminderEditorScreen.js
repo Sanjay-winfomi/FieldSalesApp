@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, Pressable, Platform, Modal, KeyboardAvoidingView } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { StyleSheet, Text, View, TextInput, Pressable, Platform, KeyboardAvoidingView } from 'react-native';
 import { ChevronDown, CalendarDays } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { scheduleReminderNotifications } from '../src/services/reminderNotifications';
 import { showAlert } from '../src/services/themedAlert';
-import { AppHeader, PrimaryButton, DealerPickerModal, FadeSlideIn } from '../src/components';
+import { getErrorMessage } from '../src/services/apiError';
+import { AppHeader, PrimaryButton, DealerPickerModal, DatePickerSheet, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, radius, serifFontFamily } from '../src/theme';
 
 const MIN_NOTE_LENGTH = 20;
@@ -45,9 +45,9 @@ export default function ReminderEditorScreen({ navigation }) {
     setShowDatePicker(true);
   };
 
-  const handleAndroidDateChange = (event, selected) => {
+  const confirmPickedDate = (picked) => {
+    setDate(picked);
     setShowDatePicker(false);
-    if (event.type === 'set' && selected) setDate(selected);
   };
 
   const handleSave = async () => {
@@ -68,10 +68,22 @@ export default function ReminderEditorScreen({ navigation }) {
       });
 
       if (notifIdDayBefore || notifIdDayOf) {
+        // Queue instead of just logging on failure — without this, an
+        // online request that fails for any reason other than a dropped
+        // connection (a transient 5xx, a timeout) leaves these two
+        // already-scheduled local notifications with no id recorded
+        // server-side, so RemindersScreen's delete flow can never cancel
+        // them and they fire after the reminder itself is deleted.
         await api.patch(`/reminders/${reminder.id}/notifications`, {
           notif_id_day_before: notifIdDayBefore,
           notif_id_day_of: notifIdDayOf,
-        }).catch((err) => console.error('Failed to persist notification ids:', err));
+        }).catch(async (err) => {
+          console.error('Failed to persist notification ids, queuing for retry:', err);
+          await enqueueAction('patch', `/reminders/${reminder.id}/notifications`, {
+            notif_id_day_before: notifIdDayBefore,
+            notif_id_day_of: notifIdDayOf,
+          });
+        });
       }
 
       navigation.goBack();
@@ -106,7 +118,7 @@ export default function ReminderEditorScreen({ navigation }) {
         showAlert('Invalid date', 'The reminder date cannot be in the past.');
       } else {
         console.error('Failed to save reminder:', err);
-        showAlert('Error', 'Could not save this reminder. Please try again.');
+        showAlert('Error', getErrorMessage(err, 'Could not save this reminder. Please try again.'));
       }
     } finally {
       setSaving(false);
@@ -172,38 +184,13 @@ export default function ReminderEditorScreen({ navigation }) {
         }}
       />
 
-      {showDatePicker && Platform.OS === 'android' && (
-        <DateTimePicker
-          value={pendingDate}
-          mode="date"
-          display="default"
-          minimumDate={new Date()}
-          onChange={handleAndroidDateChange}
-        />
-      )}
-
-      {Platform.OS === 'ios' && (
-        <Modal visible={showDatePicker} transparent animationType="fade" onRequestClose={() => setShowDatePicker(false)}>
-          <Pressable style={styles.iosPickerBackdrop} onPress={() => setShowDatePicker(false)}>
-            <Pressable style={styles.iosPickerSheet} onPress={() => {}}>
-              <DateTimePicker
-                value={pendingDate}
-                mode="date"
-                display="spinner"
-                minimumDate={new Date()}
-                onChange={(event, selected) => selected && setPendingDate(selected)}
-              />
-              <PrimaryButton
-                title="Done"
-                onPress={() => {
-                  setDate(pendingDate);
-                  setShowDatePicker(false);
-                }}
-              />
-            </Pressable>
-          </Pressable>
-        </Modal>
-      )}
+      <DatePickerSheet
+        visible={showDatePicker}
+        initialDate={pendingDate}
+        minDate={new Date()}
+        onConfirm={confirmPickedDate}
+        onCancel={() => setShowDatePicker(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -258,16 +245,5 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     backgroundColor: colors.card,
-  },
-  iosPickerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  iosPickerSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.input,
-    borderTopRightRadius: radius.input,
-    padding: spacing.screenHorizontal,
   },
 });

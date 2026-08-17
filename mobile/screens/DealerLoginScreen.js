@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, ScrollView } from 'react-native';
-import { getCurrentLocation, getReadableAddress, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
+import { getCurrentLocation, getReadableAddress, haversineMeters, MAX_ACCEPTABLE_ACCURACY_METERS } from '../src/services/location';
 import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
+import { getErrorMessage } from '../src/services/apiError';
 import { AppHeader, GPSStatusCard, PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing } from '../src/theme';
 
@@ -80,6 +81,16 @@ export default function DealerLoginScreen({ dealer, attendance, onLogin, navigat
           const localId = 'offline-' + Date.now();
           await enqueueAction('post', '/visits/login', payload, { localId, resolves: 'visit' });
           showAlert('Offline Mode', 'Dealer login saved locally and will sync when online.');
+          // login_inside_radius (not "within_radius" — that field doesn't
+          // exist anywhere else in the codebase) is what
+          // DealerLogoutScreen's loginWasException check reads later to
+          // decide whether a logout reason is required. Computed locally
+          // from the dealer's known coordinates/radius, same haversine
+          // check the server itself would run, since there's no server
+          // round-trip to ask while offline.
+          const loginInsideRadius = dealer.latitude == null || dealer.longitude == null
+            ? true
+            : haversineMeters(dealer.latitude, dealer.longitude, coords.lat, coords.lng) <= (dealer.radius_meters ?? 200);
           visitData = {
             id: localId,
             login_time: new Date().toISOString(),
@@ -90,7 +101,7 @@ export default function DealerLoginScreen({ dealer, attendance, onLogin, navigat
             dealer_radius_meters: dealer.radius_meters,
             login_lat: coords.lat,
             login_lng: coords.lng,
-            within_radius: true,
+            login_inside_radius: loginInsideRadius,
           };
         } else if (error.response.data?.error === 'reason_required') {
           setReasonRequired({ distanceMeters: error.response.data.distanceMeters });
@@ -108,7 +119,7 @@ export default function DealerLoginScreen({ dealer, attendance, onLogin, navigat
       }
     } catch (error) {
       console.error('Dealer login error:', error);
-      showAlert('Error', error.response?.data?.error || 'Failed to log in. Please try again.');
+      showAlert('Error', getErrorMessage(error, 'Failed to log in. Please try again.'));
     } finally {
       setLoading(false);
     }

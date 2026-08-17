@@ -4,6 +4,7 @@ import { Trash2 } from 'lucide-react-native';
 import { api } from '../src/services/api';
 import { enqueueAction, isNetworkError } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
+import { getErrorMessage } from '../src/services/apiError';
 import { AppHeader, PrimaryButton, LoadingCard, FadeSlideIn } from '../src/components';
 import { colors, typography, spacing, serifFontFamily } from '../src/theme';
 
@@ -81,7 +82,7 @@ export default function NoteEditorScreen({ navigation, route }) {
         showAlert('Note too short', `Notes need at least ${MIN_CONTENT_LENGTH} characters.`);
       } else {
         console.error('Failed to save note:', err);
-        showAlert('Error', 'Could not save this note. Please try again.');
+        showAlert('Error', getErrorMessage(err, 'Could not save this note. Please try again.'));
       }
     } finally {
       if (isMountedRef.current) setSaving(false);
@@ -110,7 +111,7 @@ export default function NoteEditorScreen({ navigation, route }) {
               return;
             }
             console.error('Failed to delete note:', err);
-            showAlert('Error', 'Could not delete this note.');
+            showAlert('Error', getErrorMessage(err, 'Could not delete this note.'));
             setDeleting(false);
           }
         },

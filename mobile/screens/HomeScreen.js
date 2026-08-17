@@ -42,7 +42,7 @@ export default function HomeScreen({ navigation }) {
   const {
     employee,
     dayStatus,
-    visitsCount,
+    pendingVisitsCount,
     distanceTravelled,
     attendance,
     visits,
@@ -262,7 +262,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.summaryGrid}>
             <SummaryCard
               icon={<Store size={20} color={colors.primary} />}
-              value={visitsCount}
+              value={pendingVisitsCount}
               label="Visits today"
               tone="primary"
               onPress={() => navigation.navigate('TodaysVisits')}

@@ -61,6 +61,24 @@ describe('syncManager', () => {
     expect(await getPendingCount()).toBe(0);
   });
 
+  test('resolves a dependent action queued in a LATER flush pass, after its parent already resolved in an earlier one', async () => {
+    const localId = 'offline-999';
+    await enqueueAction('post', '/attendance/login', { lat: 1, lng: 2 }, { localId, resolves: 'attendance' });
+    api.request.mockResolvedValueOnce({ data: { attendance: { id: 55 } } });
+    await flushQueue(); // parent resolves and leaves the queue in this pass; its in-memory idMap is discarded once this call returns
+
+    // A dependent action referencing the same localId, enqueued only AFTER
+    // the parent's own flush already completed — it must still resolve to
+    // the real id via the persisted id map, not the (long-gone) in-memory
+    // one from the first flushQueue() call.
+    await enqueueAction('post', '/visits/login', { attendance_id: localId, dealer_id: 5 });
+    api.request.mockResolvedValueOnce({ data: { visit: { id: 201 } } });
+    await flushQueue();
+
+    expect(api.request.mock.calls[1][0].data.attendance_id).toBe(55);
+    expect(await getPendingCount()).toBe(0);
+  });
+
   test('resolves a temp offline id embedded in a queued action URL, not just the body', async () => {
     const localId = 'offline-123';
     await enqueueAction('post', '/visits/login', { attendance_id: 1, dealer_id: 5 }, { localId, resolves: 'visit' });

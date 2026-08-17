@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, View, Text, TextInput, Pressable, Platform, Keyboard, Animated, StyleSheet } from 'react-native';
-import { Calendar } from 'react-native-calendars';
 import { X, CalendarDays } from 'lucide-react-native';
 import { api } from '../services/api';
 import { enqueueAction, isNetworkError } from '../services/syncManager';
 import { showAlert } from '../services/themedAlert';
 import PrimaryButton from './buttons/PrimaryButton';
+import DatePickerSheet from './DatePickerSheet';
 import { colors, typography, spacing, radius } from '../theme';
 
 const MIN_REASON_LENGTH = 10;
@@ -127,15 +127,8 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
     }
   };
 
-  const handleDayPress = (day) => {
-    // Parsed as local midnight (no trailing Z) — day.dateString is a plain
-    // 'YYYY-MM-DD' with no timezone of its own, and parsing it as UTC would
-    // shift the selected day by one in any timezone behind UTC.
-    setPendingDate(new Date(`${day.dateString}T00:00:00`));
-  };
-
-  const confirmPickedDate = () => {
-    setDate(pendingDate);
+  const confirmPickedDate = (picked) => {
+    setDate(picked);
     setShowDatePicker(false);
   };
 
@@ -222,49 +215,13 @@ export default function FollowupRequestModal({ visible, assignment, onClose, onS
           </View>
         </Animated.View>
 
-        {showDatePicker && (
-          // A real inline calendar grid (react-native-calendars), not
-          // @react-native-community/datetimepicker's native OS dialog.
-          // That library's Android <DateTimePicker> always opens a genuine
-          // native Dialog window no matter what `display` value is passed
-          // ('spinner'/'calendar'/'default' only change the widget style
-          // *inside* that same dialog) — it never actually renders inline in
-          // our own sheet below, which is why it showed up as a jarring,
-          // unstyled system box floating disconnected from the rest of this
-          // modal. Rendering the calendar ourselves fixes both the look
-          // (fully themeable to match the app) and the earlier flash risk
-          // (there's no second native window to flash at all) in one move,
-          // and behaves identically on both platforms instead of needing a
-          // separate native-dialog-vs-inline-spinner branch per OS.
-          <View style={styles.pickerBackdrop}>
-            <View style={styles.pickerSheet}>
-              <Calendar
-                current={toDateString(pendingDate)}
-                minDate={toDateString(new Date())}
-                markedDates={{
-                  [toDateString(pendingDate)]: { selected: true, selectedColor: colors.primary },
-                }}
-                onDayPress={handleDayPress}
-                theme={{
-                  backgroundColor: colors.card,
-                  calendarBackground: colors.card,
-                  textSectionTitleColor: colors.textSecondary,
-                  selectedDayBackgroundColor: colors.primary,
-                  selectedDayTextColor: colors.textInverse,
-                  todayTextColor: colors.primary,
-                  dayTextColor: colors.text,
-                  textDisabledColor: colors.disabledText,
-                  monthTextColor: colors.text,
-                  arrowColor: colors.primary,
-                  textDayFontFamily: typography.body.fontFamily,
-                  textMonthFontFamily: typography.cardTitle.fontFamily,
-                  textDayHeaderFontFamily: typography.caption.fontFamily,
-                }}
-              />
-              <PrimaryButton title="Done" onPress={confirmPickedDate} style={styles.pickerDoneButton} />
-            </View>
-          </View>
-        )}
+        <DatePickerSheet
+          visible={showDatePicker}
+          initialDate={pendingDate}
+          minDate={new Date()}
+          onConfirm={confirmPickedDate}
+          onCancel={() => setShowDatePicker(false)}
+        />
       </View>
     </Modal>
   );
@@ -310,17 +267,4 @@ const styles = StyleSheet.create({
   },
   counter: { ...typography.caption, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.lg, textAlign: 'right' },
   counterShort: { color: colors.dangerDark, fontWeight: '600' },
-  pickerBackdrop: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end',
-  },
-  pickerSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.card,
-    borderTopRightRadius: radius.card,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  pickerDoneButton: { marginTop: spacing.md },
 });

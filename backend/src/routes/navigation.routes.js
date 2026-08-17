@@ -123,8 +123,18 @@ router.post('/compute', async (req, res) => {
     );
 
     if (assignmentId != null) {
+      // Same rank/status guard as PATCH /:id/status below — without it, a
+      // rep re-tapping "Navigate" for an assignment already 'completed' (or
+      // manager-'cancelled') would silently force it back to 'navigating',
+      // making the Daily Travel Summary miscount a visited dealer as
+      // pending, or resurrecting a cancelled assignment.
       await pool.query(
-        `UPDATE dealer_assignments SET status = 'navigating', updated_at = NOW() WHERE id = $1`,
+        `UPDATE dealer_assignments
+         SET status = 'navigating', updated_at = NOW()
+         WHERE id = $1
+           AND status != 'cancelled'
+           AND status != 'completed'
+           AND status != 'arrived'`,
         [assignmentId]
       );
     }
@@ -297,7 +307,7 @@ router.get('/summary/today', async (req, res) => {
   try {
     const assignmentCounts = await pool.query(
       `SELECT
-         COUNT(*)::int AS total_assigned,
+         COUNT(*) FILTER (WHERE status != 'cancelled')::int AS total_assigned,
          COUNT(*) FILTER (WHERE status = 'completed')::int AS visited,
          COUNT(*) FILTER (WHERE status != 'completed' AND status != 'cancelled')::int AS pending
        FROM dealer_assignments

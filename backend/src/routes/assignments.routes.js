@@ -85,7 +85,6 @@ router.put('/', requireRole('manager'), async (req, res) => {
   try {
     const employeeResult = await client.query(`SELECT id FROM employees WHERE id = $1 AND role = 'rep'`, [employeeId]);
     if (employeeResult.rows.length === 0) {
-      client.release();
       return res.status(404).json({ error: 'Representative not found' });
     }
 
@@ -95,7 +94,6 @@ router.put('/', requireRole('manager'), async (req, res) => {
         [orderedDealerIds]
       );
       if (dealerResult.rows.length !== orderedDealerIds.length) {
-        client.release();
         return res.status(404).json({ error: 'One or more dealers not found' });
       }
     }
