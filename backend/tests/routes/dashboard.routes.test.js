@@ -34,6 +34,23 @@ describe('GET /api/x/today', () => {
     expect(res.body.reps[0].last_activity).toBe('At Dealer A');
   });
 
+  test('a logged-in rep on an office day shows "At office today", not "no visits yet"', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        employee_id: 1, name: 'Arun', region: 'South', attendance_id: 5,
+        login_time: '2026-07-27T05:00:00Z', logout_time: null, work_mode: 'office',
+        dealer_name: null, visit_login: null, visit_logout: null,
+        visits_count: '0',
+      }],
+    });
+    const app = makeApp(dashboardRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/today');
+    // Still counts as "logged_in" for the dashboard's stat tiles — only the
+    // label differs, so an office day doesn't disappear from that count.
+    expect(res.body.reps[0].status).toBe('logged_in');
+    expect(res.body.reps[0].last_activity).toBe('At office today');
+  });
+
   test('formats a day-ended rep\'s office logout time in IST, not server-local time', async () => {
     pool.query.mockResolvedValueOnce({
       rows: [{

@@ -61,11 +61,17 @@ router.post('/login', async (req, res) => {
   if (lat === null || lng === null) {
     return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
   }
+  // 'office' — the rep isn't going out on field visits today (working from
+  // their own company office instead) — skips the GPS-accuracy gate below:
+  // that threshold exists to keep a field day's distance/radius math
+  // trustworthy, which doesn't apply to a day with no dealer visits, and
+  // insisting on it would just make office days fail indoors for no reason.
+  const workMode = req.body.work_mode === 'office' ? 'office' : 'field';
   const accuracyMeters = parseAccuracy(req.body.accuracy_meters);
   if (accuracyMeters === null) {
     return res.status(400).json({ error: 'accuracy_meters must be a valid non-negative number' });
   }
-  if (accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
+  if (workMode === 'field' && accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
     return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
   }
 
@@ -84,11 +90,11 @@ router.post('/login', async (req, res) => {
     // login requests (double-tap, retry-on-timeout) resolve to exactly one
     // row, instead of a separate SELECT-then-INSERT which leaves a race window.
     const result = await pool.query(
-      `INSERT INTO attendance (employee_id, business_date, login_time, login_lat, login_lng, sync_status)
-       VALUES ($1, ${businessDateExpr('NOW()')}, NOW(), $2, $3, 'synced')
+      `INSERT INTO attendance (employee_id, business_date, login_time, login_lat, login_lng, work_mode, sync_status)
+       VALUES ($1, ${businessDateExpr('NOW()')}, NOW(), $2, $3, $4, 'synced')
        ON CONFLICT (employee_id, business_date) WHERE business_date IS NOT NULL DO NOTHING
-       RETURNING id, login_time, login_lat, login_lng`,
-      [employeeId, lat, lng]
+       RETURNING id, login_time, login_lat, login_lng, work_mode`,
+      [employeeId, lat, lng, workMode]
     );
 
     if (result.rows.length === 0) {
@@ -133,9 +139,9 @@ router.post('/logout', async (req, res) => {
   if (accuracyMeters === null) {
     return res.status(400).json({ error: 'accuracy_meters must be a valid non-negative number' });
   }
-  if (accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
-    return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
-  }
+  // The accuracy-threshold gate itself is checked further down, once
+  // work_mode is known from the stored attendance row — an office day skips
+  // it for the same reason /login does (see that handler's comment).
 
   const idempotencyKey = req.get('Idempotency-Key') || null;
 
@@ -164,7 +170,7 @@ router.post('/logout', async (req, res) => {
     await client.query('BEGIN');
 
     const existing = await client.query(
-      `SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km
+      `SELECT id, login_time, login_lat, login_lng, logout_time, total_distance_km, work_mode
        FROM attendance
        WHERE id = $1 AND employee_id = $2
        FOR UPDATE`,
@@ -190,6 +196,10 @@ router.post('/logout', async (req, res) => {
         error: 'Already logged out today',
         attendance: { id: att.id, logout_time: att.logout_time },
       });
+    }
+    if (att.work_mode === 'field' && accuracyMeters !== undefined && accuracyMeters > GPS_ACCURACY_THRESHOLD_M) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'gps_accuracy_exceeded', accuracyMeters, thresholdMeters: GPS_ACCURACY_THRESHOLD_M });
     }
 
     const loginTime  = new Date(att.login_time);
@@ -307,7 +317,7 @@ router.post('/logout', async (req, res) => {
            final_leg_is_routed = $6
        WHERE id = $4 AND logout_time IS NULL
        RETURNING id, login_time, logout_time, total_distance_km, total_duration_minutes,
-                 final_leg_distance_km, final_leg_is_routed`,
+                 final_leg_distance_km, final_leg_is_routed, work_mode`,
       [lat, lng, durationMins, attendance_id, finalLegDistanceKm, finalLegIsRouted]
     );
 
@@ -385,7 +395,7 @@ router.get('/today', async (req, res) => {
       `SELECT id, login_time, login_lat, login_lng,
               logout_time, logout_lat, logout_lng,
               total_distance_km, total_duration_minutes,
-              final_leg_distance_km, final_leg_is_routed, sync_status
+              final_leg_distance_km, final_leg_is_routed, work_mode, sync_status
        FROM attendance
        WHERE employee_id = $1
          AND ${isCurrentBusinessDay('login_time')}

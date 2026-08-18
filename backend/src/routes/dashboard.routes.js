@@ -23,6 +23,7 @@ router.get('/today', async (req, res) => {
         a.login_time,
         a.logout_time,
         a.total_distance_km,
+        a.work_mode,
         a.sync_status   AS day_sync_status,
         -- Latest visit
         lv.dealer_name,
@@ -76,6 +77,13 @@ router.get('/today', async (req, res) => {
         status       = 'logged_in';
         lastActivity = `Travelling from ${row.dealer_name}`;
         timestamp    = row.visit_logout;
+      } else if (row.work_mode === 'office') {
+        // Still counts toward the "Logged in" stat (status stays the same
+        // as the branch below) — only the label differs, so an office day
+        // doesn't misleadingly read as "hasn't started visiting dealers yet".
+        status       = 'logged_in';
+        lastActivity = 'At office today';
+        timestamp    = row.login_time;
       } else {
         status       = 'logged_in';
         lastActivity = 'Logged in — no visits yet';
@@ -129,7 +137,7 @@ router.get('/rep/:id/today', async (req, res) => {
     const attResult = await pool.query(
       `SELECT id, login_time, login_lat, login_lng,
               logout_time, logout_lat, logout_lng,
-              total_distance_km, total_duration_minutes, sync_status
+              total_distance_km, total_duration_minutes, work_mode, sync_status
        FROM attendance
        WHERE employee_id = $1
          AND ${isCurrentBusinessDay('login_time')}

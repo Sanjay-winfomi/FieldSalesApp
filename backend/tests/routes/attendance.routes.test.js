@@ -95,11 +95,33 @@ describe('POST /api/x/logout', () => {
     expect(res.status).toBe(400);
   });
 
-  test('422 when accuracy_meters exceeds the threshold', async () => {
+  test('422 when accuracy_meters exceeds the threshold on a field day', async () => {
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3, work_mode: 'field' }] }) // attendance (FOR UPDATE)
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    pool.connect.mockResolvedValueOnce(client);
     const app = makeApp(attendanceRouter, { basePath: '/api/x' });
     const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77, accuracy_meters: 500 });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('gps_accuracy_exceeded');
+  });
+
+  test('accuracy_meters exceeding the threshold does NOT block logout on an office day', async () => {
+    const client = mockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, logout_time: null, total_distance_km: 3, work_mode: 'office' }] }) // attendance (FOR UPDATE)
+      .mockResolvedValueOnce({ rows: [] }) // no open dealer visit
+      .mockResolvedValueOnce({ rows: [] }) // no closed dealer visits either — final leg falls back to login point
+      .mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', logout_time: '2026-07-27T13:00:00Z', total_distance_km: 3, total_duration_minutes: 480, work_mode: 'office' }] }) // UPDATE attendance
+      .mockResolvedValueOnce({ rows: [{ visits_count: '0' }] }) // visits count
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    pool.connect.mockResolvedValueOnce(client);
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/logout').send({ attendance_id: 5, lat: 11, lng: 77, accuracy_meters: 500 });
+    expect(res.status).toBe(200);
   });
 
   test('404 when the attendance record does not belong to this employee', async () => {

@@ -125,7 +125,7 @@ router.get('/attendance', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT e.name AS employee_name, e.region,
-              a.login_time, a.logout_time,
+              a.login_time, a.logout_time, a.work_mode,
               a.total_duration_minutes, ROUND(a.total_distance_km::numeric, 2) AS total_distance_km,
               (SELECT COUNT(*) FROM client_visits cv WHERE cv.attendance_id = a.id) AS visits_count
        FROM attendance a

@@ -117,6 +117,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_employee_business_date
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS final_leg_distance_km DOUBLE PRECISION;
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS final_leg_is_routed BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- 'office' lets a rep who isn't going out on field visits that day (working
+-- from their own company office instead) self-declare it at login — the
+-- point is purely to give absenceCheck.js's "did they log in at all" sweep
+-- a real attendance row to find, so it doesn't flag them as a probable
+-- unplanned absence. Nothing else in the app branches on this: dealer
+-- visits, distance, and duration all still work identically either way —
+-- an office day just usually has zero of the former, same as a slow field
+-- day would.
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS work_mode VARCHAR(10) NOT NULL DEFAULT 'field'
+  CHECK (work_mode IN ('field', 'office'));
+
 -- ============================================================
 -- 4. client_visits
 -- ============================================================
