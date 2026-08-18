@@ -215,4 +215,20 @@ describe('NotificationsPage', () => {
     expect(await screen.findByText('Reviewed')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reviewed/i })).not.toBeInTheDocument();
   });
+
+  test('an unreviewed day_absent notification also shows a Reviewed button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 4, type: 'day_absent', title: 'Representative did not log in',
+          body: 'divya did not log in on 18 Aug 2026 — likely absent, follow up if unplanned.',
+          read_at: null, created_at: '2026-08-19T02:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText('Representative did not log in')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /reviewed/i })).toBeInTheDocument();
+  });
 });

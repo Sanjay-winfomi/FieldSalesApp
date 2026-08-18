@@ -44,7 +44,7 @@ describe('POST /api/x/read-all', () => {
     // has actually clicked "Reviewed".
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('type != ALL');
-    expect(params[0]).toEqual(expect.arrayContaining(['day_auto_cutoff', 'visit_auto_cutoff']));
+    expect(params[0]).toEqual(expect.arrayContaining(['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent']));
   });
 });
 

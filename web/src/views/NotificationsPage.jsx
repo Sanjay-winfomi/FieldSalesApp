@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock, UserX } from 'lucide-react';
 import { apiClient } from '../api';
 import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -18,14 +18,15 @@ const TYPE_META = {
   unvisited_assignments: { icon: CalendarX,    tone: 'warning' },
   day_auto_cutoff:      { icon: Clock,         tone: 'warning' },
   visit_auto_cutoff:    { icon: Clock,         tone: 'warning' },
+  day_absent:           { icon: UserX,         tone: 'danger' },
 };
 
-// These two require an explicit "Reviewed" click — see the backend's
-// read-all endpoint, which deliberately excludes them from the passive
-// mark-everything-read-on-page-open behavior every other notification type
-// gets, since a missed logout is serious enough to want a manager to
+// These require an explicit "Reviewed" click — see the backend's read-all
+// endpoint, which deliberately excludes them from the passive mark-
+// everything-read-on-page-open behavior every other notification type
+// gets, since a missed logout/login is serious enough to want a manager to
 // actually look at it first.
-const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff'];
+const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent'];
 
 const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
 

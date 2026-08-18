@@ -48,11 +48,11 @@ router.get('/unread-count', async (req, res) => {
   }
 });
 
-// A missed-logout auto-cutoff is serious enough that opening the
-// notifications page shouldn't silently mark it read before a manager has
-// actually looked at it and clicked "Reviewed" — every other notification
-// type still gets the passive read-all-on-open behavior.
-const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff'];
+// A missed logout/login is serious enough that opening the notifications
+// page shouldn't silently mark it read before a manager has actually looked
+// at it and clicked "Reviewed" — every other notification type still gets
+// the passive read-all-on-open behavior.
+const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent'];
 
 // POST /api/notifications/read-all
 router.post('/read-all', async (req, res) => {
