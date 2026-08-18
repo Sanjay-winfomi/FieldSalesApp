@@ -12,6 +12,7 @@ const REPORT_TABS = [
   { key: 'dealer-visits', label: 'Dealer visits' },
   { key: 'distance-duration', label: 'Distance & duration' },
   { key: 'exceptions', label: 'Exceptions' },
+  { key: 'absences', label: 'Absences' },
 ];
 
 export default function ReportsPage() {
@@ -86,23 +87,55 @@ export default function ReportsPage() {
     }
   }, [fetchReport]);
 
+  // Absences go through the generic notifications endpoint (row.id here is
+  // the manager_notifications id, not an exception_log id) — same one
+  // NotificationsPage's own "Reviewed" button calls, so marking it here or
+  // there lands on the same read_at column either way. Updates the row
+  // locally rather than refetching the whole report, matching
+  // NotificationsPage's own optimistic-update convention.
+  const markAbsenceReviewed = useCallback(async (id) => {
+    try {
+      await apiClient.patch(`/notifications/${id}/read`);
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, reviewed: true } : r)));
+    } catch {
+      // Leave the row as-is — the user can retry the click.
+    }
+  }, []);
+
   const columns = useMemo(() => {
     const base = buildDynamicColumns(rows);
-    if (activeTab !== 'exceptions') return base;
-    return [
-      ...base,
-      {
-        key: 'review_action',
-        label: '',
-        sortable: false,
-        render: (row) => row.manager_reviewed ? null : (
-          <Button variant="secondary" style={{ height: 30, padding: '0 10px', fontSize: 12 }} onClick={() => markExceptionReviewed(row.id)}>
-            Mark reviewed
-          </Button>
-        ),
-      },
-    ];
-  }, [rows, activeTab, markExceptionReviewed]);
+    if (activeTab === 'exceptions') {
+      return [
+        ...base,
+        {
+          key: 'review_action',
+          label: '',
+          sortable: false,
+          render: (row) => row.manager_reviewed ? null : (
+            <Button variant="secondary" style={{ height: 30, padding: '0 10px', fontSize: 12 }} onClick={() => markExceptionReviewed(row.id)}>
+              Mark reviewed
+            </Button>
+          ),
+        },
+      ];
+    }
+    if (activeTab === 'absences') {
+      return [
+        ...base,
+        {
+          key: 'review_action',
+          label: '',
+          sortable: false,
+          render: (row) => row.reviewed ? null : (
+            <Button variant="secondary" style={{ height: 30, padding: '0 10px', fontSize: 12 }} onClick={() => markAbsenceReviewed(row.id)}>
+              Mark reviewed
+            </Button>
+          ),
+        },
+      ];
+    }
+    return base;
+  }, [rows, activeTab, markExceptionReviewed, markAbsenceReviewed]);
 
   return (
     <div style={styles.page} className="ft-page">

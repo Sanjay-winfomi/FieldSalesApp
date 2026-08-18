@@ -293,4 +293,58 @@ router.get('/exceptions', async (req, res) => {
   }
 });
 
+// GET /api/reports/absences — read-only mirror of the day_absent manager
+// notifications absenceCheck.js creates, shaped to fit ReportsPage.jsx's
+// generic fetch/CSV-export flow, sorted by the actual missed business date
+// rather than notification-created-at order (the two usually match, but a
+// sweep catching up on a backlog after a spin-down can create the
+// notification a day or more after the date it's actually about).
+router.get('/absences', async (req, res) => {
+  const { format, employee_id, employee_ids } = req.query;
+  const conditions = [`n.type = 'day_absent'`];
+  const params = [];
+  // buildDateEmployeeFilter assumes an `a.employee_id` alias for the employee
+  // filter, but this query has no attendance join — pass only from/to through
+  // it (against created_at; close enough to the real absence date for a
+  // date-RANGE filter even in the rare backlog-catch-up case) and apply
+  // employee_id/employee_ids against `n` directly below, same as the
+  // exceptions report's identical situation.
+  const dateFilterError = buildDateEmployeeFilter({ from: req.query.from, to: req.query.to }, params, conditions, 'n.created_at');
+  if (dateFilterError) return res.status(400).json({ error: dateFilterError });
+
+  if (employee_ids) {
+    const ids = employee_ids.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isInteger);
+    if (ids.length === 0) return res.status(400).json({ error: 'Invalid employee_ids' });
+    params.push(ids);
+    conditions.push(`n.employee_id = ANY($${params.length}::int[])`);
+  } else if (employee_id) {
+    const employeeId = parseInt(employee_id);
+    if (!Number.isInteger(employeeId)) {
+      return res.status(400).json({ error: 'Invalid employee_id' });
+    }
+    params.push(employeeId);
+    conditions.push(`n.employee_id = $${params.length}`);
+  }
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+  try {
+    const result = await pool.query(
+      `SELECT n.id, e.name AS employee_name, e.region,
+              ${businessDateExpr('n.created_at')} AS absence_date,
+              (n.read_at IS NOT NULL) AS reviewed
+       FROM manager_notifications n
+       JOIN employees e ON e.id = n.employee_id
+       ${whereClause}
+       ORDER BY absence_date DESC, e.name
+       LIMIT 2000`,
+      params
+    );
+
+    return sendReport(res, result.rows, format, 'absences-report.csv');
+  } catch (err) {
+    logger.error('GET /api/reports/absences error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

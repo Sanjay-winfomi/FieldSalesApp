@@ -48,3 +48,56 @@ describe('GET /api/x/distance-duration', () => {
     expect(res.body.rows[0].days_worked).toBe(10);
   });
 });
+
+describe('GET /api/x/absences', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('json format returns day_absent rows sorted by absence date', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { id: 9, employee_name: 'Divya', region: 'South', absence_date: '2026-08-18', reviewed: false },
+        { id: 7, employee_name: 'Arun', region: 'South', absence_date: '2026-08-17', reviewed: true },
+      ],
+    });
+    const app = makeApp(reportsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/absences');
+    expect(res.status).toBe(200);
+    expect(res.body.rows).toHaveLength(2);
+    // Only the type filter is unconditional — confirms this query is scoped
+    // to day_absent notifications, not the whole manager_notifications feed.
+    expect(pool.query.mock.calls[0][0]).toContain(`n.type = 'day_absent'`);
+  });
+
+  test('csv format excludes the id column, same convention as every other report', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: 9, employee_name: 'Divya', region: 'South', absence_date: '2026-08-18', reviewed: false }],
+    });
+    const app = makeApp(reportsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/absences').query({ format: 'csv' });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.text).not.toContain('\nid,');
+    expect(res.text).toContain('Divya');
+  });
+
+  test('filters by employee_id', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(reportsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/absences').query({ employee_id: 7 });
+    expect(res.status).toBe(200);
+    expect(pool.query.mock.calls[0][0]).toContain('n.employee_id =');
+    expect(pool.query.mock.calls[0][1]).toContain(7);
+  });
+
+  test('400 on an invalid employee_id', async () => {
+    const app = makeApp(reportsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/absences').query({ employee_id: 'abc' });
+    expect(res.status).toBe(400);
+  });
+
+  test('400 on an invalid from date', async () => {
+    const app = makeApp(reportsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).get('/api/x/absences').query({ from: 'not-a-date' });
+    expect(res.status).toBe(400);
+  });
+});
