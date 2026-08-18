@@ -320,4 +320,62 @@ describe('NotificationsPage', () => {
     expect(apiClient.delete).not.toHaveBeenCalled();
     expect(screen.getByText('Day auto-logged-out (missed logout)')).toBeInTheDocument();
   });
+
+  test('no "Clear all resolved" button when nothing is currently eligible', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } }); // pending — not deletable
+    render(<NotificationsPage />);
+
+    await screen.findByText('Follow-up visit requested');
+    expect(screen.queryByRole('button', { name: /clear all resolved/i })).not.toBeInTheDocument();
+  });
+
+  test('"Clear all resolved" shows a count and only counts eligible notifications', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [
+          FOLLOWUP_NOTIFICATION, // pending — not deletable
+          {
+            id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+            body: 'arun did not log out.', read_at: '2026-08-18T09:00:00Z',
+            created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+          },
+          {
+            id: 4, type: 'day_absent', title: 'Representative did not log in',
+            body: 'divya did not log in.', read_at: '2026-08-19T09:00:00Z',
+            created_at: '2026-08-19T02:00:00Z', followup_request_id: null,
+          },
+        ],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByRole('button', { name: 'Clear all resolved (2)' })).toBeInTheDocument();
+  });
+
+  test('clicking "Clear all resolved" and confirming deletes every eligible notification, leaving the rest', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [
+          FOLLOWUP_NOTIFICATION, // pending — must survive
+          {
+            id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+            body: 'arun did not log out.', read_at: '2026-08-18T09:00:00Z',
+            created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+          },
+        ],
+      },
+    });
+    apiClient.delete.mockResolvedValue({ data: { success: true, deleted: 1 } });
+    render(<NotificationsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear all resolved (1)' }));
+    expect(await screen.findByText('Clear all resolved notifications?')).toBeInTheDocument();
+    expect(screen.getByText(/permanently removes 1 reviewed\/resolved notification\. /)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(apiClient.delete).toHaveBeenCalledWith('/notifications'));
+    await waitFor(() => expect(screen.queryByText('Day auto-logged-out (missed logout)')).not.toBeInTheDocument());
+    expect(screen.getByText('Follow-up visit requested')).toBeInTheDocument();
+  });
 });

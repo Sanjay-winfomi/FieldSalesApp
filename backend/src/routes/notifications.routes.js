@@ -5,10 +5,12 @@
  * GET    /api/notifications/unread-count — lightweight poll target for the bell badge
  * PATCH  /api/notifications/:id/read     — mark one read
  * POST   /api/notifications/read-all     — mark all unread as read (on opening the page)
- * DELETE /api/notifications/:id          — permanently remove one, only once it's
- *                                          actually been reviewed/resolved (see
- *                                          isDeletable below) — nothing still
- *                                          pending action can be cleared away.
+ * DELETE /api/notifications/:id          — permanently remove one, only once
+ *                                          it's actually reviewed/resolved
+ *                                          (see DELETABLE_CONDITION below)
+ * DELETE /api/notifications              — bulk version of the same rule —
+ *                                          removes every currently-eligible
+ *                                          notification in one call
  *
  * Read-state is shared across all managers, not per-manager-account — see
  * schema.sql's comment on manager_notifications for why.
@@ -58,6 +60,27 @@ router.get('/unread-count', async (req, res) => {
 // the passive read-all-on-open behavior.
 const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent'];
 
+// Shared by both the single and bulk DELETE routes below — a notification
+// is only ever deletable once it's actually done: a REQUIRES_EXPLICIT_REVIEW
+// type with its Reviewed click already recorded, or a follow-up request
+// already approved/rejected (not still pending). Every other notification
+// type — including a REQUIRES_EXPLICIT_REVIEW type that's still unread —
+// has no "resolved" concept at all and is never matched, so nothing still
+// needing a manager's attention can ever be cleared away, one at a time or
+// in bulk. `arrayParamIndex` is the 1-based position of the
+// REQUIRES_EXPLICIT_REVIEW array parameter in that query's own params list
+// (differs between the single-id route, which also binds the id, and the
+// bulk route, which doesn't).
+function deletableCondition(arrayParamIndex) {
+  return `(
+    (n.type = ANY($${arrayParamIndex}::varchar[]) AND n.read_at IS NOT NULL)
+    OR (n.type = 'followup_request' AND EXISTS (
+      SELECT 1 FROM dealer_followup_requests r
+      WHERE r.id = n.followup_request_id AND r.status IN ('approved', 'rejected')
+    ))
+  )`;
+}
+
 // POST /api/notifications/read-all
 router.post('/read-all', async (req, res) => {
   try {
@@ -93,15 +116,10 @@ router.patch('/:id/read', async (req, res) => {
   }
 });
 
-// DELETE /api/notifications/:id — permanently clears one notification, but
-// only if it's actually done: a REQUIRES_EXPLICIT_REVIEW type with its
-// Reviewed click already recorded, or a follow-up request already
-// approved/rejected (not still pending). Everything else — including a
-// REQUIRES_EXPLICIT_REVIEW type that's still unread, and every other
-// notification type, which has no "resolved" concept at all — can never be
-// deleted, so nothing still needing a manager's attention can be cleared
-// away by mistake. Enforced here, not just hidden client-side, so this
-// can't be bypassed by calling the endpoint directly.
+// DELETE /api/notifications/:id — permanently clears one notification, if
+// (and only if) deletableCondition matches it. Enforced here, not just
+// hidden client-side, so this can't be bypassed by calling the endpoint
+// directly.
 router.delete('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!Number.isInteger(id)) {
@@ -110,14 +128,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM manager_notifications n
-       WHERE n.id = $1
-         AND (
-           (n.type = ANY($2::varchar[]) AND n.read_at IS NOT NULL)
-           OR (n.type = 'followup_request' AND EXISTS (
-             SELECT 1 FROM dealer_followup_requests r
-             WHERE r.id = n.followup_request_id AND r.status IN ('approved', 'rejected')
-           ))
-         )
+       WHERE n.id = $1 AND ${deletableCondition(2)}
        RETURNING id`,
       [id, REQUIRES_EXPLICIT_REVIEW]
     );
@@ -127,6 +138,26 @@ router.delete('/:id', async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     logger.error('DELETE /api/notifications/:id error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/notifications — bulk-clears every currently-eligible
+// notification in one call (the "Clear all resolved" button) — same
+// deletableCondition, just with no `id` filter. Reports how many were
+// actually removed so the UI can show a real count rather than assuming
+// every row shown as deletable client-side still was by the time this ran.
+router.delete('/', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM manager_notifications n
+       WHERE ${deletableCondition(1)}
+       RETURNING id`,
+      [REQUIRES_EXPLICIT_REVIEW]
+    );
+    return res.json({ success: true, deleted: result.rows.length });
+  } catch (err) {
+    logger.error('DELETE /api/notifications error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -90,10 +90,12 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // Keyed by notification id — in-flight state for the "Reviewed" button
   // on a day/visit auto-cutoff notification.
   const [reviewingIds, setReviewingIds] = useState({});
-  // The notification pending a Clear confirmation, plus in-flight state for
-  // the confirm button itself.
+  // The pending Clear confirmation — either one notification object (the
+  // per-row Clear button) or the literal 'all' (the header's "Clear all
+  // resolved" button) — plus in-flight state for the confirm button itself.
   const [clearTarget, setClearTarget] = useState(null);
   const [clearing, setClearing] = useState(false);
+  const clearableCount = notifications.filter(isDeletable).length;
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -170,15 +172,21 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
     }
   };
 
-  // Permanently removes a notification — only ever called on one that
-  // isDeletable() already confirmed is reviewed/resolved, and the backend
-  // re-checks the same rule itself regardless.
+  // Permanently removes one notification, or every currently-eligible one
+  // in bulk (clearTarget === 'all') — either way only ever reaches a
+  // notification isDeletable() already confirmed is reviewed/resolved, and
+  // the backend re-checks the same rule itself regardless.
   const confirmClear = async () => {
     if (!clearTarget) return;
     setClearing(true);
     try {
-      await apiClient.delete(`/notifications/${clearTarget.id}`);
-      setNotifications((prev) => prev.filter((n) => n.id !== clearTarget.id));
+      if (clearTarget === 'all') {
+        await apiClient.delete('/notifications');
+        setNotifications((prev) => prev.filter((n) => !isDeletable(n)));
+      } else {
+        await apiClient.delete(`/notifications/${clearTarget.id}`);
+        setNotifications((prev) => prev.filter((n) => n.id !== clearTarget.id));
+      }
       setClearTarget(null);
     } catch {
       // Leave the confirmation dialog open — the user can retry the click.
@@ -208,7 +216,20 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
       {onBack && (
         <IconButton icon={<ArrowLeft size={18} />} title="Back to Dashboard" onClick={onBack} style={styles.backBtn} />
       )}
-      <SectionHeader title="Notifications" subtitle="Dealer visit alerts and login/logout exceptions across your team" />
+      <SectionHeader
+        title="Notifications"
+        subtitle="Dealer visit alerts and login/logout exceptions across your team"
+        action={clearableCount > 0 && (
+          <Button
+            variant="secondary"
+            icon={<Trash2 size={14} />}
+            style={styles.clearAllBtn}
+            onClick={() => setClearTarget('all')}
+          >
+            Clear all resolved ({clearableCount})
+          </Button>
+        )}
+      />
 
       <Card noPadding style={{ overflow: 'hidden' }}>
         {error ? (
@@ -334,8 +355,12 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
 
       <ConfirmationModal
         open={!!clearTarget}
-        title="Clear this notification?"
-        message="This permanently removes it from the list. This cannot be undone."
+        title={clearTarget === 'all' ? 'Clear all resolved notifications?' : 'Clear this notification?'}
+        message={
+          clearTarget === 'all'
+            ? `This permanently removes ${clearableCount} reviewed/resolved notification${clearableCount === 1 ? '' : 's'}. This cannot be undone.`
+            : 'This permanently removes it from the list. This cannot be undone.'
+        }
         confirmLabel="Clear"
         danger
         loading={clearing}
@@ -365,4 +390,5 @@ const styles = {
   followupDateInput: { height: 32, padding: '0 8px', fontSize: 12, width: 140, maxWidth: '100%' },
   followupApprovedDate: { ...typography.caption, color: colors.textMuted },
   clearBtn: { width: 28, height: 28 },
+  clearAllBtn: { height: 34, padding: '0 14px', fontSize: 12.5, flexShrink: 0 },
 };

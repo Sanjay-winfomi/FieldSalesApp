@@ -107,3 +107,30 @@ describe('DELETE /api/x/:id', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('DELETE /api/x (bulk clear)', () => {
+  afterEach(() => jest.resetAllMocks());
+
+  test('200 deletes every currently-eligible notification and reports the count', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 20 }, { id: 21 }, { id: 22 }] });
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.deleted).toBe(3);
+    // Same eligibility rule as the single-id route, just with no id filter.
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('n.id = $1');
+    expect(sql).toContain('read_at IS NOT NULL');
+    expect(sql).toContain("status IN ('approved', 'rejected')");
+    expect(params[0]).toEqual(expect.arrayContaining(['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent']));
+  });
+
+  test('200 with deleted: 0 when nothing is currently eligible', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x');
+    expect(res.status).toBe(200);
+    expect(res.body.deleted).toBe(0);
+  });
+});
