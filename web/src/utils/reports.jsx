@@ -23,6 +23,13 @@ export function toDateInputValue(d) {
 }
 
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+// A bare date with no time component (e.g. absences' business-date column,
+// returned as a plain 'YYYY-MM-DD' string — see pool.js's DATE type-parser
+// override). Pure string rearrangement, not a Date object round-trip —
+// parsing this as a Date and re-formatting risks exactly the timezone-shift
+// bug pool.js's own override exists to avoid (a bare date crossing midnight
+// UTC when displayed in IST).
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 // Every duration the backend returns is in raw minutes (attendance/visit
 // duration columns, rollup averages) — every one of those field names ends
@@ -60,6 +67,13 @@ export function formatCellValue(value, key) {
       hour: '2-digit', minute: '2-digit', hour12: true,
       timeZone: 'Asia/Kolkata',
     });
+  }
+  if (typeof value === 'string') {
+    const dateOnlyMatch = value.match(DATE_ONLY_PATTERN);
+    if (dateOnlyMatch) {
+      const [, year, month, day] = dateOnlyMatch;
+      return `${day}-${month}-${year}`;
+    }
   }
   if (key && MINUTES_KEY_PATTERN.test(key) && typeof value === 'number') {
     return formatMinutesAsHours(value);

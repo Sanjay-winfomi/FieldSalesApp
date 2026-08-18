@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { render } from '@testing-library/react';
-import { buildDynamicColumns, formatMinutesAsHours } from '../reports';
+import { buildDynamicColumns, formatMinutesAsHours, formatCellValue } from '../reports';
 
 describe('buildDynamicColumns', () => {
   test('builds columns from a uniform row set', () => {
@@ -29,6 +29,31 @@ describe('buildDynamicColumns', () => {
     expect(durationCol.label).toBe('Total Duration');
     const { container } = render(durationCol.render(rows[0]));
     expect(container.textContent).toBe('13h 55m');
+  });
+
+  test('a bare "YYYY-MM-DD" date column renders as "DD-MM-YYYY"', () => {
+    const rows = [{ name: 'Arun', absence_date: '2026-08-18' }];
+    const cols = buildDynamicColumns(rows);
+    const dateCol = cols.find((c) => c.key === 'absence_date');
+    const { container } = render(dateCol.render(rows[0]));
+    expect(container.textContent).toBe('18-08-2026');
+  });
+});
+
+describe('formatCellValue', () => {
+  test('formats a bare date-only string as DD-MM-YYYY', () => {
+    expect(formatCellValue('2026-08-18')).toBe('18-08-2026');
+    expect(formatCellValue('2026-01-05')).toBe('05-01-2026');
+  });
+
+  test('still formats a full ISO timestamp as a date+time, not just DD-MM-YYYY', () => {
+    // Regression check: the new bare-date pattern is exact-length-anchored
+    // ($) so it must never match a timestamp and truncate off the time.
+    expect(formatCellValue('2026-08-18T05:00:00.000Z')).not.toBe('18-08-2026');
+  });
+
+  test('other string values pass through unchanged', () => {
+    expect(formatCellValue('Arun Kumar')).toBe('Arun Kumar');
   });
 });
 
