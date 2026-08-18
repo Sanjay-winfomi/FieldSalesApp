@@ -1,10 +1,14 @@
 /**
  * notifications.routes.js — manager-facing in-app notification bell feed.
  *
- * GET   /api/notifications              — list, newest first
- * GET   /api/notifications/unread-count — lightweight poll target for the bell badge
- * PATCH /api/notifications/:id/read     — mark one read
- * POST  /api/notifications/read-all     — mark all unread as read (on opening the page)
+ * GET    /api/notifications              — list, newest first
+ * GET    /api/notifications/unread-count — lightweight poll target for the bell badge
+ * PATCH  /api/notifications/:id/read     — mark one read
+ * POST   /api/notifications/read-all     — mark all unread as read (on opening the page)
+ * DELETE /api/notifications/:id          — permanently remove one, only once it's
+ *                                          actually been reviewed/resolved (see
+ *                                          isDeletable below) — nothing still
+ *                                          pending action can be cleared away.
  *
  * Read-state is shared across all managers, not per-manager-account — see
  * schema.sql's comment on manager_notifications for why.
@@ -85,6 +89,44 @@ router.patch('/:id/read', async (req, res) => {
     return res.json({ notification: result.rows[0] });
   } catch (err) {
     logger.error('PATCH /api/notifications/:id/read error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/notifications/:id — permanently clears one notification, but
+// only if it's actually done: a REQUIRES_EXPLICIT_REVIEW type with its
+// Reviewed click already recorded, or a follow-up request already
+// approved/rejected (not still pending). Everything else — including a
+// REQUIRES_EXPLICIT_REVIEW type that's still unread, and every other
+// notification type, which has no "resolved" concept at all — can never be
+// deleted, so nothing still needing a manager's attention can be cleared
+// away by mistake. Enforced here, not just hidden client-side, so this
+// can't be bypassed by calling the endpoint directly.
+router.delete('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid notification id' });
+  }
+  try {
+    const result = await pool.query(
+      `DELETE FROM manager_notifications n
+       WHERE n.id = $1
+         AND (
+           (n.type = ANY($2::varchar[]) AND n.read_at IS NOT NULL)
+           OR (n.type = 'followup_request' AND EXISTS (
+             SELECT 1 FROM dealer_followup_requests r
+             WHERE r.id = n.followup_request_id AND r.status IN ('approved', 'rejected')
+           ))
+         )
+       RETURNING id`,
+      [id, REQUIRES_EXPLICIT_REVIEW]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Notification not found, or not yet reviewed/resolved' });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/notifications/:id error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

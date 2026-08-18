@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock, UserX } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock, UserX, Trash2 } from 'lucide-react';
 import { apiClient } from '../api';
-import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button } from '../components';
+import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button, ConfirmationModal } from '../components';
 import { colors, typography, spacing } from '../theme';
 
 // Maps a notification's `type` to an icon + StatusBadge tone — mirrors the
@@ -27,6 +27,18 @@ const TYPE_META = {
 // gets, since a missed logout/login is serious enough to want a manager to
 // actually look at it first.
 const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent'];
+
+// Mirrors the backend's own DELETE /:id eligibility rule exactly (which
+// enforces it server-side regardless of this) — only shows the Clear button
+// where there's actually something "done" to check: a REQUIRES_EXPLICIT_
+// REVIEW type once its Reviewed click is recorded, or a follow-up request
+// once it's been approved/rejected, not still pending. Every other
+// notification type has no resolved concept at all, so it never gets one.
+function isDeletable(n) {
+  if (REQUIRES_EXPLICIT_REVIEW.includes(n.type)) return !!n.read_at;
+  if (n.type === 'followup_request') return n.followup_status === 'approved' || n.followup_status === 'rejected';
+  return false;
+}
 
 const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
 
@@ -78,6 +90,10 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // Keyed by notification id — in-flight state for the "Reviewed" button
   // on a day/visit auto-cutoff notification.
   const [reviewingIds, setReviewingIds] = useState({});
+  // The notification pending a Clear confirmation, plus in-flight state for
+  // the confirm button itself.
+  const [clearTarget, setClearTarget] = useState(null);
+  const [clearing, setClearing] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -151,6 +167,23 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
       // Best-effort — the button just stays clickable to retry.
     } finally {
       setReviewingIds((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
+  // Permanently removes a notification — only ever called on one that
+  // isDeletable() already confirmed is reviewed/resolved, and the backend
+  // re-checks the same rule itself regardless.
+  const confirmClear = async () => {
+    if (!clearTarget) return;
+    setClearing(true);
+    try {
+      await apiClient.delete(`/notifications/${clearTarget.id}`);
+      setNotifications((prev) => prev.filter((n) => n.id !== clearTarget.id));
+      setClearTarget(null);
+    } catch {
+      // Leave the confirmation dialog open — the user can retry the click.
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -256,14 +289,26 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                           {n.followup_status === 'approved' && n.followup_approved_date && (
                             <span style={styles.followupApprovedDate}>for {n.followup_approved_date}</span>
                           )}
+                          <IconButton
+                            icon={<Trash2 size={13} />}
+                            title="Clear notification"
+                            onClick={() => setClearTarget(n)}
+                            style={styles.clearBtn}
+                          />
                         </div>
                       )
                     )}
 
                     {REQUIRES_EXPLICIT_REVIEW.includes(n.type) && (
                       n.read_at ? (
-                        <div style={{ marginTop: spacing.sm }}>
+                        <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', gap: spacing.sm }}>
                           <StatusBadge label="Reviewed" tone="success" />
+                          <IconButton
+                            icon={<Trash2 size={13} />}
+                            title="Clear notification"
+                            onClick={() => setClearTarget(n)}
+                            style={styles.clearBtn}
+                          />
                         </div>
                       ) : (
                         <div style={{ marginTop: spacing.sm }}>
@@ -286,6 +331,17 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
           </div>
         )}
       </Card>
+
+      <ConfirmationModal
+        open={!!clearTarget}
+        title="Clear this notification?"
+        message="This permanently removes it from the list. This cannot be undone."
+        confirmLabel="Clear"
+        danger
+        loading={clearing}
+        onConfirm={confirmClear}
+        onCancel={() => setClearTarget(null)}
+      />
     </div>
   );
 }
@@ -308,4 +364,5 @@ const styles = {
   followupDateLabel: { display: 'flex', flexDirection: 'column', gap: 2, ...typography.caption, color: colors.textSecondary, fontWeight: 600 },
   followupDateInput: { height: 32, padding: '0 8px', fontSize: 12, width: 140, maxWidth: '100%' },
   followupApprovedDate: { ...typography.caption, color: colors.textMuted },
+  clearBtn: { width: 28, height: 28 },
 };

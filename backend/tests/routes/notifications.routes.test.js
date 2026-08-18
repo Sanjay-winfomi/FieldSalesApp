@@ -72,3 +72,38 @@ describe('PATCH /api/x/:id/read', () => {
     expect(res.body.notification.read_at).toBeTruthy();
   });
 });
+
+describe('DELETE /api/x/:id', () => {
+  afterEach(() => jest.resetAllMocks());
+
+  test('400 on an invalid id', async () => {
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/not-a-number');
+    expect(res.status).toBe(400);
+  });
+
+  test('200 deletes a reviewed auto-cutoff notification', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 20 }] });
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/20');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    // The eligibility rule (reviewed, or an approved/rejected follow-up
+    // request) is enforced in the query itself, not just client-side.
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('read_at IS NOT NULL');
+    expect(sql).toContain("status IN ('approved', 'rejected')");
+    expect(params[0]).toBe(20);
+    expect(params[1]).toEqual(expect.arrayContaining(['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent']));
+  });
+
+  test('404 when the notification does not exist, or is not yet reviewed/resolved', async () => {
+    // The query's WHERE clause matches zero rows either way — the route
+    // can't (and doesn't need to) distinguish "wrong id" from "not eligible
+    // yet" from a single DELETE ... RETURNING result.
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/20');
+    expect(res.status).toBe(404);
+  });
+});

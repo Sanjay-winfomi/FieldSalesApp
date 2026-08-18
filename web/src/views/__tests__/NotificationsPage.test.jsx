@@ -4,7 +4,7 @@ import { apiClient } from '../../api';
 import NotificationsPage from '../NotificationsPage';
 
 vi.mock('../../api', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
 const FOLLOWUP_NOTIFICATION = {
@@ -230,5 +230,94 @@ describe('NotificationsPage', () => {
 
     expect(await screen.findByText('Representative did not log in')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /reviewed/i })).toBeInTheDocument();
+  });
+
+  test('an unreviewed auto-cutoff notification has no Clear button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day.',
+          read_at: null, created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    await screen.findByRole('button', { name: /reviewed/i });
+    expect(screen.queryByRole('button', { name: 'Clear notification' })).not.toBeInTheDocument();
+  });
+
+  test('a reviewed auto-cutoff notification shows a Clear button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day.',
+          read_at: '2026-08-18T09:00:00Z', created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByRole('button', { name: 'Clear notification' })).toBeInTheDocument();
+  });
+
+  test('a pending follow-up request has no Clear button', async () => {
+    apiClient.get.mockResolvedValue({ data: { notifications: [FOLLOWUP_NOTIFICATION] } });
+    render(<NotificationsPage />);
+
+    await screen.findByRole('button', { name: /approve/i });
+    expect(screen.queryByRole('button', { name: 'Clear notification' })).not.toBeInTheDocument();
+  });
+
+  test('an approved follow-up request shows a Clear button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: { notifications: [{ ...FOLLOWUP_NOTIFICATION, followup_status: 'approved' }] },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByRole('button', { name: 'Clear notification' })).toBeInTheDocument();
+  });
+
+  test('clicking Clear opens a confirmation dialog; confirming deletes the notification', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day.',
+          read_at: '2026-08-18T09:00:00Z', created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    apiClient.delete.mockResolvedValue({});
+    render(<NotificationsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear notification' }));
+    expect(await screen.findByText('Clear this notification?')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(apiClient.delete).toHaveBeenCalledWith('/notifications/3'));
+    await waitFor(() => expect(screen.queryByText('Day auto-logged-out (missed logout)')).not.toBeInTheDocument());
+  });
+
+  test('cancelling the confirmation dialog does not delete anything', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day.',
+          read_at: '2026-08-18T09:00:00Z', created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear notification' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(apiClient.delete).not.toHaveBeenCalled();
+    expect(screen.getByText('Day auto-logged-out (missed logout)')).toBeInTheDocument();
   });
 });
