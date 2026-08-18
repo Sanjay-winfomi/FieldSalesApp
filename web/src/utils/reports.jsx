@@ -24,11 +24,34 @@ export function toDateInputValue(d) {
 
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
+// Every duration the backend returns is in raw minutes (attendance/visit
+// duration columns, rollup averages) — every one of those field names ends
+// in "_minutes" by convention, which is what lets this be applied generically
+// instead of an explicit per-field allowlist.
+const MINUTES_KEY_PATTERN = /_minutes$/;
+
+// "Xh Ym" everywhere, matching the mobile app's own formatDuration
+// (activityHistory.js) — a manager reading 14836 raw minutes has no quick
+// sense of scale; 247h 16m (or, worse, the same number relabeled "hours"
+// without dividing it) does.
+export function formatMinutesAsHours(minutes) {
+  // Number(null) is 0, not NaN — checked explicitly so a missing value
+  // reads as "—" (no data) rather than the misleading "0h 0m" (zero duration).
+  if (minutes === null || minutes === undefined) return '—';
+  const n = Number(minutes);
+  if (!Number.isFinite(n)) return '—';
+  if (n < 1) return '0h 0m';
+  const h = Math.floor(n / 60);
+  const m = Math.round(n % 60);
+  return `${h}h ${m}m`;
+}
+
 // Tables show raw report data on screen — timestamps need to read as a
-// date/time a manager can scan, not the ISO string the API returns. CSV
-// exports deliberately keep the raw ISO value instead (unambiguous, sortable,
+// date/time a manager can scan, not the ISO string the API returns, and
+// durations need to read in hours/minutes, not raw minutes. CSV exports
+// deliberately keep the raw values instead (unambiguous, sortable,
 // re-importable), so this formatting is display-only.
-export function formatCellValue(value) {
+export function formatCellValue(value, key) {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string' && ISO_TIMESTAMP_PATTERN.test(value)) {
@@ -37,6 +60,9 @@ export function formatCellValue(value) {
       hour: '2-digit', minute: '2-digit', hour12: true,
       timeZone: 'Asia/Kolkata',
     });
+  }
+  if (key && MINUTES_KEY_PATTERN.test(key) && typeof value === 'number') {
+    return formatMinutesAsHours(value);
   }
   return value;
 }
@@ -84,9 +110,12 @@ export function buildDynamicColumns(rows) {
     .filter((key) => !ID_LIKE_KEYS.includes(key))
     .map((key) => ({
       key,
-      label: titleCase(key),
+      // Strip "_minutes" from the header instead of relabeling it "_hours"
+      // — the cell itself already reads "13h 55m", so repeating a bare unit
+      // in the header would be redundant ("Total Duration Hours: 13h 55m").
+      label: titleCase(key.replace(MINUTES_KEY_PATTERN, '')),
       render: (row) => {
-        const value = formatCellValue(row[key]);
+        const value = formatCellValue(row[key], key);
         return <span title={String(value)}>{value}</span>;
       },
     }));

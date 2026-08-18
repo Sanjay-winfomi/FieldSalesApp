@@ -5,7 +5,7 @@ import {
   Card, FilterBar, Button, DataTable, MetricCard, EmptyState,
 } from '../components';
 import { colors, spacing } from '../theme';
-import { downloadCsv, toDateInputValue, buildDynamicColumns } from '../utils/reports';
+import { downloadCsv, toDateInputValue, buildDynamicColumns, formatMinutesAsHours } from '../utils/reports';
 
 const SECTIONS = [
   { key: 'attendance', title: 'Attendance', endpoint: 'attendance' },
@@ -105,9 +105,9 @@ export default function RepFullReport({ repId, employeeName }) {
         <div style={styles.metricsGrid}>
           <MetricCard icon={<CalendarCheck />} value={rollup.days_worked} label="Days worked" tone="primary" />
           <MetricCard icon={<Route />} value={`${formatNumeric(rollup.total_distance_km, 1)} km`} label="Total distance" tone="warning" />
-          <MetricCard icon={<Timer />} value={`${rollup.total_duration_minutes ?? 0} min`} label="Total duration" tone="success" />
+          <MetricCard icon={<Timer />} value={formatMinutesAsHours(rollup.total_duration_minutes ?? 0)} label="Total duration" tone="success" />
           <MetricCard icon={<MapPin />} value={rollup.total_visits ?? 0} label="Total visits" tone="primary" />
-          <MetricCard icon={<Timer />} value={`${formatNumeric(rollup.avg_visit_duration_minutes, 0)} min`} label="Avg visit duration" tone="neutral" />
+          <MetricCard icon={<Timer />} value={formatMinutesAsHours(rollup.avg_visit_duration_minutes ?? 0)} label="Avg visit duration" tone="neutral" />
         </div>
       )}
 

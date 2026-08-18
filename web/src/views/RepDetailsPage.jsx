@@ -3,6 +3,7 @@ import { ArrowLeft, Clock, Route, Timer, MapPin, CheckCircle2, AlertTriangle } f
 import { apiClient } from '../api';
 import { Card, SectionHeader, LoadingCard, EmptyState, IconButton } from '../components';
 import { colors, typography, spacing } from '../theme';
+import { formatMinutesAsHours } from '../utils/reports';
 import RepFullReport from './RepFullReport';
 
 function formatTimeOnly(iso) {
@@ -138,7 +139,7 @@ export default function RepDetailsPage({ repId, onBack }) {
                     <div style={styles.metaCol}>
                       <span style={styles.metaLabel}><Timer size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Work duration</span>
                       <span style={styles.metaValue}>
-                        {data.attendance.total_duration_minutes ? `${data.attendance.total_duration_minutes} mins` : 'Active'}
+                        {data.attendance.total_duration_minutes ? formatMinutesAsHours(data.attendance.total_duration_minutes) : 'Active'}
                       </span>
                     </div>
                   </div>
@@ -172,7 +173,7 @@ export default function RepDetailsPage({ repId, onBack }) {
                         </div>
                         <p style={styles.dealerAddress}>{visit.dealer_address}</p>
                         <div style={styles.visitStats}>
-                          <span>{visit.visit_duration_minutes ? `${visit.visit_duration_minutes} min duration` : 'Active'}</span>
+                          <span>{visit.visit_duration_minutes ? `${formatMinutesAsHours(visit.visit_duration_minutes)} duration` : 'Active'}</span>
                           {visit.distance_from_previous_km > 0 && (
                             <span>· {parseFloat(visit.distance_from_previous_km).toFixed(2)} km from prev point</span>
                           )}
