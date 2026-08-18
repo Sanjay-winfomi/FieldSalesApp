@@ -75,6 +75,47 @@ describe('POST /api/x/login', () => {
     expect(res.status).toBe(201);
   });
 
+  test('an office-day login succeeds with no lat/lng at all', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: null, login_lng: null, work_mode: 'office' }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ work_mode: 'office' });
+    expect(res.status).toBe(201);
+    expect(pool.query.mock.calls[0][1]).toEqual([1, null, null, 'office']);
+  });
+
+  test('an office-day login is not blocked by a poor GPS accuracy fix', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', work_mode: 'office' }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ work_mode: 'office', lat: 11, lng: 77, accuracy_meters: 500 });
+    expect(res.status).toBe(201);
+  });
+
+  test('an office-day login fires a plain informational manager notification', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', work_mode: 'office' }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ work_mode: 'office' });
+    expect(res.status).toBe(201);
+    expect(createManagerNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'office_day',
+      severity: 'info',
+      employeeId: 1,
+    }));
+  });
+
+  test('a normal field-day login does NOT fire the office-day notification', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 5, login_time: '2026-07-27T05:00:00Z', login_lat: 11, login_lng: 77, work_mode: 'field' }] });
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ lat: 11, lng: 77 });
+    expect(res.status).toBe(201);
+    expect(createManagerNotification).not.toHaveBeenCalled();
+  });
+
+  test('400 when lat/lng missing on a field-day login (unchanged)', async () => {
+    const app = makeApp(attendanceRouter, { basePath: '/api/x' });
+    const res = await request(app).post('/api/x/login').send({ work_mode: 'field' });
+    expect(res.status).toBe(400);
+  });
+
   test('409 with the existing attendance_id when already logged in today', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [] }) // INSERT ... ON CONFLICT DO NOTHING -> no rows

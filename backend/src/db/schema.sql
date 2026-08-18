@@ -632,3 +632,59 @@ CREATE INDEX IF NOT EXISTS idx_dealer_followup_requests_resolved_by ON dealer_fo
 -- the notification history of it having happened.
 ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS followup_request_id INTEGER REFERENCES dealer_followup_requests(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_manager_notifications_followup_request_id ON manager_notifications (followup_request_id);
+
+-- absenceCheck.js's own NOT EXISTS dedup check races against itself when two
+-- app instances run its sweep concurrently (e.g. a Render redeploy briefly
+-- overlapping the old and new instance, each with its own setInterval) —
+-- both can see "no notification yet" and insert a duplicate ~one sweep
+-- interval apart. business_date makes the same (employee_id, business_date)
+-- pair enforceable as a real DB constraint for type = 'day_absent', so a
+-- concurrent insert is rejected outright rather than merely discouraged.
+-- Other notification types leave business_date NULL and are untouched by
+-- the partial index below (NULLs never conflict).
+ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS business_date DATE;
+
+-- One-time backfill + cleanup for rows that predate the business_date
+-- column: derive it for existing day_absent rows, then collapse any
+-- already-duplicated (employee_id, business_date) pairs down to the
+-- earliest row (read_at is a shared/manager-wide flag — if any duplicate was
+-- already reviewed, keep that fact rather than losing it to whichever row
+-- happened to be earliest).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM manager_notifications
+    WHERE type = 'day_absent' AND business_date IS NULL
+  ) THEN
+    -- schema.sql is plain SQL with no access to the DAY_BOUNDARY_HOUR env
+    -- var businessDay.js reads at startup — hardcodes its default (5) rather
+    -- than duplicating config here. Only affects how already-existing
+    -- duplicate rows get grouped for this one-time cleanup; going forward,
+    -- absenceCheck.js/managerNotifications.js pass the real business_date
+    -- computed in JS (which does honor the env var) at insert time.
+    UPDATE manager_notifications
+    SET business_date = DATE((created_at) AT TIME ZONE 'Asia/Kolkata' - INTERVAL '5 hours')
+    WHERE type = 'day_absent' AND business_date IS NULL;
+
+    UPDATE manager_notifications keep
+    SET read_at = dupe.read_at
+    FROM manager_notifications dupe
+    WHERE keep.type = 'day_absent' AND dupe.type = 'day_absent'
+      AND keep.employee_id = dupe.employee_id AND keep.business_date = dupe.business_date
+      AND dupe.read_at IS NOT NULL AND keep.read_at IS NULL
+      AND keep.id = (
+        SELECT MIN(id) FROM manager_notifications m2
+        WHERE m2.type = 'day_absent' AND m2.employee_id = keep.employee_id AND m2.business_date = keep.business_date
+      );
+
+    DELETE FROM manager_notifications dupe
+    WHERE dupe.type = 'day_absent'
+      AND dupe.id > (
+        SELECT MIN(id) FROM manager_notifications m2
+        WHERE m2.type = 'day_absent' AND m2.employee_id = dupe.employee_id AND m2.business_date = dupe.business_date
+      );
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_manager_notifications_absent_dedup
+  ON manager_notifications (employee_id, business_date) WHERE type = 'day_absent';

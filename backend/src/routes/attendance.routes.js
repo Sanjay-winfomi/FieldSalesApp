@@ -53,20 +53,34 @@ function parseAccuracy(value) {
 router.post('/login', async (req, res) => {
   const employeeId = req.employee.id;
 
-  if (req.body.lat === undefined || req.body.lng === undefined) {
-    return res.status(400).json({ error: 'lat and lng are required' });
-  }
-  const lat = parseCoord(req.body.lat, -90, 90);
-  const lng = parseCoord(req.body.lng, -180, 180);
-  if (lat === null || lng === null) {
-    return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
-  }
   // 'office' — the rep isn't going out on field visits today (working from
-  // their own company office instead) — skips the GPS-accuracy gate below:
-  // that threshold exists to keep a field day's distance/radius math
-  // trustworthy, which doesn't apply to a day with no dealer visits, and
-  // insisting on it would just make office days fail indoors for no reason.
+  // their own company office instead). Determined before the lat/lng check
+  // below, since an office day skips it entirely: there's no dealer-visit
+  // distance/radius math depending on this location at all, so requiring
+  // one would just be friction (and a permission prompt) for no reason.
   const workMode = req.body.work_mode === 'office' ? 'office' : 'field';
+
+  let lat = null;
+  let lng = null;
+  if (workMode === 'field') {
+    if (req.body.lat === undefined || req.body.lng === undefined) {
+      return res.status(400).json({ error: 'lat and lng are required' });
+    }
+    lat = parseCoord(req.body.lat, -90, 90);
+    lng = parseCoord(req.body.lng, -180, 180);
+    if (lat === null || lng === null) {
+      return res.status(400).json({ error: 'lat and lng must be valid numbers (-90..90, -180..180)' });
+    }
+  } else if (req.body.lat !== undefined || req.body.lng !== undefined) {
+    // Optional but still validated if the client happens to send one anyway
+    // (e.g. it got a fix before the rep picked office day) — same format
+    // rules as a field day, just not required.
+    lat = parseCoord(req.body.lat, -90, 90);
+    lng = parseCoord(req.body.lng, -180, 180);
+  }
+  // Skips the GPS-accuracy gate below for the same reason as the lat/lng
+  // requirement above — that threshold exists to keep a field day's
+  // distance/radius math trustworthy, which doesn't apply here.
   const accuracyMeters = parseAccuracy(req.body.accuracy_meters);
   if (accuracyMeters === null) {
     return res.status(400).json({ error: 'accuracy_meters must be a valid non-negative number' });
@@ -111,6 +125,22 @@ router.post('/login', async (req, res) => {
     }
 
     logDayLogin(req.employee.username, lat, lng);
+
+    // Plain informational notice, not an alert — no action needed from a
+    // manager, so it's deliberately NOT added to notifications.routes.js's
+    // REQUIRES_EXPLICIT_REVIEW list: it just shows as text in the feed and
+    // gets marked read the normal passive way, same as e.g. "returned to
+    // dealer premises". Fire-and-forget — never affects the login response.
+    if (workMode === 'office') {
+      createManagerNotification({
+        type: 'office_day',
+        title: 'Office day',
+        body: `${req.employee.username} marked today as an office day — not visiting dealers.`,
+        severity: 'info',
+        employeeId,
+      }).catch(() => {});
+    }
+
     const body = { attendance: result.rows[0] };
     await saveIdempotentResponse(idempotencyKey, employeeId, 'attendance/login', 201, body);
     return res.status(201).json(body);

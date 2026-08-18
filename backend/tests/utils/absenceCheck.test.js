@@ -19,6 +19,7 @@ describe('runAbsenceCheckSweep', () => {
       type: 'day_absent',
       severity: 'danger',
       employeeId: 4,
+      businessDate: '2026-08-18',
     }));
     expect(createManagerNotification.mock.calls[0][0].body).toContain('divya');
   });

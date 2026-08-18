@@ -61,6 +61,32 @@ describe('DayLoginScreen', () => {
     await waitFor(() => expect(onLogin).toHaveBeenCalled());
   });
 
+  test('selecting Office day before GPS resolves logs in with no location at all', async () => {
+    // GPS never resolves in this test — proves office day doesn't wait on
+    // (or need) a location fix to become submittable.
+    getCurrentLocation.mockReturnValue(new Promise(() => {}));
+    api.post.mockResolvedValue({ data: { attendance: { id: 6, login_time: new Date().toISOString(), work_mode: 'office' } } });
+    const onLogin = jest.fn();
+
+    const { findByLabelText, findByText, findByRole } = await render(
+      <DayLoginScreen onLogin={onLogin} onAlreadyLoggedIn={jest.fn()} navigation={navigation} />
+    );
+
+    fireEvent.press(await findByLabelText('Office day, not visiting dealers'));
+    expect(await findByText('No location needed for an office day.')).toBeTruthy();
+
+    const loginBtn = await findByRole('button', { name: 'Login for the day' });
+    expect(loginBtn.props.accessibilityState.disabled).toBe(false);
+    fireEvent.press(loginBtn);
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/attendance/login', { work_mode: 'office' }));
+    await waitFor(() => expect(onLogin).toHaveBeenCalled());
+
+    // Only the one call from the initial (default field mode) mount — never
+    // called again after switching to office.
+    expect(getCurrentLocation).toHaveBeenCalledTimes(1);
+  });
+
   test('field mode (the default) sends work_mode: field', async () => {
     getCurrentLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
     api.post.mockResolvedValue({ data: { attendance: { id: 5, login_time: new Date().toISOString(), work_mode: 'field' } } });

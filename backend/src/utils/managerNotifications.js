@@ -22,13 +22,20 @@ const pool = require('../db/pool');
  * @param {number} [opts.visitId]
  * @param {number} [opts.followupRequestId] - lets the notification feed
  *   render Approve/Reject actions inline (see dealer_followup_requests)
+ * @param {string} [opts.businessDate] - 'YYYY-MM-DD'; only meaningful for
+ *   type 'day_absent' (see absenceCheck.js) — a partial unique index on
+ *   (employee_id, business_date) WHERE type = 'day_absent' rejects a second
+ *   insert for the same rep + day outright, so a sweep racing against
+ *   another instance of itself can't double-notify (schema.sql). Every
+ *   other type leaves this null and is unaffected by that index.
  */
-async function createManagerNotification({ type, title, body, severity = 'info', employeeId = null, dealerId = null, visitId = null, followupRequestId = null }) {
+async function createManagerNotification({ type, title, body, severity = 'info', employeeId = null, dealerId = null, visitId = null, followupRequestId = null, businessDate = null }) {
   try {
     await pool.query(
-      `INSERT INTO manager_notifications (type, title, body, severity, employee_id, dealer_id, visit_id, followup_request_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [type, title, body, severity, employeeId, dealerId, visitId, followupRequestId]
+      `INSERT INTO manager_notifications (type, title, body, severity, employee_id, dealer_id, visit_id, followup_request_id, business_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (employee_id, business_date) WHERE type = 'day_absent' DO NOTHING`,
+      [type, title, body, severity, employeeId, dealerId, visitId, followupRequestId, businessDate]
     );
   } catch (err) {
     // A notification failing to write should never take down the request

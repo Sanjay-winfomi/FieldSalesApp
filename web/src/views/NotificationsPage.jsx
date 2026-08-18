@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock, UserX, Trash2 } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock, UserX, Trash2, Building2 } from 'lucide-react';
 import { apiClient } from '../api';
 import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button, ConfirmationModal } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -19,6 +19,9 @@ const TYPE_META = {
   day_auto_cutoff:      { icon: Clock,         tone: 'warning' },
   visit_auto_cutoff:    { icon: Clock,         tone: 'warning' },
   day_absent:           { icon: UserX,         tone: 'danger' },
+  // Plain informational — no action needed, so deliberately absent from
+  // REQUIRES_EXPLICIT_REVIEW/isDeletable below: it just reads as text.
+  office_day:           { icon: Building2,     tone: 'info' },
 };
 
 // These require an explicit "Reviewed" click — see the backend's read-all

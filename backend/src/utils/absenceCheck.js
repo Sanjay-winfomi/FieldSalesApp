@@ -68,6 +68,7 @@ async function flagAbsentReps() {
         body: `${row.username} did not log in on ${dateLabel} — likely absent, follow up if unplanned.`,
         severity: 'danger',
         employeeId: row.employee_id,
+        businessDate: row.business_date,
       });
     } catch (err) {
       logger.error('Failed to notify for absent rep', { employeeId: row.employee_id, error: err.message });

@@ -164,6 +164,25 @@ describe('NotificationsPage', () => {
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
   });
 
+  test('an office_day notification renders as plain text, with no Reviewed/Clear/approve buttons at all', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 5, type: 'office_day', title: 'Office day',
+          body: 'arun marked today as an office day — not visiting dealers.',
+          read_at: null, created_at: '2026-08-19T05:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText('Office day')).toBeInTheDocument();
+    expect(screen.getByText('arun marked today as an office day — not visiting dealers.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reviewed/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear notification' })).not.toBeInTheDocument();
+  });
+
   test('an unreviewed day_auto_cutoff notification shows a Reviewed button', async () => {
     apiClient.get.mockResolvedValue({
       data: {
