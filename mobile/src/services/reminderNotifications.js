@@ -57,8 +57,10 @@ export async function scheduleReminderNotifications({ dealerName, reminderDate }
       if (date <= now) return Promise.resolve(null);
       return Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Reminder',
-          body: `Reminder: ${dealerName} ${daysLeft} days left`,
+          title: `Follow up: ${dealerName}`,
+          body: daysLeft === 0
+            ? `Your reminder for ${dealerName} is due today.`
+            : `Your reminder for ${dealerName} is due tomorrow.`,
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: 'reminders' },
       });
