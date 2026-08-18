@@ -163,4 +163,56 @@ describe('NotificationsPage', () => {
     expect(await screen.findByText('Left dealer premises')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
   });
+
+  test('an unreviewed day_auto_cutoff notification shows a Reviewed button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day — automatically closed at 1:00 AM after 10.0h.',
+          read_at: null, created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByRole('button', { name: /reviewed/i })).toBeInTheDocument();
+  });
+
+  test('clicking Reviewed marks the notification read and swaps the button for a badge', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'visit_auto_cutoff', title: 'Dealer visit auto-closed (missed logout)',
+          body: 'arun did not log out of Dealer A — automatically closed at 1:00 AM after 8.0h.',
+          read_at: null, created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    apiClient.patch.mockResolvedValue({ data: { notification: { id: 3, read_at: '2026-08-18T09:00:00Z' } } });
+    render(<NotificationsPage />);
+
+    const reviewedBtn = await screen.findByRole('button', { name: /reviewed/i });
+    fireEvent.click(reviewedBtn);
+
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledWith('/notifications/3/read'));
+    expect(await screen.findByText('Reviewed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reviewed/i })).not.toBeInTheDocument();
+  });
+
+  test('an already-reviewed auto-cutoff notification shows the badge directly, no button', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        notifications: [{
+          id: 3, type: 'day_auto_cutoff', title: 'Day auto-logged-out (missed logout)',
+          body: 'arun did not log out for the day.',
+          read_at: '2026-08-18T09:00:00Z', created_at: '2026-08-18T01:00:00Z', followup_request_id: null,
+        }],
+      },
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText('Reviewed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reviewed/i })).not.toBeInTheDocument();
+  });
 });

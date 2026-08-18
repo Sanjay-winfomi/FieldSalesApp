@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X } from 'lucide-react';
+import { Bell, MapPin, LogIn, LogOut, ShieldAlert, CheckCircle2, ArrowLeft, WifiOff, CalendarClock, CalendarX, Check, X, Clock } from 'lucide-react';
 import { apiClient } from '../api';
 import { SectionHeader, Card, EmptyState, StatusBadge, IconButton, Button } from '../components';
 import { colors, typography, spacing } from '../theme';
@@ -16,7 +16,16 @@ const TYPE_META = {
   sync_failure:         { icon: WifiOff,       tone: 'danger' },
   followup_request:     { icon: CalendarClock, tone: 'info' },
   unvisited_assignments: { icon: CalendarX,    tone: 'warning' },
+  day_auto_cutoff:      { icon: Clock,         tone: 'warning' },
+  visit_auto_cutoff:    { icon: Clock,         tone: 'warning' },
 };
+
+// These two require an explicit "Reviewed" click — see the backend's
+// read-all endpoint, which deliberately excludes them from the passive
+// mark-everything-read-on-page-open behavior every other notification type
+// gets, since a missed logout is serious enough to want a manager to
+// actually look at it first.
+const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff'];
 
 const FOLLOWUP_STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected' };
 
@@ -65,6 +74,9 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // approval to, if they've touched the input. Falls back to whatever the
   // rep originally requested (followup_requested_date) until then.
   const [approvalDates, setApprovalDates] = useState({});
+  // Keyed by notification id — in-flight state for the "Reviewed" button
+  // on a day/visit auto-cutoff notification.
+  const [reviewingIds, setReviewingIds] = useState({});
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -120,11 +132,39 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
     }
   };
 
-  // Mark everything read on open, then reflect the now-zero count back up to
-  // the header's bell badge immediately rather than waiting on its own poll.
+  // Explicit "Reviewed" click for a day/visit auto-cutoff notification —
+  // these are deliberately excluded from the passive read-all-on-open below,
+  // so this is the only way one of these ever gets marked read.
+  const markReviewed = async (id) => {
+    setReviewingIds((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await apiClient.patch(`/notifications/${id}/read`);
+      setNotifications((prev) => prev.map((n) => (
+        n.id === id ? { ...n, read_at: res.data.notification.read_at } : n
+      )));
+      if (onUnreadCountChange) {
+        const unread = await apiClient.get('/notifications/unread-count');
+        onUnreadCountChange(unread.data.count);
+      }
+    } catch {
+      // Best-effort — the button just stays clickable to retry.
+    } finally {
+      setReviewingIds((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
+  // Mark everything else read on open (day_auto_cutoff/visit_auto_cutoff are
+  // excluded server-side — see notifications.routes.js), then reflect the
+  // real remaining unread count back up to the header's bell badge
+  // immediately rather than waiting on its own poll. Not hardcoded to 0:
+  // an unreviewed auto-cutoff notification is exactly the case where the
+  // badge must NOT clear just because the page was opened.
   useEffect(() => {
-    apiClient.post('/notifications/read-all').then(() => {
-      if (onUnreadCountChange) onUnreadCountChange(0);
+    apiClient.post('/notifications/read-all').then(async () => {
+      if (onUnreadCountChange) {
+        const unread = await apiClient.get('/notifications/unread-count');
+        onUnreadCountChange(unread.data.count);
+      }
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -215,6 +255,26 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                           {n.followup_status === 'approved' && n.followup_approved_date && (
                             <span style={styles.followupApprovedDate}>for {n.followup_approved_date}</span>
                           )}
+                        </div>
+                      )
+                    )}
+
+                    {REQUIRES_EXPLICIT_REVIEW.includes(n.type) && (
+                      n.read_at ? (
+                        <div style={{ marginTop: spacing.sm }}>
+                          <StatusBadge label="Reviewed" tone="success" />
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: spacing.sm }}>
+                          <Button
+                            variant="success"
+                            style={styles.followupBtn}
+                            icon={<Check size={14} />}
+                            loading={!!reviewingIds[n.id]}
+                            onClick={() => markReviewed(n.id)}
+                          >
+                            Reviewed
+                          </Button>
                         </div>
                       )
                     )}

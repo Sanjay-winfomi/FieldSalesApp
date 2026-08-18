@@ -48,10 +48,19 @@ router.get('/unread-count', async (req, res) => {
   }
 });
 
+// A missed-logout auto-cutoff is serious enough that opening the
+// notifications page shouldn't silently mark it read before a manager has
+// actually looked at it and clicked "Reviewed" — every other notification
+// type still gets the passive read-all-on-open behavior.
+const REQUIRES_EXPLICIT_REVIEW = ['day_auto_cutoff', 'visit_auto_cutoff'];
+
 // POST /api/notifications/read-all
 router.post('/read-all', async (req, res) => {
   try {
-    await pool.query(`UPDATE manager_notifications SET read_at = NOW() WHERE read_at IS NULL`);
+    await pool.query(
+      `UPDATE manager_notifications SET read_at = NOW() WHERE read_at IS NULL AND type != ALL($1::varchar[])`,
+      [REQUIRES_EXPLICIT_REVIEW]
+    );
     return res.json({ success: true });
   } catch (err) {
     logger.error('POST /api/notifications/read-all error', { error: err.message, stack: err.stack });

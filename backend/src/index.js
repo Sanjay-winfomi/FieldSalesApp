@@ -48,6 +48,10 @@ const assignmentsRouter  = require('./routes/assignments.routes');
 const navigationRouter   = require('./routes/navigation.routes');
 const followupRequestsRouter = require('./routes/followupRequests.routes');
 
+// Side-effect-only require — registers the self-scheduling 1:00 AM IST
+// auto-cutoff sweep for a rep who never logs out (see autoCutoff.js).
+require('./utils/autoCutoff');
+
 const { requireAuth, requireRole } = require('./middleware/auth.middleware');
 
 // Fail fast at boot rather than let the first login attempt throw a confusing
