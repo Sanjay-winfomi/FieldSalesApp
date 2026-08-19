@@ -306,7 +306,7 @@ export default function HomeScreen({ navigation }) {
         </FadeSlideIn>
 
         {dayStatus === 'logged_in' && !activeVisit && nearbyDealer && (
-          <FadeSlideIn delay={100}>
+          <FadeSlideIn delay={100} style={{ marginTop: spacing.cardGap }}>
             <StatusCard
               label="You're near a dealer"
               value={nearbyDealer.dealerName || `Dealer #${nearbyDealer.dealerId}`}
@@ -314,7 +314,7 @@ export default function HomeScreen({ navigation }) {
               icon={<MapPin size={22} color={colors.primary} />}
               action={
                 <Pressable
-                  style={styles.smallActionBtn}
+                  style={styles.nearbyDealerBtn}
                   onPress={() => onSelectDealer({
                     id: nearbyDealer.dealerId,
                     name: nearbyDealer.dealerName,
@@ -445,6 +445,10 @@ const styles = StyleSheet.create({
   completedPill: { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: '#FDE68A' },
   logoutBtn: { backgroundColor: colors.danger, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
   logoutBtnText: { color: colors.textInverse, fontSize: 13, fontWeight: '700' },
+  // Same pill as smallActionBtn/logoutBtn, just a touch wider — "Dealer
+  // login" is longer than "Login"/"Dealer Logout" and looked cramped at the
+  // same horizontal padding.
+  nearbyDealerBtn: { backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
 
   sectionLabel: { ...typography.cardTitle, fontSize: 16, color: colors.text, marginBottom: spacing.md },
   summaryGrid: { flexDirection: 'row' },
