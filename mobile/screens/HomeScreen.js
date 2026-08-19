@@ -54,21 +54,31 @@ export default function HomeScreen({ navigation }) {
     fetchTodayState,
     onSelectDealer,
     fetchAssignedDealers,
+    nearbyDealer,
+    refreshNearbyDealer,
   } = useAppState();
   const { pendingSyncCount, setPendingSyncCount } = usePendingSync();
 
   // Refresh the assigned-dealer list (and any in-progress navigation
   // status on it) whenever this tab regains focus — e.g. returning from
   // Check-In or the navigation screen. Same pattern already used by
-  // DealerDirectoryScreen's own focus listener.
+  // DealerDirectoryScreen's own focus listener. refreshNearbyDealer rides
+  // along here too — it's App.js's own AppState 'active' listener that
+  // covers coming back from the background, but that alone misses cold-
+  // starting straight onto this tab or switching back to it while the app
+  // was never backgrounded, so this screen also has to trigger its own check.
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', fetchAssignedDealers);
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchAssignedDealers();
+      refreshNearbyDealer();
+    });
     return unsubscribe;
-  }, [navigation, fetchAssignedDealers]);
+  }, [navigation, fetchAssignedDealers, refreshNearbyDealer]);
 
   const handleRefresh = () => {
     fetchTodayState();
     fetchAssignedDealers();
+    refreshNearbyDealer();
   };
 
   const loginTime = attendance?.login_time ? formatTime(attendance.login_time) : '';
@@ -294,6 +304,33 @@ export default function HomeScreen({ navigation }) {
             />
           </View>
         </FadeSlideIn>
+
+        {dayStatus === 'logged_in' && !activeVisit && nearbyDealer && (
+          <FadeSlideIn delay={100}>
+            <StatusCard
+              label="You're near a dealer"
+              value={nearbyDealer.dealerName || `Dealer #${nearbyDealer.dealerId}`}
+              tone="info"
+              icon={<MapPin size={22} color={colors.primary} />}
+              action={
+                <Pressable
+                  style={styles.smallActionBtn}
+                  onPress={() => onSelectDealer({
+                    id: nearbyDealer.dealerId,
+                    name: nearbyDealer.dealerName,
+                    address: nearbyDealer.dealerAddress,
+                    latitude: nearbyDealer.dealerLat,
+                    longitude: nearbyDealer.dealerLng,
+                    radius_meters: nearbyDealer.radiusMeters,
+                  }, true, navigation)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.smallActionBtnText}>Dealer login</Text>
+                </Pressable>
+              }
+            />
+          </FadeSlideIn>
+        )}
 
         {dayStatus === 'logged_in' && (
           <FadeSlideIn delay={160} style={{ marginTop: spacing.cardGap }}>

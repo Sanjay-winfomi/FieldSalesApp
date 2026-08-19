@@ -24,6 +24,7 @@ import {
   startAssignedDealersGeofence,
   stopAssignedDealersGeofence,
   checkArrivalNow,
+  findNearbyAssignedDealer,
 } from '../assignedDealerGeofence';
 
 const ASSIGNMENT_A = { id: 1, dealer_id: 10, dealer_name: 'Dealer A', dealer_address: 'Addr A', dealer_lat: 11.0, dealer_lng: 77.0, radius_meters: 150 };
@@ -188,6 +189,45 @@ describe('assignedDealerGeofence', () => {
     test('never throws on a missing/invalid position', async () => {
       await expect(checkArrivalNow(null, null)).resolves.toBeUndefined();
       expect(sendArrivalNotification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findNearbyAssignedDealer', () => {
+    test('returns the pending assignment whose radius contains the given position', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      const nearby = await findNearbyAssignedDealer(11.0010, 77.0); // ~111m away, inside the 150m radius
+
+      expect(nearby).toEqual(expect.objectContaining({ regionId: 'assignment-1', dealerName: 'Dealer A' }));
+    });
+
+    test('returns null for a position outside every pending dealer\'s radius', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+
+      const nearby = await findNearbyAssignedDealer(11.01, 77.0); // ~1.1km away, well outside 150m
+
+      expect(nearby).toBeNull();
+    });
+
+    test('keeps returning the same dealer on repeated calls, unlike checkArrivalNow\'s one-shot notify', async () => {
+      Location.getBackgroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+      await startAssignedDealersGeofence([ASSIGNMENT_A]);
+      await checkArrivalNow(11.0010, 77.0); // marks assignment-1 as already-notified
+
+      const nearby = await findNearbyAssignedDealer(11.0010, 77.0);
+
+      expect(nearby).toEqual(expect.objectContaining({ regionId: 'assignment-1' }));
+    });
+
+    test('returns null when nothing is currently being watched', async () => {
+      const nearby = await findNearbyAssignedDealer(11.0, 77.0);
+      expect(nearby).toBeNull();
+    });
+
+    test('never throws on a missing/invalid position', async () => {
+      await expect(findNearbyAssignedDealer(null, null)).resolves.toBeNull();
     });
   });
 });

@@ -16,7 +16,7 @@ import { startDealerGeofence, stopDealerGeofence } from './src/services/geofence
 import { startVisitForegroundService, stopVisitForegroundService } from './src/services/visitForegroundService';
 import { isMiuiDevice, hasSeenMiuiOnboarding } from './src/services/miui';
 import { captureException } from './src/services/crashReporter';
-import { startAssignedDealersGeofence, stopAssignedDealersGeofence, checkArrivalNow } from './src/services/assignedDealerGeofence';
+import { startAssignedDealersGeofence, stopAssignedDealersGeofence, checkArrivalNow, findNearbyAssignedDealer } from './src/services/assignedDealerGeofence';
 import { configureNotificationHandler } from './src/services/reminderNotifications';
 import { configureGeofenceNotificationChannel, configureArrivalNotificationChannel, sendGeofenceNotification } from './src/services/geofenceNotifications';
 import { AppStateContext, PendingSyncContext } from './src/context/AppStateContext';
@@ -106,6 +106,13 @@ export default function App() {
   const [selectedDealer, setSelectedDealer] = useState(null);
   const [assignedDealers, setAssignedDealers] = useState([]);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
+  // The still-pending assigned dealer (if any) the rep's last-known location
+  // fell inside the radius of — drives Home's "Dealer login" card. Distinct
+  // from the OS/notification arrival flow (assignedDealerGeofence.js): that's
+  // one-shot-per-assignment by design, this is just "is the rep here right
+  // now", so it's recomputed (see refreshNearbyDealer below) rather than
+  // remembered across visits to the same spot.
+  const [nearbyDealer, setNearbyDealer] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
@@ -426,6 +433,33 @@ export default function App() {
     assignedDealersRef.current = assignedDealers;
   });
 
+  // Home's "Dealer login" card check — same GPS reading/cadence reasoning as
+  // checkArrivalNow below (Balanced accuracy, not a fresh Highest-accuracy
+  // lock), but read-only: it just answers "is the rep inside a still-pending
+  // assigned dealer's radius right now", for the UI to react to, rather than
+  // firing anything. Exposed via context so HomeScreen can also call it on
+  // its own focus (covers cold-starting straight onto Home, and switching
+  // back to the Home tab — this listener alone only covers app-backgrounded
+  // -> foregrounded, not "the app was already in front the whole time").
+  const refreshNearbyDealer = useCallback(async () => {
+    let pending;
+    try {
+      pending = assignedDealersRef.current.filter((a) => a.status !== 'completed' && a.status !== 'cancelled');
+    } catch (error) {
+      console.error('Failed to compute pending assignments for nearby-dealer check:', error);
+      captureException(error, { area: 'refresh-nearby-dealer-pending' });
+      return;
+    }
+    if (pending.length === 0) {
+      setNearbyDealer(null);
+      return;
+    }
+    const loc = await getApproximateLocation();
+    if (!loc) return;
+    const nearby = await findNearbyAssignedDealer(loc.lat, loc.lng);
+    setNearbyDealer(nearby);
+  }, []);
+
   useEffect(() => {
     if (!employee) return;
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -454,6 +488,7 @@ export default function App() {
       getApproximateLocation().then((loc) => {
         if (loc) checkArrivalNow(loc.lat, loc.lng);
       });
+      refreshNearbyDealer();
     });
     return () => subscription.remove();
   }, [employee]);
@@ -470,6 +505,7 @@ export default function App() {
       setVisits([]);
       setSelectedDealer(null);
       setAssignedDealers([]);
+      setNearbyDealer(null);
       // Deliberately does NOT clearQueue() here, unlike finishLogout below.
       // This fires from an unannounced, automatic session expiry (refresh
       // token rejected mid-request) — the rep never chose to log out and
@@ -646,6 +682,9 @@ export default function App() {
     // response landing right after this check-in must not overwrite it.
     todayStateSeqRef.current++;
     setVisits((prev) => [...prev, newVisit]);
+    // The rep just checked in — Home's "Dealer login" card for this dealer
+    // no longer applies (there's an active visit now instead).
+    setNearbyDealer(null);
   };
 
   const handleDealerLogout = async (updatedVisit) => {
@@ -679,6 +718,7 @@ export default function App() {
       setPendingSyncCount(0);
       setSelectedDealer(null);
       setAssignedDealers([]);
+      setNearbyDealer(null);
       // Logout is dispatched from a screen nested inside MainTabs (the tab
       // navigator), which has no meaningful "replace" of its own — reach the
       // parent root Stack explicitly so the whole app resets to Login.
@@ -749,11 +789,13 @@ export default function App() {
     assignedDealers,
     fetchAssignedDealers,
     onSelectAssignment: handleSelectAssignment,
+    nearbyDealer,
+    refreshNearbyDealer,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     employee, attendance, visits, dayStatus, visitsCount, pendingVisitsCount, distanceTravelled,
     refreshing, locationPermissionDenied, locationPermissionCanAskAgain,
-    backgroundLocationDenied, assignedDealers,
+    backgroundLocationDenied, assignedDealers, nearbyDealer,
   ]);
 
   // See PendingSyncContext's own comment (src/context/AppStateContext.js) —

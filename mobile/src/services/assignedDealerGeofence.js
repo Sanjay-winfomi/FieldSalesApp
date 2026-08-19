@@ -153,6 +153,35 @@ export async function stopAssignedDealersGeofence() {
 }
 
 /**
+ * Read-only counterpart to checkArrivalNow, for driving UI (Home's "Dealer
+ * login" card) instead of firing a push notification. Deliberately doesn't
+ * consult or mutate the notified-set: checkArrivalNow is one-shot-per-
+ * assignment by design (a push should only fire once), but a UI affordance
+ * should keep showing for as long as the rep is actually standing inside
+ * the radius, including after the notification for the same arrival has
+ * already fired.
+ * @param {number} lat
+ * @param {number} lng
+ * @returns {Promise<{regionId, assignmentId, dealerId, dealerName, dealerAddress, dealerLat, dealerLng, radiusMeters}|null>}
+ */
+export async function findNearbyAssignedDealer(lat, lng) {
+  if (lat == null || lng == null) return null;
+  try {
+    const cacheJson = await AsyncStorage.getItem(CACHE_KEY);
+    const cached = cacheJson ? JSON.parse(cacheJson) : [];
+    for (const assignment of cached) {
+      const distanceMeters = haversineMeters(lat, lng, assignment.dealerLat, assignment.dealerLng);
+      if (distanceMeters <= assignment.radiusMeters) return assignment;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Nearby assigned dealer check failed:', err.message);
+    captureException(err, { area: 'find-nearby-assigned-dealer' });
+    return null;
+  }
+}
+
+/**
  * Immediate foreground fallback for the OS geofence's inherent detection
  * lag — checks the given GPS reading against every still-pending assigned
  * dealer right now, instead of waiting for a background Enter event that
