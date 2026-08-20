@@ -10,6 +10,7 @@ import React from 'react';
 import { render, waitFor, fireEvent } from '@testing-library/react-native';
 import { api } from '../../src/services/api';
 import { getApproximateLocation, haversineMeters } from '../../src/services/location';
+import { __fitToCoordinatesMock } from 'react-native-maps';
 import DealerNavigationScreen from '../DealerNavigationScreen';
 
 // The first render in this file pays a one-time cold-start cost for the
@@ -111,6 +112,22 @@ describe('DealerNavigationScreen', () => {
 
     expect(await findByText(/no registered coordinates/)).toBeTruthy();
     expect(api.post).not.toHaveBeenCalled();
+  });
+
+  test('fits the map to both the rep and dealer markers once ready, instead of relying on Android\'s unreliable initialRegion', async () => {
+    getApproximateLocation.mockResolvedValue({ lat: 12.9, lng: 77.6, accuracyMeters: 10 });
+    api.post.mockResolvedValue({
+      data: { navigation: { id: 100, status: 'navigating', distance_meters: 4200, duration_seconds: 600, duration_in_traffic_seconds: 660, encoded_polyline: null } },
+    });
+
+    await render(
+      <DealerNavigationScreen assignment={ASSIGNMENT} navigation={{ goBack: jest.fn(), addListener: jest.fn(() => jest.fn()) }} onArrived={jest.fn()} />
+    );
+
+    await waitFor(() => expect(__fitToCoordinatesMock).toHaveBeenCalledWith(
+      [{ latitude: 12.9, longitude: 77.6 }, { latitude: 13.0, longitude: 77.0 }],
+      expect.objectContaining({ animated: false })
+    ));
   });
 
   test('cancelling stops the position poll and patches the backend before navigating back', async () => {

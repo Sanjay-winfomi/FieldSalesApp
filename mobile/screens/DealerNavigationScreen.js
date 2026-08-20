@@ -115,6 +115,14 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
   // otherwise keep firing GPS/API calls for a screen the rep can no longer
   // see.
   const isFocusedRef = useRef(true);
+  // react-native-maps' `initialRegion` prop is unreliable on Android with
+  // PROVIDER_GOOGLE — if the native view's layout size isn't known yet at
+  // the instant it mounts (routine inside a flex container like this
+  // screen's), the SDK can silently ignore it and fall back to its own
+  // built-in default camera (zoomed all the way out to the whole world),
+  // regardless of how correct the region math above is. Explicitly fitting
+  // once the map reports itself ready sidesteps that entirely.
+  const mapRef = useRef(null);
 
   useEffect(() => () => { isMountedRef.current = false; }, []);
 
@@ -284,6 +292,23 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
   const polylinePoints = route?.encoded_polyline ? decodePolyline(route.encoded_polyline) : [];
   const statusLabel = STATUS_LABELS[status] || status;
 
+  // Fits both the rep's and the dealer's markers into view once the map is
+  // actually ready to be moved — a one-time correction for Android's
+  // initialRegion unreliability (see mapRef's own comment above). Not tied
+  // to `coords` updates from the arrival poll: re-centering the map every
+  // 15s while a rep might be reading it or has manually panned/zoomed would
+  // be far more annoying than a map that just doesn't recenter on its own.
+  const handleMapReady = () => {
+    if (dealerLat == null || dealerLng == null) return;
+    const points = coords
+      ? [{ latitude: coords.lat, longitude: coords.lng }, { latitude: dealerLat, longitude: dealerLng }]
+      : [{ latitude: dealerLat, longitude: dealerLng }];
+    mapRef.current?.fitToCoordinates(points, {
+      edgePadding: { top: 80, right: 60, bottom: 80, left: 60 },
+      animated: false,
+    });
+  };
+
   return (
     <View style={styles.screen}>
       <AppHeader
@@ -305,11 +330,13 @@ export default function DealerNavigationScreen({ assignment, navigation, onArriv
       {(status === 'mapReady' || status === 'ready' || status === 'navigating' || status === 'arrived') && dealerLat != null && (
         <>
           <MapView
+            ref={mapRef}
             style={styles.map}
             provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
             loadingEnabled
             loadingIndicatorColor={colors.primary}
             loadingBackgroundColor={colors.background}
+            onMapReady={handleMapReady}
             initialRegion={(() => {
               const latitude = coords?.lat ?? dealerLat;
               const longitude = coords?.lng ?? dealerLng;
