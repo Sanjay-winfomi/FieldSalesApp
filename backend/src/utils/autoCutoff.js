@@ -120,11 +120,32 @@ async function runAutoCutoffSweep() {
 
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
+// This sweep is time-critical in a way idempotency.js's own cleanup isn't —
+// it exists to catch something that was due at a specific instant (1:00 AM)
+// that has, by definition, always already passed by the time this process
+// is even running. Relying on SWEEP_INTERVAL_MS alone silently fails on
+// Render's free tier: the service spins down after ~15 minutes with no
+// incoming requests and only wakes on the next one, resetting every
+// in-memory timer to zero — so if the gap between requests keeps landing
+// under 15 minutes (near-certain overnight, when a cutoff instant actually
+// happens), the interval can restart over and over without ever reaching
+// its first tick. A rep's forgotten day-logout can then sit open for hours
+// past 1 AM, only closing whenever the service happens to stay continuously
+// up for a full 15 minutes — which starts counting fresh from whatever the
+// first request of the day happened to wake it.
+//
+// STARTUP_DELAY_MS runs the sweep once shortly after every boot (including
+// every cold-start wake) instead of waiting on that interval alone — still
+// not synchronously at require-time (a bare require() of this module must
+// never itself perform a query), just delayed enough that no realistic test
+// file's own run time reaches it before the file's environment is torn down.
+const STARTUP_DELAY_MS = 30 * 1000;
+
+const startupTimeout = setTimeout(runAutoCutoffSweep, STARTUP_DELAY_MS);
+startupTimeout.unref();
+
 // unref() so this timer never keeps the process alive on its own (relevant
-// for tests and clean shutdowns) — mirrors idempotency.js's own sweep. Not
-// run immediately at require-time (only on the first tick, up to
-// SWEEP_INTERVAL_MS after boot) for the same reason idempotency.js's cleanup
-// isn't: a bare require() of this module must never itself perform a query.
+// for tests and clean shutdowns) — mirrors idempotency.js's own sweep.
 const sweepInterval = setInterval(runAutoCutoffSweep, SWEEP_INTERVAL_MS);
 sweepInterval.unref();
 

@@ -90,10 +90,23 @@ async function runAbsenceCheckSweep() {
 
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
+// Same reasoning as autoCutoff.js's own STARTUP_DELAY_MS: this sweep exists
+// to catch an 11 PM threshold that's always already passed by the time this
+// process runs, and Render's free tier spins down after ~15 minutes idle —
+// resetting every in-memory timer on each wake. Relying on SWEEP_INTERVAL_MS
+// alone means a cold-start that doesn't happen to stay up a full continuous
+// 15 minutes can go arbitrarily long without ever ticking, leaving a
+// genuinely-absent rep unflagged well past 11 PM. Runs once shortly after
+// every boot in addition to the interval — still not synchronously at
+// require-time (a bare require() of this module must never itself perform a
+// query), just delayed past any realistic test file's own run time.
+const STARTUP_DELAY_MS = 30 * 1000;
+
+const startupTimeout = setTimeout(runAbsenceCheckSweep, STARTUP_DELAY_MS);
+startupTimeout.unref();
+
 // unref() so this timer never keeps the process alive on its own — mirrors
-// autoCutoff.js's/idempotency.js's own sweeps. Not run immediately at
-// require-time for the same reason theirs aren't: a bare require() of this
-// module must never itself perform a query.
+// autoCutoff.js's/idempotency.js's own sweeps.
 const sweepInterval = setInterval(runAbsenceCheckSweep, SWEEP_INTERVAL_MS);
 sweepInterval.unref();
 
