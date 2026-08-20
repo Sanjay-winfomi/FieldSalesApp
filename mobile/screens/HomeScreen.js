@@ -267,6 +267,33 @@ export default function HomeScreen({ navigation }) {
           </FadeSlideIn>
         )}
 
+        {dayStatus === 'logged_in' && !activeVisit && nearbyDealer && (
+          <FadeSlideIn delay={100}>
+            <StatusCard
+              label="You're near a dealer"
+              value={nearbyDealer.dealerName || `Dealer #${nearbyDealer.dealerId}`}
+              tone="info"
+              icon={<MapPin size={22} color={colors.primary} />}
+              action={
+                <Pressable
+                  style={styles.nearbyDealerBtn}
+                  onPress={() => onSelectDealer({
+                    id: nearbyDealer.dealerId,
+                    name: nearbyDealer.dealerName,
+                    address: nearbyDealer.dealerAddress,
+                    latitude: nearbyDealer.dealerLat,
+                    longitude: nearbyDealer.dealerLng,
+                    radius_meters: nearbyDealer.radiusMeters,
+                  }, true, navigation)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.smallActionBtnText}>Dealer login</Text>
+                </Pressable>
+              }
+            />
+          </FadeSlideIn>
+        )}
+
         <FadeSlideIn delay={120}>
           <Text style={styles.sectionLabel}>Today's summary</Text>
           <View style={styles.summaryGrid}>
@@ -304,33 +331,6 @@ export default function HomeScreen({ navigation }) {
             />
           </View>
         </FadeSlideIn>
-
-        {dayStatus === 'logged_in' && !activeVisit && nearbyDealer && (
-          <FadeSlideIn delay={100} style={{ marginTop: spacing.cardGap }}>
-            <StatusCard
-              label="You're near a dealer"
-              value={nearbyDealer.dealerName || `Dealer #${nearbyDealer.dealerId}`}
-              tone="info"
-              icon={<MapPin size={22} color={colors.primary} />}
-              action={
-                <Pressable
-                  style={styles.nearbyDealerBtn}
-                  onPress={() => onSelectDealer({
-                    id: nearbyDealer.dealerId,
-                    name: nearbyDealer.dealerName,
-                    address: nearbyDealer.dealerAddress,
-                    latitude: nearbyDealer.dealerLat,
-                    longitude: nearbyDealer.dealerLng,
-                    radius_meters: nearbyDealer.radiusMeters,
-                  }, true, navigation)}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.smallActionBtnText}>Dealer login</Text>
-                </Pressable>
-              }
-            />
-          </FadeSlideIn>
-        )}
 
         {dayStatus === 'logged_in' && (
           <FadeSlideIn delay={160} style={{ marginTop: spacing.cardGap }}>
