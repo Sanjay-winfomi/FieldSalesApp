@@ -13,7 +13,7 @@ jest.mock('../../src/services/location', () => ({
 jest.mock('../../src/services/api', () => ({ api: { post: jest.fn() } }));
 
 // First render in this file pays a one-time cold-start cost for the
-// icon/SVG transform pipeline, same as DealerNavigationScreen.test.js.
+// icon/SVG transform pipeline.
 jest.setTimeout(15000);
 
 const ASSIGNMENT_A = {

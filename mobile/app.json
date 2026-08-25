@@ -15,8 +15,7 @@
         "UIBackgroundModes": [
           "location"
         ]
-      },
-      "config": {}
+      }
     },
     "android": {
       "package": "com.winfomi.fieldtrack",
@@ -34,10 +33,7 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION"
-      ],
-      "config": {
-        "googleMaps": {}
-      }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

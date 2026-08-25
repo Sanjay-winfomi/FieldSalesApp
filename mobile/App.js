@@ -5,7 +5,7 @@ import * as SystemUI from 'expo-system-ui';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission, getApproximateLocation } from './src/services/location';
+import { getLocationPermissionStatus, openLocationSettings, requestBackgroundLocationPermission, getApproximateLocation, openNativeNavigation } from './src/services/location';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -33,7 +33,6 @@ import DayLoginScreen from './screens/DayLoginScreen';
 import DealerLoginScreen from './screens/DealerLoginScreen';
 import DealerLogoutScreen from './screens/DealerLogoutScreen';
 import DayLogoutScreen from './screens/DayLogoutScreen';
-import DealerNavigationScreen from './screens/DealerNavigationScreen';
 import TodaysVisitsScreen from './screens/TodaysVisitsScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import DistanceHistoryScreen from './screens/DistanceHistoryScreen';
@@ -105,7 +104,6 @@ export default function App() {
   const [visits, setVisits] = useState([]);
   const [selectedDealer, setSelectedDealer] = useState(null);
   const [assignedDealers, setAssignedDealers] = useState([]);
-  const [selectedAssignment, setSelectedAssignment] = useState(null);
   // The still-pending assigned dealer (if any) the rep's last-known location
   // fell inside the radius of — drives Home's "Dealer login" card. Distinct
   // from the OS/notification arrival flow (assignedDealerGeofence.js): that's
@@ -163,10 +161,8 @@ export default function App() {
   // Tapping a "You've arrived at X — tap to log in" notification (sent by
   // assignedDealerGeofence.js's background task, possibly while the app was
   // fully closed) should jump straight into the existing, unmodified
-  // Check-In flow — the same handoff DealerNavigationScreen's own
-  // foreground arrival detection already uses, just triggered from a
-  // notification tap instead of an in-app button. The listener itself is
-  // only ever attached once (mount), so it goes through a ref rather than
+  // Check-In flow. The listener itself is only ever attached once (mount),
+  // so it goes through a ref rather than
   // closing directly over handleSelectDealer — that closure would otherwise
   // keep referencing whatever dayStatus/visits were at mount time forever,
   // silently misrouting a tap that lands after the rep's day/visit state
@@ -259,8 +255,8 @@ export default function App() {
   // Proactive arrival detection for TODAY's assigned dealers — not just
   // whichever one visit happens to be open. Registers a background geofence
   // per pending assignment (see assignedDealerGeofence.js) so the OS itself
-  // notifies the rep on arrival even if DealerNavigationScreen was never
-  // opened, or the app is backgrounded/closed. Re-registers whenever the
+  // notifies the rep on arrival regardless of whether the app is open,
+  // backgrounded, or fully closed. Re-registers whenever the
   // pending SET actually changes (a check-in drops a dealer off it, a fresh
   // fetch adds/removes one).
   //
@@ -421,10 +417,9 @@ export default function App() {
 
   // The background geofence (assignedDealerGeofence.js) alone isn't fast
   // enough to rely on — Android/iOS deliberately throttle background region
-  // monitoring, so "arrived" can take minutes to fire, and if the rep
-  // tapped "Start Navigation" and spent the whole drive in the native Maps
-  // app, our own foreground poll (DealerNavigationScreen) never ran at all
-  // in the meantime. The moment the app comes back to the foreground —
+  // monitoring, so "arrived" can take minutes to fire, and the rep spends
+  // the whole drive in the native Maps app in the meantime. The moment the
+  // app comes back to the foreground —
   // exactly when a rep who just finished driving would be looking at it
   // again — do one immediate GPS check against every still-pending
   // assigned dealer instead of passively waiting on the OS.
@@ -667,14 +662,45 @@ export default function App() {
     handleSelectDealerRef.current = handleSelectDealer;
   });
 
-  // A tap on "Navigate" from Home's "Today's Assigned Dealers" card — opens
-  // the in-app route preview for that assignment. Distinct from
-  // handleSelectDealer's directory-tap flow above (which it hands off into
-  // once the rep arrives), since an assignment carries its own id/sequence
-  // that the directory's free dealer selection never had.
-  const handleSelectAssignment = (assignment, navigation) => {
-    setSelectedAssignment(assignment);
-    navigation.navigate('DealerNavigation');
+  // A tap on "Navigate" from Today's Assigned Dealers — launches the native
+  // Maps app directly for real turn-by-turn (no in-app map preview screen;
+  // removed after Google Maps SDK cold-init/camera issues on-device proved
+  // unfixable from JS). Distance/ETA/status still update on the card, same
+  // as the old in-app screen did, but computed in the background so the
+  // rep isn't kept waiting on a network round trip before Maps opens.
+  const handleSelectAssignment = async (assignment) => {
+    const dealerLat = parseFloat(assignment?.dealer_lat);
+    const dealerLng = parseFloat(assignment?.dealer_lng);
+    if (!Number.isFinite(dealerLat) || !Number.isFinite(dealerLng)) {
+      showAlert('No coordinates', 'This dealer has no registered coordinates, so navigation cannot be started.');
+      return;
+    }
+
+    openNativeNavigation(dealerLat, dealerLng).catch((err) => {
+      console.warn('Failed to open native navigation:', err.message);
+    });
+
+    try {
+      const loc = await getApproximateLocation();
+      if (!loc) return;
+      const res = await api.post('/navigation/compute', {
+        dealer_id: assignment.dealer_id,
+        assignment_id: assignment.id ?? undefined,
+        origin_lat: loc.lat,
+        origin_lng: loc.lng,
+      });
+      const nav = res.data.navigation;
+      setAssignedDealers((prev) => prev.map((a) => (
+        a.id === assignment.id
+          ? { ...a, status: 'navigating', distance_meters: nav.distance_meters, expected_arrival_time: nav.expected_arrival_time }
+          : a
+      )));
+    } catch (err) {
+      // Silent — the rep is already in Google Maps by the time this could
+      // fail; a missed distance/ETA update just means the card doesn't
+      // refresh, not worth interrupting them for a background enhancement.
+      console.warn('Failed to compute navigation route in background:', err.message);
+    }
   };
 
   const handleDealerLogin = (newVisit) => {
@@ -924,22 +950,6 @@ export default function App() {
                     onLogout={(data) => {
                       handleDayLogout(data);
                       navigation.navigate('MainTabs');
-                    }}
-                  />
-                )}
-              </Stack.Screen>
-
-              <Stack.Screen name="DealerNavigation">
-                {({ navigation }) => (
-                  <DealerNavigationScreen
-                    navigation={navigation}
-                    assignment={selectedAssignment}
-                    onArrived={(dealer) => {
-                      // Hands off into the existing, unmodified Check-In flow
-                      // exactly as if the rep had tapped this dealer from the
-                      // directory — handleSelectDealer already handles the
-                      // day-status checks and navigation.
-                      handleSelectDealer(dealer, true, navigation);
                     }}
                   />
                 )}

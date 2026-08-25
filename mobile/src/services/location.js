@@ -59,8 +59,8 @@ export const getLocationPermissionStatus = async () => {
 /**
  * Both getCurrentLocation and getApproximateLocation used to call
  * requestForegroundPermissionsAsync() unconditionally on every single
- * invocation — including from the 15s navigation poll (DealerNavigationScreen)
- * and every AppState foreground-resume check (App.js). Once permission is
+ * invocation — including from the old in-app navigation preview's 15s poll
+ * (since removed) and every AppState foreground-resume check (App.js). Once permission is
  * already granted that's normally a no-op, but each of those call sites also
  * *resumes* from exactly the kind of Activity transition
  * (background -> active) that re-triggers the next poll/listener tick, so
@@ -261,6 +261,23 @@ export function haversineMeters(lat1, lng1, lat2, lng2) {
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return EARTH_RADIUS_M * c;
+}
+
+/**
+ * Deep-links straight into the native Maps app for real voice-guided
+ * turn-by-turn — this app has no in-app navigation preview (removed; Google
+ * Maps/Apple Maps already do this far better than a custom map view could).
+ * @param {number} lat
+ * @param {number} lng
+ */
+export async function openNativeNavigation(lat, lng) {
+  if (Platform.OS === 'android') {
+    return Linking.openURL(`google.navigation:q=${lat},${lng}&mode=d`);
+  }
+  const googleMapsUrl = `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`;
+  const canOpenGoogleMaps = await Linking.canOpenURL(googleMapsUrl).catch(() => false);
+  if (canOpenGoogleMaps) return Linking.openURL(googleMapsUrl);
+  return Linking.openURL(`maps://?daddr=${lat},${lng}&dirflg=d`);
 }
 
 function formatAddressParts({ streetLine, locality, city, region, postalCode, country }) {

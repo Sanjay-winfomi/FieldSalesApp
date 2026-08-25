@@ -93,6 +93,11 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // Keyed by notification id — in-flight state for the "Reviewed" button
   // on a day/visit auto-cutoff notification.
   const [reviewingIds, setReviewingIds] = useState({});
+  // Keyed by notification id — set when a "Reviewed" click fails, so the
+  // failure is visible instead of the button just silently stopping its
+  // spinner (which used to look identical to a successful review that
+  // "reverted" on the next refresh — it never actually saved).
+  const [reviewErrors, setReviewErrors] = useState({});
   // The pending Clear confirmation — either one notification object (the
   // per-row Clear button) or the literal 'all' (the header's "Clear all
   // resolved" button) — plus in-flight state for the confirm button itself.
@@ -159,6 +164,7 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
   // so this is the only way one of these ever gets marked read.
   const markReviewed = async (id) => {
     setReviewingIds((prev) => ({ ...prev, [id]: true }));
+    setReviewErrors((prev) => ({ ...prev, [id]: '' }));
     try {
       const res = await apiClient.patch(`/notifications/${id}/read`);
       setNotifications((prev) => prev.map((n) => (
@@ -168,8 +174,11 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
         const unread = await apiClient.get('/notifications/unread-count');
         onUnreadCountChange(unread.data.count);
       }
-    } catch {
-      // Best-effort — the button just stays clickable to retry.
+    } catch (err) {
+      setReviewErrors((prev) => ({
+        ...prev,
+        [id]: err.response?.data?.error || 'Failed to save — please try again.',
+      }));
     } finally {
       setReviewingIds((prev) => ({ ...prev, [id]: false }));
     }
@@ -335,7 +344,7 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                           />
                         </div>
                       ) : (
-                        <div style={{ marginTop: spacing.sm }}>
+                        <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
                           <Button
                             variant="success"
                             style={styles.followupBtn}
@@ -345,6 +354,9 @@ export default function NotificationsPage({ onUnreadCountChange, onBack }) {
                           >
                             Reviewed
                           </Button>
+                          {reviewErrors[n.id] && (
+                            <span style={styles.followupError}>{reviewErrors[n.id]}</span>
+                          )}
                         </div>
                       )
                     )}

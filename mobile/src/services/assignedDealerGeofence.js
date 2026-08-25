@@ -10,10 +10,10 @@ import { captureException } from './crashReporter';
  * TODAY's manager-assigned dealers, not just the one visit currently open.
  *
  * geofenceTask.js already covers "watch the dealer of an OPEN visit for
- * exit/still-inside" (post-check-in). This is the pre-check-in counterpart:
- * without it, arrival was only ever detected by DealerNavigationScreen's own
- * 15s poll — which only runs while that screen happens to be open. A
- * separate task (rather than folding these regions into geofenceTask.js's
+ * exit/still-inside" (post-check-in). This is the pre-check-in counterpart —
+ * arrival at a dealer the rep hasn't checked into yet, detected regardless
+ * of whether the app is even open. A separate task (rather than folding
+ * these regions into geofenceTask.js's
  * existing task) keeps the two concerns fully independent — Location's
  * startGeofencingAsync REPLACES a task's whole region set on every call, so
  * sharing one task would mean every check-in/checkout had to carefully
@@ -26,10 +26,9 @@ import { captureException } from './crashReporter';
  *
  * The OS geofence alone is NOT enough on its own: Android/iOS deliberately
  * throttle background region-monitoring to save battery, so "arrived" can
- * take anywhere from ~30s to several minutes to actually fire — worse if
- * the rep tapped "Start Navigation" and left our app for the native Maps
- * app the whole drive, since our own foreground poll (DealerNavigationScreen)
- * stops running the moment the app backgrounds. checkArrivalNow() is the
+ * take anywhere from ~30s to several minutes to actually fire — the rep
+ * spends the whole drive in the native Maps app, so there's no foreground
+ * poll running to catch it sooner. checkArrivalNow() is the
  * fallback for that gap: App.js calls it the instant the app returns to the
  * foreground, doing one immediate GPS check against every still-pending
  * dealer instead of passively waiting on the OS to get around to it.
