@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, useJsApiLoader } from '@react-google-maps/api';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Search, MapPin, User, X } from 'lucide-react';
 import { apiClient } from '../api';
 import { colors, typography, spacing, radius, shadows } from '../theme';
 
@@ -53,10 +53,13 @@ export default function MapPage() {
   const [reps, setReps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [hovered, setHovered] = useState(null); // { type: 'dealer' | 'rep', item }
+  const [active, setActive] = useState(null); // { type: 'dealer' | 'rep', item }
+  const [search, setSearch] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const mapRef = useRef(null);
   const boundsFitRef = useRef(false);
+  const searchBoxRef = useRef(null);
 
   const fetchMapData = () => {
     setLoading(true);
@@ -96,6 +99,37 @@ export default function MapPage() {
     return first ? { lat: first.latitude, lng: first.longitude } : DEFAULT_CENTER;
   }, [dealers, reps]);
 
+  // Close the suggestions dropdown on an outside click.
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) setShowSuggestions(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    const dealerMatches = dealers
+      .filter((d) => d.name?.toLowerCase().includes(q))
+      .map((d) => ({ type: 'dealer', item: d }));
+    const repMatches = reps
+      .filter((r) => r.name?.toLowerCase().includes(q))
+      .map((r) => ({ type: 'rep', item: r }));
+    return [...dealerMatches, ...repMatches].slice(0, 20);
+  }, [search, dealers, reps]);
+
+  const jumpToMarker = (type, item) => {
+    setActive({ type, item });
+    setSearch(item.name);
+    setShowSuggestions(false);
+    if (mapRef.current) {
+      mapRef.current.panTo({ lat: item.latitude, lng: item.longitude });
+      mapRef.current.setZoom(16);
+    }
+  };
+
   return (
     <div style={styles.page} className="ft-page">
       <div style={styles.headerRow}>
@@ -103,6 +137,52 @@ export default function MapPage() {
           <h1 style={styles.title}>Dealer &amp; Rep Map</h1>
           <p style={styles.subtitle}>{dealers.length} dealers &middot; {reps.length} reps with a known location</p>
         </div>
+        <div style={styles.searchBox} ref={searchBoxRef}>
+          <Search size={16} color={colors.textMuted} style={styles.searchIcon} />
+          <input
+            type="text"
+            className="ft-input"
+            style={styles.searchInput}
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setShowSuggestions(true); }}
+            onFocus={() => setShowSuggestions(true)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && matches.length > 0) jumpToMarker(matches[0].type, matches[0].item); }}
+            placeholder="Search dealer or rep name..."
+            aria-label="Search dealer or rep"
+          />
+          {!!search && (
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setShowSuggestions(false); }}
+              aria-label="Clear search"
+              style={styles.searchClearBtn}
+            >
+              <X size={16} />
+            </button>
+          )}
+
+          {showSuggestions && search.trim() && (
+            <div style={styles.suggestions}>
+              {matches.length === 0 ? (
+                <div style={styles.suggestionEmpty}>No dealer or rep matches "{search}"</div>
+              ) : (
+                matches.map(({ type, item }) => (
+                  <button
+                    key={`${type}-${item.id}`}
+                    type="button"
+                    style={styles.suggestionItem}
+                    onClick={() => jumpToMarker(type, item)}
+                  >
+                    {type === 'dealer' ? <MapPin size={14} color="#15803D" /> : <User size={14} color="#F59E0B" />}
+                    <span style={styles.suggestionName}>{item.name}</span>
+                    <span style={styles.suggestionMeta}>{type === 'dealer' ? item.address : item.region}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         <button type="button" style={styles.refreshBtn} onClick={fetchMapData} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'ft-spin' : ''} />
           Refresh
@@ -134,13 +214,14 @@ export default function MapPage() {
                 key={`dealer-${dealer.id}`}
                 position={{ lat: dealer.latitude, lng: dealer.longitude }}
                 icon={DEALER_ICON}
-                onMouseOver={() => setHovered({ type: 'dealer', item: dealer })}
-                onMouseOut={() => setHovered((h) => (h?.type === 'dealer' && h.item.id === dealer.id ? null : h))}
+                onMouseOver={() => setActive({ type: 'dealer', item: dealer })}
+                onMouseOut={() => setActive((h) => (h?.type === 'dealer' && h.item.id === dealer.id ? null : h))}
+                onClick={() => setActive({ type: 'dealer', item: dealer })}
               >
-                {hovered?.type === 'dealer' && hovered.item.id === dealer.id && (
+                {active?.type === 'dealer' && active.item.id === dealer.id && (
                   <InfoWindowF
                     position={{ lat: dealer.latitude, lng: dealer.longitude }}
-                    onCloseClick={() => setHovered(null)}
+                    onCloseClick={() => setActive(null)}
                   >
                     <div style={styles.infoBox}>
                       <div style={styles.infoTitle}>{dealer.name}</div>
@@ -167,13 +248,14 @@ export default function MapPage() {
                 key={`rep-${rep.id}`}
                 position={{ lat: rep.latitude, lng: rep.longitude }}
                 icon={REP_ICON}
-                onMouseOver={() => setHovered({ type: 'rep', item: rep })}
-                onMouseOut={() => setHovered((h) => (h?.type === 'rep' && h.item.id === rep.id ? null : h))}
+                onMouseOver={() => setActive({ type: 'rep', item: rep })}
+                onMouseOut={() => setActive((h) => (h?.type === 'rep' && h.item.id === rep.id ? null : h))}
+                onClick={() => setActive({ type: 'rep', item: rep })}
               >
-                {hovered?.type === 'rep' && hovered.item.id === rep.id && (
+                {active?.type === 'rep' && active.item.id === rep.id && (
                   <InfoWindowF
                     position={{ lat: rep.latitude, lng: rep.longitude }}
-                    onCloseClick={() => setHovered(null)}
+                    onCloseClick={() => setActive(null)}
                   >
                     <div style={styles.infoBox}>
                       <div style={styles.infoTitle}>{rep.name}</div>
@@ -221,6 +303,28 @@ const styles = {
   headerRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.md },
   title: { ...typography.dashboardTitle, color: colors.text, margin: 0 },
   subtitle: { ...typography.body, color: colors.textSecondary, margin: '4px 0 0' },
+  searchBox: { position: 'relative', flex: '1 1 320px', maxWidth: 420, marginLeft: 'auto' },
+  searchIcon: { position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' },
+  searchInput: { paddingLeft: 38, paddingRight: 34, width: '100%' },
+  searchClearBtn: {
+    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+    background: 'none', border: 'none', display: 'flex', color: colors.textMuted, padding: 4, cursor: 'pointer',
+  },
+  suggestions: {
+    position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, maxHeight: 320, overflowY: 'auto',
+    backgroundColor: colors.card, border: `1px solid ${colors.border}`, borderRadius: radius.md,
+    boxShadow: shadows.dropdown, zIndex: 50,
+  },
+  suggestionEmpty: { padding: '14px 16px', fontSize: 13, color: colors.textMuted },
+  suggestionItem: {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', border: 'none',
+    borderBottom: `1px solid ${colors.border}`, backgroundColor: 'transparent', textAlign: 'left', cursor: 'pointer',
+  },
+  suggestionName: { fontSize: 13, fontWeight: 600, color: colors.text, flexShrink: 0 },
+  suggestionMeta: {
+    fontSize: 12, color: colors.textMuted, marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap', maxWidth: '55%',
+  },
   refreshBtn: {
     display: 'flex', alignItems: 'center', gap: 7, height: 38, padding: '0 16px', borderRadius: radius.md,
     border: `1px solid ${colors.border}`, backgroundColor: colors.card, color: colors.text,
