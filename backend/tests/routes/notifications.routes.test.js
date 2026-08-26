@@ -15,6 +15,9 @@ describe('GET /api/x', () => {
     const res = await request(app).get('/api/x');
     expect(res.status).toBe(200);
     expect(res.body.notifications).toHaveLength(1);
+    // A soft-dismissed day_absent row must not resurface in the feed.
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('n.dismissed_at IS NULL');
   });
 });
 
@@ -27,6 +30,8 @@ describe('GET /api/x/unread-count', () => {
     const res = await request(app).get('/api/x/unread-count');
     expect(res.status).toBe(200);
     expect(res.body.count).toBe(3);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('dismissed_at IS NULL');
   });
 });
 
@@ -95,6 +100,24 @@ describe('DELETE /api/x/:id', () => {
     expect(sql).toContain("status IN ('approved', 'rejected')");
     expect(params[0]).toBe(20);
     expect(params[1]).toEqual(expect.arrayContaining(['day_auto_cutoff', 'visit_auto_cutoff', 'day_absent']));
+  });
+
+  // A day_absent row must be soft-dismissed, not hard-deleted — absenceCheck.js
+  // re-flags the same employee+business_date on its next 15-minute sweep as
+  // soon as no day_absent row for that pair still exists, so an actual DELETE
+  // let a reviewed-and-cleared absence notification silently come back as a
+  // brand-new, unreviewed one.
+  test('200 soft-dismisses (does not hard-delete) a reviewed day_absent notification', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 21 }] });
+    const app = makeApp(notificationsRouter, { basePath: '/api/x', employee: MANAGER });
+    const res = await request(app).delete('/api/x/21');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain("UPDATE manager_notifications SET dismissed_at = NOW()");
+    expect(sql).toContain("WHERE id IN (SELECT id FROM target WHERE type = 'day_absent')");
+    expect(sql).toContain("DELETE FROM manager_notifications");
+    expect(sql).toContain("WHERE id IN (SELECT id FROM target WHERE type <> 'day_absent')");
   });
 
   test('404 when the notification does not exist, or is not yet reviewed/resolved', async () => {

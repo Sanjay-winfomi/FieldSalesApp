@@ -688,3 +688,13 @@ END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manager_notifications_absent_dedup
   ON manager_notifications (employee_id, business_date) WHERE type = 'day_absent';
+
+-- "Clearing" a day_absent notification used to be a hard DELETE — but
+-- absenceCheck.js's sweep re-flags the same (employee_id, business_date) pair
+-- every 15 minutes for as long as the rep still has no attendance row and the
+-- date is within its lookback window, and its dedup check is just "does a
+-- day_absent row for this pair currently exist". Deleting the row made it
+-- reappear as a brand-new (unreviewed) notification on the very next sweep.
+-- dismissed_at lets the row stay in place (so both the dedup check above and
+-- this one keep seeing it) while the API still treats it as gone.
+ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ;

@@ -33,6 +33,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN employees e ON e.id = n.employee_id
        LEFT JOIN dealers d    ON d.id = n.dealer_id
        LEFT JOIN dealer_followup_requests r ON r.id = n.followup_request_id
+       WHERE n.dismissed_at IS NULL
        ORDER BY n.created_at DESC
        LIMIT 200`
     );
@@ -46,7 +47,7 @@ router.get('/', async (req, res) => {
 // GET /api/notifications/unread-count — registered before /:id so "unread-count" is never captured as an id
 router.get('/unread-count', async (req, res) => {
   try {
-    const result = await pool.query(`SELECT COUNT(*)::int AS count FROM manager_notifications WHERE read_at IS NULL`);
+    const result = await pool.query(`SELECT COUNT(*)::int AS count FROM manager_notifications WHERE read_at IS NULL AND dismissed_at IS NULL`);
     return res.json({ count: result.rows[0].count });
   } catch (err) {
     logger.error('GET /api/notifications/unread-count error', { error: err.message, stack: err.stack });
@@ -116,6 +117,38 @@ router.patch('/:id/read', async (req, res) => {
   }
 });
 
+// Clearing a notification removes it from the feed either way, but a
+// 'day_absent' row is soft-dismissed (dismissed_at set) instead of actually
+// deleted — absenceCheck.js's sweep re-flags the same (employee_id,
+// business_date) pair every 15 minutes for as long as the rep still has no
+// attendance row for it, and its dedup check is just "does a day_absent row
+// for this pair still exist". A hard DELETE made the row's own existence
+// stop guarding against that, so the exact same notification came back as a
+// brand-new, unreviewed one on the next sweep. Leaving the row in place (just
+// dismissed) keeps that guard intact while still disappearing from the feed
+// (see the WHERE dismissed_at IS NULL above). Every other type has no such
+// regenerate-on-delete risk, so it's still a real DELETE.
+function clearNotificationsCTE(targetWhere) {
+  return `
+    WITH target AS (
+      SELECT n.id, n.type FROM manager_notifications n WHERE ${targetWhere}
+    ),
+    dismissed AS (
+      UPDATE manager_notifications SET dismissed_at = NOW()
+      WHERE id IN (SELECT id FROM target WHERE type = 'day_absent')
+      RETURNING id
+    ),
+    removed AS (
+      DELETE FROM manager_notifications
+      WHERE id IN (SELECT id FROM target WHERE type <> 'day_absent')
+      RETURNING id
+    )
+    SELECT id FROM dismissed
+    UNION ALL
+    SELECT id FROM removed
+  `;
+}
+
 // DELETE /api/notifications/:id — permanently clears one notification, if
 // (and only if) deletableCondition matches it. Enforced here, not just
 // hidden client-side, so this can't be bypassed by calling the endpoint
@@ -127,9 +160,7 @@ router.delete('/:id', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `DELETE FROM manager_notifications n
-       WHERE n.id = $1 AND ${deletableCondition(2)}
-       RETURNING id`,
+      clearNotificationsCTE(`n.id = $1 AND ${deletableCondition(2)}`),
       [id, REQUIRES_EXPLICIT_REVIEW]
     );
     if (result.rows.length === 0) {
@@ -150,9 +181,7 @@ router.delete('/:id', async (req, res) => {
 router.delete('/', async (req, res) => {
   try {
     const result = await pool.query(
-      `DELETE FROM manager_notifications n
-       WHERE ${deletableCondition(1)}
-       RETURNING id`,
+      clearNotificationsCTE(deletableCondition(1)),
       [REQUIRES_EXPLICIT_REVIEW]
     );
     return res.json({ success: true, deleted: result.rows.length });
