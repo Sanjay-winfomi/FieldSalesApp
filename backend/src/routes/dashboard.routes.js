@@ -6,7 +6,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const pool    = require('../db/pool');
-const { isCurrentBusinessDay } = require('../utils/businessDay');
+const { isCurrentBusinessDay, businessDateExpr } = require('../utils/businessDay');
 
 const router = express.Router();
 
@@ -182,6 +182,115 @@ router.get('/rep/:id/today', async (req, res) => {
     });
   } catch (err) {
     logger.error('Fetch rep details error', { error: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/dashboard/map — dealer + rep locations for the manager map view.
+// Dealers: latest visit (rep + timestamp), if any. Reps: last known location
+// (their latest visit today, falling back to today's login point) plus their
+// next pending/navigating assignment for today, if any.
+router.get('/map', async (req, res) => {
+  try {
+    const [dealersResult, repsResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          d.id, d.name, d.address, d.latitude, d.longitude,
+          lv.login_time  AS last_visit_time,
+          lv.logout_time AS last_visit_logout_time,
+          lv.rep_name    AS last_visit_rep_name
+        FROM dealers d
+        LEFT JOIN LATERAL (
+          SELECT cv.login_time, cv.logout_time, e.name AS rep_name
+          FROM client_visits cv
+          JOIN attendance a ON a.id = cv.attendance_id
+          JOIN employees e  ON e.id = a.employee_id
+          WHERE cv.dealer_id = d.id
+          ORDER BY cv.login_time DESC
+          LIMIT 1
+        ) lv ON true
+        WHERE d.latitude IS NOT NULL AND d.longitude IS NOT NULL
+        ORDER BY d.name
+      `),
+      pool.query(`
+        SELECT
+          e.id AS employee_id, e.name, e.region,
+          a.id AS attendance_id, a.login_lat, a.login_lng,
+          lv.dealer_name  AS last_dealer_name,
+          lv.login_time   AS last_visit_time,
+          lv.login_lat    AS last_lat,
+          lv.login_lng    AS last_lng,
+          na.dealer_name  AS next_dealer_name,
+          na.dealer_lat   AS next_dealer_lat,
+          na.dealer_lng   AS next_dealer_lng,
+          na.sequence_order AS next_sequence_order
+        FROM employees e
+        LEFT JOIN attendance a
+          ON a.employee_id = e.id
+          AND ${isCurrentBusinessDay('a.login_time')}
+        LEFT JOIN LATERAL (
+          SELECT cv.login_time, cv.login_lat, cv.login_lng, d.name AS dealer_name
+          FROM client_visits cv
+          JOIN dealers d ON d.id = cv.dealer_id
+          WHERE cv.attendance_id = a.id
+          ORDER BY cv.login_time DESC
+          LIMIT 1
+        ) lv ON true
+        LEFT JOIN LATERAL (
+          SELECT d.name AS dealer_name, d.latitude AS dealer_lat, d.longitude AS dealer_lng,
+                 da.sequence_order
+          FROM dealer_assignments da
+          JOIN dealers d ON d.id = da.dealer_id
+          WHERE da.employee_id = e.id
+            AND da.assignment_date = ${businessDateExpr('NOW()')}
+            AND da.status IN ('pending', 'navigating')
+          ORDER BY da.sequence_order ASC
+          LIMIT 1
+        ) na ON true
+        WHERE e.role = 'rep'
+        ORDER BY e.name
+      `),
+    ]);
+
+    const dealers = dealersResult.rows.map((row) => ({
+      id:                     row.id,
+      name:                   row.name,
+      address:                row.address,
+      latitude:               parseFloat(row.latitude),
+      longitude:              parseFloat(row.longitude),
+      last_visit: row.last_visit_time ? {
+        rep_name:    row.last_visit_rep_name,
+        login_time:  row.last_visit_time,
+        logout_time: row.last_visit_logout_time,
+      } : null,
+    }));
+
+    const reps = repsResult.rows
+      .map((row) => {
+        const lat = row.last_lat ?? row.login_lat;
+        const lng = row.last_lng ?? row.login_lng;
+        return {
+          id:      row.employee_id,
+          name:    row.name,
+          region:  row.region,
+          latitude:  lat ? parseFloat(lat) : null,
+          longitude: lng ? parseFloat(lng) : null,
+          last_dealer: row.last_dealer_name ? {
+            name:       row.last_dealer_name,
+            visit_time: row.last_visit_time,
+          } : null,
+          next_assignment: row.next_dealer_name ? {
+            dealer_name: row.next_dealer_name,
+            latitude:    parseFloat(row.next_dealer_lat),
+            longitude:   parseFloat(row.next_dealer_lng),
+          } : null,
+        };
+      })
+      .filter((rep) => rep.latitude !== null && rep.longitude !== null);
+
+    return res.json({ dealers, reps, generated_at: new Date().toISOString() });
+  } catch (err) {
+    logger.error('Dashboard map error', { error: err.message, stack: err.stack });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

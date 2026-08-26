@@ -11,6 +11,7 @@ import DashboardPage from './views/DashboardPage';
 import ReportsPage from './views/ReportsPage';
 import AdminPage from './views/AdminPage';
 import NotificationsPage from './views/NotificationsPage';
+import MapPage from './views/MapPage';
 import './App.css';
 
 export default function App() {
@@ -28,7 +29,7 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState('');
   const [selectedRepId, setSelectedRepId] = useState(null);
-  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'reports' | 'admin' | 'notifications'
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'reports' | 'admin' | 'notifications' | 'map'
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 
@@ -169,6 +170,7 @@ export default function App() {
           />
         )}
 
+        {activeView === 'map' && <MapPage />}
         {activeView === 'reports' && <ReportsPage />}
         {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} currentUsername={manager?.username} />}
         {activeView === 'notifications' && (
