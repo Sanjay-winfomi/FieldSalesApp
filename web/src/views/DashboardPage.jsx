@@ -167,7 +167,12 @@ const styles = {
   subtitle: { ...typography.body, color: 'rgba(31,41,55,0.75)', marginTop: 4 },
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+    // 150px (not 190px) so all 7 cards hold one row across the zoom levels
+    // people actually use (50%-125%) instead of wrapping to a 5+2 split the
+    // moment the browser's CSS-pixel viewport narrows a bit — auto-fit still
+    // wraps gracefully at extreme zoom, it just needs a smaller floor to do
+    // that at 7 columns instead of 5.
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
     gap: spacing.lg,
     marginBottom: spacing.xl,
   },
