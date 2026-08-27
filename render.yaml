@@ -83,3 +83,79 @@ services:
       # Server-side only — set your own key/leave blank if geocoding isn't needed yet.
       - key: GOOGLE_MAPS_API_KEY
         sync: false
+
+  # Python/FastAPI port of fieldtrack-backend — same DB, same JWT secret
+  # (shared via fromService below, never re-generated), same API contract.
+  # Deployed as a SEPARATE service, not a replacement, so both can run
+  # side by side during a rolling cutover — see CUTOVER.md at the repo
+  # root for the full rollout/rollback plan. Once cutover is complete and
+  # confirmed stable, fieldtrack-backend (Node) can be suspended/removed.
+  - type: web
+    name: fieldtrack-backend-py
+    runtime: python
+    plan: free
+    rootDir: backend-py
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: fieldtrack-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: fieldtrack-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: fieldtrack-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: fieldtrack-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: fieldtrack-db
+          property: password
+      - key: DB_SSL
+        value: true
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: false
+      # Shared with fieldtrack-backend (Node), not independently generated —
+      # this is what makes a token issued by one service valid on the other
+      # during a rolling cutover. Render resolves this to the Node service's
+      # actual generated value at deploy time; nobody needs to copy/paste
+      # the secret by hand.
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: fieldtrack-backend
+          envVarKey: JWT_SECRET
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: TRUST_PROXY_HOPS
+        value: 1
+      # Same value as fieldtrack-backend's ALLOWED_ORIGINS — set once you
+      # know your Vercel URL, comma-separated if more than one.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: LOGIN_RADIUS_METERS
+        value: 200
+      - key: GPS_ACCURACY_THRESHOLD_METERS
+        value: 30
+      - key: LOGIN_MATCH_TOLERANCE_METERS
+        value: 20
+      - key: DAY_BOUNDARY_HOUR
+        value: 5
+      # Same key as fieldtrack-backend — set your own/leave blank if
+      # geocoding isn't needed yet.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: info
