@@ -11,6 +11,8 @@ so no workaround is needed here. Call `.isoformat()` explicitly wherever a
 route hand-builds a dict instead of returning a Pydantic model, to keep
 response shapes identical to the Node backend's plain date strings.
 """
+import ssl as ssl_lib
+
 import asyncpg
 
 from app.core import config
@@ -19,19 +21,43 @@ from app.core.logging_config import log_error
 _pool: asyncpg.Pool | None = None
 
 
+def _build_ssl_arg():
+    """Mirrors pool.js's `ssl: useSsl ? { rejectUnauthorized: ... } : false`.
+
+    BUG FIXED HERE (found live against Render's managed Postgres — never
+    exercised by local testing, which always ran DB_SSL=false): asyncpg's
+    `ssl` parameter takes `True` / `False` / an `ssl.SSLContext`, NOT the
+    string `"require"`. The original version of this function passed
+    `ssl="require"` (invalid) when DB_SSL_REJECT_UNAUTHORIZED was true, and
+    — worse — passed `ssl=True` (full certificate verification) when
+    DB_SSL_REJECT_UNAUTHORIZED was FALSE, which is backwards: `True` makes
+    asyncpg verify the server's certificate against the system trust store,
+    which fails immediately for Render's managed Postgres cert (it doesn't
+    chain to a standard root CA — the exact reason Node's own
+    `rejectUnauthorized: false` exists). That failed handshake surfaces as
+    `asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed
+    in the middle of operation` — not an obviously SSL-shaped error message,
+    which is why this took a real deploy to surface.
+    """
+    if not config.DB_SSL:
+        return None
+    if config.DB_SSL_REJECT_UNAUTHORIZED:
+        return True
+    ctx = ssl_lib.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl_lib.CERT_NONE
+    return ctx
+
+
 async def connect() -> None:
     global _pool
-    ssl_arg = False
-    if config.DB_SSL:
-        ssl_arg = "require" if config.DB_SSL_REJECT_UNAUTHORIZED else True
-
     _pool = await asyncpg.create_pool(
         host=config.DB_HOST,
         port=config.DB_PORT,
         database=config.DB_NAME,
         user=config.DB_USER,
         password=config.DB_PASSWORD,
-        ssl=ssl_arg if config.DB_SSL else None,
+        ssl=_build_ssl_arg(),
         min_size=1,
         max_size=config.DB_POOL_MAX,
         max_inactive_connection_lifetime=config.DB_IDLE_TIMEOUT_MS / 1000,
