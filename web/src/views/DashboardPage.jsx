@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Users, UserCheck, Clock, CheckCircle2, Store, Route, Percent, AlertTriangle, Users2 } from 'lucide-react';
+import { Users, UserCheck, Clock, CheckCircle2, Store, Percent, AlertTriangle, Users2 } from 'lucide-react';
 import { apiClient } from '../api';
 import {
   MetricCard, EmployeeCard, EmptyState, SkeletonCard, SearchBar,
@@ -45,11 +45,6 @@ export default function DashboardPage({
     day_ended: reps.filter((r) => r.status === 'day_ended').length,
   }), [reps]);
 
-  const totalDistanceToday = useMemo(
-    () => reps.reduce((sum, r) => sum + (r.total_distance_km || 0), 0),
-    [reps]
-  );
-
   const attendancePct = reps.length > 0
     ? Math.round(((stats.logged_in + stats.day_ended) / reps.length) * 100)
     : 0;
@@ -87,7 +82,6 @@ export default function DashboardPage({
           tone={dealerCountError ? 'danger' : 'primary'}
           onClick={dealerCountError ? fetchDealerCount : undefined}
         />
-        <MetricCard icon={<Route />} value={`${totalDistanceToday.toFixed(1)} km`} label="Distance today" tone="warning" />
         <MetricCard icon={<Percent />} value={`${attendancePct}%`} label="Attendance today" tone="success" />
       </div>
 
@@ -167,11 +161,11 @@ const styles = {
   subtitle: { ...typography.body, color: 'rgba(31,41,55,0.75)', marginTop: 4 },
   metricsGrid: {
     display: 'grid',
-    // 150px (not 190px) so all 7 cards hold one row across the zoom levels
-    // people actually use (50%-125%) instead of wrapping to a 5+2 split the
-    // moment the browser's CSS-pixel viewport narrows a bit — auto-fit still
-    // wraps gracefully at extreme zoom, it just needs a smaller floor to do
-    // that at 7 columns instead of 5.
+    // 150px (not 190px) so all 6 cards hold one row across the zoom levels
+    // people actually use (50%-125%) instead of wrapping to an uneven split
+    // the moment the browser's CSS-pixel viewport narrows a bit — auto-fit
+    // still wraps gracefully at extreme zoom, it just needs a smaller floor
+    // to do that at 6 columns instead of fewer.
     gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
     gap: spacing.lg,
     marginBottom: spacing.xl,
