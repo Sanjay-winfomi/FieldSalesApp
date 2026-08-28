@@ -66,6 +66,18 @@ scheduler = AsyncIOScheduler()
 
 
 def start_scheduler() -> None:
+    # AsyncIOScheduler.start() only calls asyncio.get_running_loop() the
+    # FIRST time it's ever started (`if not self._eventloop`) — after a
+    # shutdown, self._eventloop still holds a reference to that original,
+    # now-closed loop, so restarting the same instance within the same
+    # process raises "RuntimeError: Event loop is closed" the moment a job
+    # fires. A real deployment only ever starts this once per process, so
+    # this never surfaces in production — but a fresh instance per start
+    # makes start/stop safe to call more than once in the same process
+    # (test harnesses that boot the app's lifespan more than once; a future
+    # in-process restart hook), at zero cost to the single-boot case.
+    global scheduler
+    scheduler = AsyncIOScheduler()
     # IMPORTANT: do not pass next_run_time=None here — in APScheduler that
     # means "add this job PAUSED", not "wait a full interval before the
     # first run" (confirmed against APScheduler's own add_job docstring:

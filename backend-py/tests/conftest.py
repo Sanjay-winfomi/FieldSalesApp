@@ -38,6 +38,19 @@ async def client():
     # share one lifespan/one loop, avoiding the cross-test loop mismatch
     # entirely. This is a test-harness-only concern — a real deployment
     # boots the app, and therefore the scheduler, exactly once.
+    #
+    # Every test FILE that uses this fixture must also mark its tests with
+    # `pytestmark = pytest.mark.asyncio(loop_scope="module")` — pytest-asyncio
+    # does not infer a test's own loop scope from the fixtures it requests,
+    # so an unmarked test still gets its own per-test loop by default even
+    # though `client` itself is module-scoped (this reproduced deterministically
+    # as a 500/InterfaceError, not just "sometimes" — see the docstring in
+    # test_health_and_auth.py for the full story). scheduler.py's
+    # `start_scheduler()` also constructs a fresh AsyncIOScheduler() on every
+    # call rather than reusing the module-level singleton, so that a SECOND
+    # test file using this same fixture doesn't inherit the first file's
+    # dead event-loop reference (AsyncIOScheduler.start() only ever captures
+    # `asyncio.get_running_loop()` once, the first time it's started).
     async with LifespanManager(app) as manager:
         transport = ASGITransport(app=manager.app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
