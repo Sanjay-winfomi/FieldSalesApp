@@ -56,6 +56,24 @@ class TestRunAbsenceCheckSweep:
 
         assert len(calls) == 2
 
+    async def test_query_excludes_business_dates_before_the_employee_was_created(self, mock_pool, monkeypatch):
+        # A rep created on e.g. Aug 28 must not be flagged absent for Aug 26/27
+        # (dates before their account existed) even though those dates fall
+        # inside the sweep's lookback window.
+        async def fake_create_manager_notification(**kwargs):
+            pass
+
+        monkeypatch.setattr(
+            "app.utils.absence_check.create_manager_notification", fake_create_manager_notification
+        )
+        mock_pool.queue_fetch([])
+
+        await run_absence_check_sweep()
+
+        query = mock_pool.fetch_calls[0].query
+        assert "ed.business_date >=" in query
+        assert "e.created_at" in query
+
     async def test_does_nothing_when_no_rep_is_eligible(self, mock_pool, monkeypatch):
         calls = []
 

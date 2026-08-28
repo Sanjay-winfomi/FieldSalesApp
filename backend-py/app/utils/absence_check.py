@@ -1,6 +1,9 @@
-"""absence_check.py — ports absenceCheck.js exactly (same lookback window,
-same 11pm-IST-per-business-date threshold, same dedup logic via the
-day_absent partial unique index)."""
+"""absence_check.py — ports absenceCheck.js (same lookback window, same
+11pm-IST-per-business-date threshold, same dedup logic via the day_absent
+partial unique index), plus one deliberate behavior fix not present in the
+original Node version: a rep is only eligible for a business date on or
+after the date their account was created, so newly-added employees are no
+longer flagged absent for lookback dates that predate their existence."""
 from app.core.logging_config import log_error, log_info
 from app.db import pool
 from app.services.manager_notifications import create_manager_notification
@@ -28,6 +31,7 @@ async def _flag_absent_reps() -> int:
          FROM eligible_dates ed
          CROSS JOIN employees e
          WHERE e.role = 'rep' AND e.is_active = true
+           AND ed.business_date >= {business_date_expr('e.created_at')}
            AND NOT EXISTS (
              SELECT 1 FROM attendance a WHERE a.employee_id = e.id AND a.business_date = ed.business_date
            )
