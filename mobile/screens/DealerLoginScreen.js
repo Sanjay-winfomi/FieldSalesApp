@@ -5,12 +5,14 @@ import { api } from '../src/services/api';
 import { enqueueAction } from '../src/services/syncManager';
 import { showAlert } from '../src/services/themedAlert';
 import { getErrorMessage } from '../src/services/apiError';
+import { useAppState } from '../src/context/AppStateContext';
 import { AppHeader, GPSStatusCard, PrimaryButton, TextField, FadeSlideIn } from '../src/components';
 import { colors, spacing } from '../src/theme';
 
 const MIN_REASON_LENGTH = 20;
 
 export default function DealerLoginScreen({ dealer, attendance, onLogin, navigation }) {
+  const { fetchTodayState } = useAppState();
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [coords, setCoords] = useState(null);
@@ -108,6 +110,22 @@ export default function DealerLoginScreen({ dealer, attendance, onLogin, navigat
           return;
         } else if (error.response.data?.error === 'gps_accuracy_exceeded') {
           showAlert('GPS Too Imprecise', 'Your GPS accuracy is too low to log in. Move to an open area for a stronger signal.');
+          return;
+        } else if (error.response.status === 409 && error.response.data?.error === 'visit_already_open') {
+          // The server's truth has since diverged from this screen's stale
+          // local state (e.g. another device, or a queued offline login that
+          // already synced) — surface the raw code ("visit_already_open")
+          // as a real sentence instead, and resync so Home/TodaysVisits stop
+          // showing no active visit.
+          const openDealerName = error.response.data?.visit?.dealer_name;
+          showAlert(
+            'Visit already open',
+            openDealerName
+              ? `You already have an open visit at ${openDealerName}. Log out of it before logging in elsewhere.`
+              : 'You already have an open dealer visit. Log out of it before logging in elsewhere.'
+          );
+          await fetchTodayState();
+          navigation.goBack();
           return;
         } else {
           throw error;

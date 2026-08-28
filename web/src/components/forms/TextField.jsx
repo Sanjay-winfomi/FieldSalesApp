@@ -16,6 +16,7 @@ export default function TextField({
   required,
   disabled,
   minLength,
+  icon,
   style,
   ...rest
 }) {
@@ -31,7 +32,7 @@ export default function TextField({
           <label
             style={{
               position: 'absolute',
-              left: 14,
+              left: icon ? 38 : 14,
               top: floated ? -8 : '50%',
               transform: floated ? 'none' : 'translateY(-50%)',
               fontSize: floated ? 11 : 14,
@@ -46,10 +47,15 @@ export default function TextField({
             {label}{required && <span style={{ color: colors.danger }}> *</span>}
           </label>
         )}
+        {icon && (
+          <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', display: 'flex', pointerEvents: 'none' }}>
+            {icon}
+          </span>
+        )}
         <input
           type={type}
           className={`ft-input ${error ? 'ft-input-error' : ''}`}
-          style={{ borderColor, height: 46 }}
+          style={{ borderColor, height: 46, paddingLeft: icon ? 38 : undefined }}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={focused ? placeholder : ''}
