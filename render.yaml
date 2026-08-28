@@ -1,95 +1,8 @@
-databases:
-  - name: fieldtrack-db
-    plan: free
-    databaseName: fieldtrack
-    user: fieldtrack
-
 services:
-  - type: web
-    name: fieldtrack-backend
-    runtime: node
-    plan: free
-    rootDir: backend
-    buildCommand: npm install
-    # Applies schema.sql before every boot — safe to re-run (CREATE TABLE IF
-    # NOT EXISTS / idempotent ALTER TABLEs), and never resurrects deleted
-    # rows since it only touches structure, not demo data.
-    #
-    # seed.js is deliberately NOT run here anymore: it inserts a dealer/
-    # employee only if one with that name doesn't already exist, which
-    # sounded idempotent but actually meant any demo dealer/employee a
-    # manager deleted got silently re-created on the next boot (e.g. after
-    # Render's free-tier idle spin-down). Seeding is now a one-time, manual
-    # step — run `npm run seed` locally against this service's DB (via
-    # backend/.env) only when setting up a fresh/empty database.
-    startCommand: npm run migrate && npm start
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      # seed.js refuses to run with NODE_ENV=production unless this is set —
-      # a safety net added for ad-hoc/local runs against a real database, but
-      # this service's own startCommand intentionally reseeds idempotent demo
-      # data on every boot (see the comment above), so it must opt back in.
-      - key: SEED_ALLOW_PRODUCTION
-        value: true
-      - key: DB_HOST
-        fromDatabase:
-          name: fieldtrack-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: fieldtrack-db
-          property: port
-      - key: DB_NAME
-        fromDatabase:
-          name: fieldtrack-db
-          property: database
-      - key: DB_USER
-        fromDatabase:
-          name: fieldtrack-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: fieldtrack-db
-          property: password
-      - key: DB_SSL
-        value: true
-      # Render's internal Postgres connection presents a cert that doesn't
-      # chain to a standard root CA — rejecting unauthorized certs (the
-      # default) makes every query throw right after connecting.
-      - key: DB_SSL_REJECT_UNAUTHORIZED
-        value: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: JWT_EXPIRES_IN
-        value: 8h
-      - key: JWT_REFRESH_EXPIRES_IN
-        value: 7d
-      - key: TRUST_PROXY_HOPS
-        value: 1
-      # Set this once you know your Vercel URL, e.g. https://your-app.vercel.app
-      # — comma-separated if there's more than one (preview + production).
-      - key: ALLOWED_ORIGINS
-        sync: false
-      - key: LOGIN_RADIUS_METERS
-        value: 200
-      - key: GPS_ACCURACY_THRESHOLD_METERS
-        value: 30
-      - key: LOGIN_MATCH_TOLERANCE_METERS
-        value: 20
-      - key: DAY_BOUNDARY_HOUR
-        value: 5
-      # Server-side only — set your own key/leave blank if geocoding isn't needed yet.
-      - key: GOOGLE_MAPS_API_KEY
-        sync: false
-
-  # Python/FastAPI port of fieldtrack-backend — same DB, same JWT secret
-  # (shared via fromService below, never re-generated), same API contract.
-  # Deployed as a SEPARATE service, not a replacement, so both can run
-  # side by side during a rolling cutover — see CUTOVER.md at the repo
-  # root for the full rollout/rollback plan. Once cutover is complete and
-  # confirmed stable, fieldtrack-backend (Node) can be suspended/removed.
+  # FastAPI/Python backend — the only backend now. The original Node service
+  # (fieldtrack-backend) and its database were retired after that database's
+  # free-tier instance expired; this service now runs against a separately
+  # created database (not managed by this Blueprint — see below).
   - type: web
     name: fieldtrack-backend-py
     runtime: python
@@ -101,48 +14,40 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # The database this service actually uses was created by hand in the
+      # Render dashboard (not via this Blueprint's `databases:` — a prior
+      # attempt at that ran into free-tier account limits and Blueprint's
+      # existing-resource detection not recognizing manually created
+      # resources, so all five of these are set directly in the dashboard
+      # rather than via `fromDatabase`). Fill these in there, not here.
       - key: DB_HOST
-        fromDatabase:
-          name: fieldtrack-db
-          property: host
+        sync: false
       - key: DB_PORT
-        fromDatabase:
-          name: fieldtrack-db
-          property: port
+        sync: false
       - key: DB_NAME
-        fromDatabase:
-          name: fieldtrack-db
-          property: database
+        sync: false
       - key: DB_USER
-        fromDatabase:
-          name: fieldtrack-db
-          property: user
+        sync: false
       - key: DB_PASSWORD
-        fromDatabase:
-          name: fieldtrack-db
-          property: password
+        sync: false
       - key: DB_SSL
         value: true
       - key: DB_SSL_REJECT_UNAUTHORIZED
         value: false
-      # Shared with fieldtrack-backend (Node), not independently generated —
-      # this is what makes a token issued by one service valid on the other
-      # during a rolling cutover. Render resolves this to the Node service's
-      # actual generated value at deploy time; nobody needs to copy/paste
-      # the secret by hand.
+      # No longer shared via `fromService` with a Node sibling — set this to
+      # a real random secret in the dashboard. If a mobile/web build was ever
+      # issued a token from the old Node service, that token is invalid
+      # against this one unless you set this to the exact same value the
+      # old service used (not recoverable now that it's deleted, so this
+      # only matters if you saved that value beforehand).
       - key: JWT_SECRET
-        fromService:
-          type: web
-          name: fieldtrack-backend
-          envVarKey: JWT_SECRET
+        sync: false
       - key: JWT_EXPIRES_IN
         value: 8h
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
       - key: TRUST_PROXY_HOPS
         value: 1
-      # Same value as fieldtrack-backend's ALLOWED_ORIGINS — set once you
-      # know your Vercel URL, comma-separated if more than one.
       - key: ALLOWED_ORIGINS
         sync: false
       - key: LOGIN_RADIUS_METERS
@@ -153,8 +58,6 @@ services:
         value: 20
       - key: DAY_BOUNDARY_HOUR
         value: 5
-      # Same key as fieldtrack-backend — set your own/leave blank if
-      # geocoding isn't needed yet.
       - key: GOOGLE_MAPS_API_KEY
         sync: false
       - key: LOG_LEVEL
