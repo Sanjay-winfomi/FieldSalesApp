@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from app.core import config
 from app.core.logging_config import log_warn
@@ -55,7 +55,19 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"error": "Origin not allowed"}, status_code=403)
 
         if request.method == "OPTIONS" and origin:
-            response = JSONResponse({}, status_code=204)
+            # A 204 response MUST have a genuinely empty body (RFC 9110 §15.3.5)
+            # — JSONResponse({}, status_code=204) instead renders a 2-byte
+            # b"{}" body while Starlette's 204 special-case in
+            # Response.init_headers() skips setting Content-Length at all.
+            # That mismatch is exactly what triggered
+            # "RuntimeError: Response content longer than Content-Length"
+            # inside Starlette's BaseHTTPMiddleware response-forwarding
+            # (starlette/middleware/base.py) on every real CORS preflight —
+            # found live in production, not in local testing (which never
+            # exercised a real cross-origin preflight against this
+            # middleware stack). A plain Response with no content argument
+            # has a true empty body, avoiding the mismatch entirely.
+            response = Response(status_code=204)
         else:
             response = await call_next(request)
 
