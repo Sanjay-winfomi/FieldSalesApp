@@ -9,39 +9,47 @@ const MAP_CONTAINER_STYLE = { width: '100%', height: '100%', minHeight: 520 };
 // Fallback center (India) used only until markers arrive and fitBounds takes over.
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
 
-// Deep indigo circle for dealers, hot-pink teardrop pin for reps — deliberately
-// NOT green/amber/orange, since those collide with Google's own basemap colors
-// (parks, POI dots, road shields), which is exactly why the previous markers
-// were hard to spot. Shape also differs (circle vs. pin), not just color, so
-// the two are distinguishable even for colorblind users.
-const DEALER_COLOR = '#1E3A8A';
-const REP_COLOR = '#DB2777';
+// Classic corkboard-pushpin look — a glossy ball head on a metal needle,
+// tip pointing at the exact coordinate — same shape for both, color-coded
+// (red = rep, yellow = dealer) so they're unmistakable from a distance and
+// don't rely on shape alone.
+const DEALER_COLOR = { light: '#FFE066', dark: '#D69E00' }; // yellow
+const REP_COLOR = { light: '#FF6B6B', dark: '#C11919' }; // red
+// Flat solid shades of the same two colors, for UI accents (search
+// suggestions, legend swatch) that aren't rendered as a gradient pin.
+const DEALER_SOLID = '#D69E00';
+const REP_SOLID = '#DC2626';
 
-const DEALER_ICON = {
-  // Full circle, centered on its own coordinate.
-  path: 'M 0,0 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0',
-  fillColor: DEALER_COLOR,
-  fillOpacity: 1,
-  strokeColor: '#FFFFFF',
-  strokeWeight: 2.5,
-  scale: 1.6,
-  anchor: { x: 0, y: 0 },
-  labelOrigin: { x: 0, y: 0 },
-};
+const PIN_WIDTH = 30;
+const PIN_HEIGHT = 52;
+const PIN_HEAD_CENTER_Y = 17;
+const PIN_HEAD_RADIUS = 14;
 
-const REP_ICON = {
-  path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z',
-  fillColor: REP_COLOR,
-  fillOpacity: 1,
-  strokeColor: '#FFFFFF',
-  strokeWeight: 2,
-  scale: 2.2,
-  anchor: { x: 12, y: 22 },
-  labelOrigin: { x: 12, y: 9 },
-};
+function pushpinSvgDataUri({ light, dark }) {
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_WIDTH}" height="${PIN_HEIGHT}" viewBox="0 0 ${PIN_WIDTH} ${PIN_HEIGHT}">
+  <defs>
+    <radialGradient id="head" cx="34%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="30%" stop-color="${light}"/>
+      <stop offset="100%" stop-color="${dark}"/>
+    </radialGradient>
+    <linearGradient id="needle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f2f2f2"/>
+      <stop offset="45%" stop-color="#a8a8a8"/>
+      <stop offset="100%" stop-color="#5f5f5f"/>
+    </linearGradient>
+  </defs>
+  <line x1="${PIN_WIDTH / 2}" y1="${PIN_HEAD_CENTER_Y + PIN_HEAD_RADIUS - 4}" x2="${PIN_WIDTH / 2}" y2="${PIN_HEIGHT - 2}"
+        stroke="url(#needle)" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="${PIN_WIDTH / 2}" cy="${PIN_HEAD_CENTER_Y}" r="${PIN_HEAD_RADIUS}"
+          fill="url(#head)" stroke="${dark}" stroke-width="1"/>
+</svg>`.trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 
-const DEALER_LABEL = { text: 'D', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' };
-const REP_LABEL = { text: 'R', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' };
+const DEALER_PIN_URL = pushpinSvgDataUri(DEALER_COLOR);
+const REP_PIN_URL = pushpinSvgDataUri(REP_COLOR);
 
 function formatDateTime(iso) {
   if (!iso) return '—';
@@ -62,6 +70,27 @@ export default function MapPage() {
     id: 'fieldtrack-google-maps',
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
   });
+
+  // google.maps.Size/Point only exist once the Maps script has loaded, so
+  // these icon objects (needed to anchor the pin's needle tip, not its
+  // top-left corner, to the actual coordinate) are built here rather than
+  // as module-level constants.
+  const dealerIcon = useMemo(() => {
+    if (!isLoaded || !window.google) return undefined;
+    return {
+      url: DEALER_PIN_URL,
+      scaledSize: new window.google.maps.Size(PIN_WIDTH, PIN_HEIGHT),
+      anchor: new window.google.maps.Point(PIN_WIDTH / 2, PIN_HEIGHT - 2),
+    };
+  }, [isLoaded]);
+  const repIcon = useMemo(() => {
+    if (!isLoaded || !window.google) return undefined;
+    return {
+      url: REP_PIN_URL,
+      scaledSize: new window.google.maps.Size(PIN_WIDTH, PIN_HEIGHT),
+      anchor: new window.google.maps.Point(PIN_WIDTH / 2, PIN_HEIGHT - 2),
+    };
+  }, [isLoaded]);
 
   const [dealers, setDealers] = useState([]);
   const [reps, setReps] = useState([]);
@@ -187,7 +216,7 @@ export default function MapPage() {
                     style={styles.suggestionItem}
                     onClick={() => jumpToMarker(type, item)}
                   >
-                    {type === 'dealer' ? <MapPin size={14} color={DEALER_COLOR} /> : <User size={14} color={REP_COLOR} />}
+                    {type === 'dealer' ? <MapPin size={14} color={DEALER_SOLID} /> : <User size={14} color={REP_SOLID} />}
                     <span style={styles.suggestionName}>{item.name}</span>
                     <span style={styles.suggestionMeta}>{type === 'dealer' ? item.address : item.region}</span>
                   </button>
@@ -228,8 +257,7 @@ export default function MapPage() {
               <MarkerF
                 key={`dealer-${dealer.id}`}
                 position={{ lat: dealer.latitude, lng: dealer.longitude }}
-                icon={DEALER_ICON}
-                label={DEALER_LABEL}
+                icon={dealerIcon}
                 zIndex={1}
                 onMouseOver={() => setActive({ type: 'dealer', item: dealer })}
                 onMouseOut={() => setActive((h) => (h?.type === 'dealer' && h.item.id === dealer.id ? null : h))}
@@ -264,8 +292,7 @@ export default function MapPage() {
               <MarkerF
                 key={`rep-${rep.id}`}
                 position={{ lat: rep.latitude, lng: rep.longitude }}
-                icon={REP_ICON}
-                label={REP_LABEL}
+                icon={repIcon}
                 zIndex={2}
                 onMouseOver={() => setActive({ type: 'rep', item: rep })}
                 onMouseOut={() => setActive((h) => (h?.type === 'rep' && h.item.id === rep.id ? null : h))}
@@ -312,12 +339,12 @@ export default function MapPage() {
         <div style={styles.legendBox}>
           <div style={styles.legendTitle}>Legend</div>
           <div style={styles.legendItem}>
-            <span style={{ ...styles.legendSwatch, backgroundColor: DEALER_COLOR, borderRadius: '50%' }} />
-            <span>Dealer</span>
+            <img src={REP_PIN_URL} alt="" width={18} height={31} style={styles.legendSwatch} />
+            <span>Rep</span>
           </div>
           <div style={styles.legendItem}>
-            <span style={{ ...styles.legendSwatch, backgroundColor: REP_COLOR, borderRadius: '30% 30% 50% 50%' }} />
-            <span>Rep</span>
+            <img src={DEALER_PIN_URL} alt="" width={18} height={31} style={styles.legendSwatch} />
+            <span>Dealer</span>
           </div>
         </div>
       </div>
@@ -380,7 +407,7 @@ const styles = {
     letterSpacing: 0.4, marginBottom: 2,
   },
   legendItem: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: colors.text, fontWeight: 600 },
-  legendSwatch: { width: 16, height: 16, display: 'inline-block', flexShrink: 0, border: '2px solid #FFFFFF', boxShadow: '0 0 0 1px rgba(0,0,0,0.15)' },
+  legendSwatch: { flexShrink: 0, display: 'block' },
   infoBox: { minWidth: 180, maxWidth: 240, fontFamily: 'inherit' },
   infoTitle: { fontSize: 14, fontWeight: 700, color: '#1F2937' },
   infoMuted: { fontSize: 12, color: '#6B7280', marginTop: 2 },
