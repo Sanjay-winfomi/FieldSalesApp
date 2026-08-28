@@ -9,25 +9,39 @@ const MAP_CONTAINER_STYLE = { width: '100%', height: '100%', minHeight: 520 };
 // Fallback center (India) used only until markers arrive and fitBounds takes over.
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
 
+// Deep indigo circle for dealers, hot-pink teardrop pin for reps — deliberately
+// NOT green/amber/orange, since those collide with Google's own basemap colors
+// (parks, POI dots, road shields), which is exactly why the previous markers
+// were hard to spot. Shape also differs (circle vs. pin), not just color, so
+// the two are distinguishable even for colorblind users.
+const DEALER_COLOR = '#1E3A8A';
+const REP_COLOR = '#DB2777';
+
 const DEALER_ICON = {
-  path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z',
-  fillColor: '#15803D',
+  // Full circle, centered on its own coordinate.
+  path: 'M 0,0 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0',
+  fillColor: DEALER_COLOR,
   fillOpacity: 1,
   strokeColor: '#FFFFFF',
-  strokeWeight: 1.5,
-  scale: 1.4,
-  anchor: { x: 12, y: 22 },
+  strokeWeight: 2.5,
+  scale: 1.6,
+  anchor: { x: 0, y: 0 },
+  labelOrigin: { x: 0, y: 0 },
 };
 
 const REP_ICON = {
   path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z',
-  fillColor: '#F59E0B',
+  fillColor: REP_COLOR,
   fillOpacity: 1,
   strokeColor: '#FFFFFF',
-  strokeWeight: 1.5,
-  scale: 1.4,
+  strokeWeight: 2,
+  scale: 2.2,
   anchor: { x: 12, y: 22 },
+  labelOrigin: { x: 12, y: 9 },
 };
+
+const DEALER_LABEL = { text: 'D', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' };
+const REP_LABEL = { text: 'R', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' };
 
 function formatDateTime(iso) {
   if (!iso) return '—';
@@ -173,7 +187,7 @@ export default function MapPage() {
                     style={styles.suggestionItem}
                     onClick={() => jumpToMarker(type, item)}
                   >
-                    {type === 'dealer' ? <MapPin size={14} color="#15803D" /> : <User size={14} color="#F59E0B" />}
+                    {type === 'dealer' ? <MapPin size={14} color={DEALER_COLOR} /> : <User size={14} color={REP_COLOR} />}
                     <span style={styles.suggestionName}>{item.name}</span>
                     <span style={styles.suggestionMeta}>{type === 'dealer' ? item.address : item.region}</span>
                   </button>
@@ -196,6 +210,7 @@ export default function MapPage() {
         </div>
       )}
 
+      <div style={styles.mapRow}>
       <div style={styles.mapCard}>
         {loadError ? (
           <div style={styles.mapPlaceholder}>Map failed to load — check NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.</div>
@@ -214,6 +229,8 @@ export default function MapPage() {
                 key={`dealer-${dealer.id}`}
                 position={{ lat: dealer.latitude, lng: dealer.longitude }}
                 icon={DEALER_ICON}
+                label={DEALER_LABEL}
+                zIndex={1}
                 onMouseOver={() => setActive({ type: 'dealer', item: dealer })}
                 onMouseOut={() => setActive((h) => (h?.type === 'dealer' && h.item.id === dealer.id ? null : h))}
                 onClick={() => setActive({ type: 'dealer', item: dealer })}
@@ -248,6 +265,8 @@ export default function MapPage() {
                 key={`rep-${rep.id}`}
                 position={{ lat: rep.latitude, lng: rep.longitude }}
                 icon={REP_ICON}
+                label={REP_LABEL}
+                zIndex={2}
                 onMouseOver={() => setActive({ type: 'rep', item: rep })}
                 onMouseOut={() => setActive((h) => (h?.type === 'rep' && h.item.id === rep.id ? null : h))}
                 onClick={() => setActive({ type: 'rep', item: rep })}
@@ -290,9 +309,17 @@ export default function MapPage() {
         )}
       </div>
 
-      <div style={styles.legendRow}>
-        <div style={styles.legendItem}><span style={{ ...styles.legendDot, backgroundColor: '#15803D' }} /> Dealer</div>
-        <div style={styles.legendItem}><span style={{ ...styles.legendDot, backgroundColor: '#F59E0B' }} /> Rep</div>
+        <div style={styles.legendBox}>
+          <div style={styles.legendTitle}>Legend</div>
+          <div style={styles.legendItem}>
+            <span style={{ ...styles.legendSwatch, backgroundColor: DEALER_COLOR, borderRadius: '50%' }} />
+            <span>Dealer</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span style={{ ...styles.legendSwatch, backgroundColor: REP_COLOR, borderRadius: '30% 30% 50% 50%' }} />
+            <span>Rep</span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -334,17 +361,26 @@ const styles = {
     display: 'flex', alignItems: 'center', padding: '12px 16px', borderRadius: radius.md,
     backgroundColor: colors.dangerLight, color: colors.dangerDark, fontSize: 13, fontWeight: 500,
   },
+  mapRow: { display: 'flex', gap: spacing.lg, alignItems: 'stretch', flexWrap: 'wrap' },
   mapCard: {
-    borderRadius: radius.card, border: `1px solid ${colors.border}`, boxShadow: shadows.card,
-    overflow: 'hidden', backgroundColor: colors.card, minHeight: 520,
+    flex: '1 1 auto', minWidth: 0, borderRadius: radius.card, border: `1px solid ${colors.border}`,
+    boxShadow: shadows.card, overflow: 'hidden', backgroundColor: colors.card, minHeight: 520,
   },
   mapPlaceholder: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', height: 520,
     color: colors.textMuted, fontSize: 14,
   },
-  legendRow: { display: 'flex', gap: spacing.lg },
-  legendItem: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: colors.textSecondary, fontWeight: 500 },
-  legendDot: { width: 10, height: 10, borderRadius: 5, display: 'inline-block' },
+  legendBox: {
+    flex: '0 0 168px', alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', gap: 10,
+    padding: '14px 16px', borderRadius: radius.card, border: `1px solid ${colors.border}`,
+    boxShadow: shadows.card, backgroundColor: colors.card,
+  },
+  legendTitle: {
+    fontSize: 11, fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase',
+    letterSpacing: 0.4, marginBottom: 2,
+  },
+  legendItem: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: colors.text, fontWeight: 600 },
+  legendSwatch: { width: 16, height: 16, display: 'inline-block', flexShrink: 0, border: '2px solid #FFFFFF', boxShadow: '0 0 0 1px rgba(0,0,0,0.15)' },
   infoBox: { minWidth: 180, maxWidth: 240, fontFamily: 'inherit' },
   infoTitle: { fontSize: 14, fontWeight: 700, color: '#1F2937' },
   infoMuted: { fontSize: 12, color: '#6B7280', marginTop: 2 },
