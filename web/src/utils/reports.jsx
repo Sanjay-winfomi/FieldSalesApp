@@ -78,6 +78,9 @@ export function formatCellValue(value, key) {
   if (key && MINUTES_KEY_PATTERN.test(key) && typeof value === 'number') {
     return formatMinutesAsHours(value);
   }
+  if (key === 'work_mode' && typeof value === 'string') {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
   return value;
 }
 
