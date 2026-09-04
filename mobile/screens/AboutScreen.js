@@ -31,10 +31,10 @@ export default function AboutScreen({ navigation }) {
             <Text style={styles.sectionTitle}>Support</Text>
             <Text
               style={styles.link}
-              onPress={() => Linking.openURL('mailto:support@winfomi.com')}
+              onPress={() => Linking.openURL('mailto:sales@winfomi.com')}
               accessibilityRole="link"
             >
-              <Mail size={14} color={colors.primary} /> support@winfomi.com
+              <Mail size={14} color={colors.primary} /> sales@winfomi.com
             </Text>
           </Card>
         </FadeSlideIn>

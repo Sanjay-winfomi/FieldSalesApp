@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable, PanResponder } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { FileText, Sparkles, Clock, Music, Play, Pause } from 'lucide-react-native';
+import { FileText, Sparkles, Clock, Music, Play, Pause, Square } from 'lucide-react-native';
 import { getRecordingStatus, getAudioLink } from '../src/services/meetingApi';
 import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LoadingCard, EmptyState, Card, FadeSlideIn, SecondaryButton } from '../src/components';
@@ -16,6 +16,50 @@ function formatSeconds(s) {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+const PLAYBACK_RATES = [1, 1.5, 2, 0.5];
+
+/** Tap-or-drag seek track. Reports fractional progress (0-1) via onSeek,
+ * only once the touch is released — matches how most audio players commit
+ * a seek at gesture-end rather than scrubbing the actual playback position
+ * on every pixel of movement. */
+function SeekBar({ progress, onSeek }) {
+  const widthRef = useRef(0);
+  const [dragX, setDragX] = useState(null);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => setDragX(evt.nativeEvent.locationX),
+      onPanResponderMove: (evt) => setDragX(evt.nativeEvent.locationX),
+      onPanResponderRelease: (evt) => {
+        const width = widthRef.current;
+        if (width > 0) {
+          const x = Math.max(0, Math.min(evt.nativeEvent.locationX, width));
+          onSeek(x / width);
+        }
+        setDragX(null);
+      },
+      onPanResponderTerminate: () => setDragX(null),
+    })
+  ).current;
+
+  const width = widthRef.current;
+  const fraction = dragX !== null && width > 0 ? Math.max(0, Math.min(dragX / width, 1)) : progress;
+
+  return (
+    <View
+      style={styles.seekTrack}
+      onLayout={(e) => { widthRef.current = e.nativeEvent.layout.width; }}
+      {...panResponder.panHandlers}
+    >
+      <View style={styles.seekTrackBg} />
+      <View style={[styles.seekTrackFill, { width: `${fraction * 100}%` }]} />
+      <View style={[styles.seekThumb, { left: `${fraction * 100}%` }]} />
+    </View>
+  );
+}
+
 /** In-app audio player — plays straight from the presigned S3 URL, no
  * jumping out to the browser. `url` starts null; useAudioPlayer accepts
  * that and swaps in the real source (recreating its underlying player)
@@ -24,6 +68,7 @@ function formatSeconds(s) {
 function AudioPlayerBar({ url }) {
   const player = useAudioPlayer(url);
   const status = useAudioPlayerStatus(player);
+  const [rateIndex, setRateIndex] = useState(0);
 
   // Autoplay the moment a real source is loaded — matches the "tap to
   // listen" expectation the old Linking.openURL button set.
@@ -32,17 +77,58 @@ function AudioPlayerBar({ url }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
 
+  const handleSeek = (fraction) => {
+    if (!status.duration) return;
+    player.seekTo(fraction * status.duration);
+  };
+
+  const handleStop = () => {
+    player.pause();
+    player.seekTo(0);
+  };
+
+  const handleCycleRate = () => {
+    const nextIndex = (rateIndex + 1) % PLAYBACK_RATES.length;
+    setRateIndex(nextIndex);
+    player.setPlaybackRate(PLAYBACK_RATES[nextIndex]);
+  };
+
+  const progress = status.duration > 0 ? status.currentTime / status.duration : 0;
+
   return (
-    <View style={styles.playerBar}>
-      <Pressable
-        onPress={() => (status.playing ? player.pause() : player.play())}
-        style={styles.playButton}
-        accessibilityRole="button"
-        accessibilityLabel={status.playing ? 'Pause' : 'Play'}
-      >
-        {status.playing ? <Pause size={20} color={colors.textInverse} /> : <Play size={20} color={colors.textInverse} />}
-      </Pressable>
-      <Text style={styles.playerTime}>{formatSeconds(status.currentTime)} / {formatSeconds(status.duration)}</Text>
+    <View>
+      <SeekBar progress={progress} onSeek={handleSeek} />
+
+      <View style={styles.playerBar}>
+        <Pressable
+          onPress={() => (status.playing ? player.pause() : player.play())}
+          style={styles.playButton}
+          accessibilityRole="button"
+          accessibilityLabel={status.playing ? 'Pause' : 'Play'}
+        >
+          {status.playing ? <Pause size={20} color={colors.textInverse} /> : <Play size={20} color={colors.textInverse} />}
+        </Pressable>
+
+        <Pressable
+          onPress={handleStop}
+          style={styles.stopButton}
+          accessibilityRole="button"
+          accessibilityLabel="Stop"
+        >
+          <Square size={16} color={colors.textSecondary} />
+        </Pressable>
+
+        <Text style={styles.playerTime}>{formatSeconds(status.currentTime)} / {formatSeconds(status.duration)}</Text>
+
+        <Pressable
+          onPress={handleCycleRate}
+          style={styles.speedButton}
+          accessibilityRole="button"
+          accessibilityLabel="Change playback speed"
+        >
+          <Text style={styles.speedButtonText}>{PLAYBACK_RATES[rateIndex]}x</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -202,7 +288,33 @@ const styles = StyleSheet.create({
   playerBar: { flexDirection: 'row', alignItems: 'center' },
   playButton: {
     width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm,
+  },
+  stopButton: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.neutralBg,
     alignItems: 'center', justifyContent: 'center', marginRight: spacing.md,
   },
-  playerTime: { ...typography.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+  playerTime: { ...typography.body, color: colors.textSecondary, fontVariant: ['tabular-nums'], flex: 1 },
+  speedButton: {
+    paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: 999,
+    backgroundColor: colors.neutralBg,
+  },
+  speedButtonText: { ...typography.caption, color: colors.text, fontWeight: '700' },
+  // A generous vertical hit area around the visible 4px track makes the
+  // thumb easy to grab on a phone screen without widening the track itself.
+  seekTrack: {
+    height: 28, justifyContent: 'center', marginBottom: spacing.sm,
+  },
+  seekTrackBg: {
+    position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 2,
+    backgroundColor: colors.border,
+  },
+  seekTrackFill: {
+    position: 'absolute', left: 0, height: 4, borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  seekThumb: {
+    position: 'absolute', width: 14, height: 14, borderRadius: 7,
+    backgroundColor: colors.primary, marginLeft: -7,
+  },
 });

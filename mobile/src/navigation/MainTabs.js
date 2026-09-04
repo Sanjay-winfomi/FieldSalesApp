@@ -67,8 +67,9 @@ export default function MainTabs() {
         name="Meetings"
         component={MeetingsScreen}
         options={{
+          tabBarLabel: 'Recordings',
           tabBarIcon: ({ color, size }) => <Mic size={size ?? 22} color={color} />,
-          tabBarAccessibilityLabel: 'Meetings tab',
+          tabBarAccessibilityLabel: 'Recordings tab',
         }}
       />
       <Tab.Screen

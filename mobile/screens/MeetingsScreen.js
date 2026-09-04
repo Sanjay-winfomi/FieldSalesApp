@@ -156,7 +156,7 @@ export default function MeetingsScreen({ navigation }) {
         >
           <View style={styles.headerGlow} pointerEvents="none" />
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Meetings</Text>
+            <Text style={styles.title}>Recordings</Text>
             <Pressable
               onPress={() => rootNavigation.navigate('MeetingFolders')}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -176,6 +176,7 @@ export default function MeetingsScreen({ navigation }) {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.chipsScroll}
           contentContainerStyle={styles.chipsRow}
         >
           <Pressable
@@ -271,7 +272,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: spacing.screenHorizontal,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.xl,
     borderBottomLeftRadius: radius.card,
     borderBottomRightRadius: radius.card,
     overflow: 'hidden',
@@ -280,7 +281,7 @@ const styles = StyleSheet.create({
   headerGlow: {
     position: 'absolute', top: -SCREEN_WIDTH * 0.13, right: -SCREEN_WIDTH * 0.1,
     width: SCREEN_WIDTH * 0.47, height: SCREEN_WIDTH * 0.47, borderRadius: SCREEN_WIDTH * 0.235,
-    backgroundColor: 'rgba(34,197,94,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { ...typography.sectionTitle, color: colors.text, fontSize: 22 },
@@ -288,7 +289,13 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
-  chipsRow: { paddingHorizontal: spacing.screenHorizontal, paddingVertical: spacing.md, gap: spacing.sm },
+  // Pinned to a fixed height (rather than sizing purely from content) so this
+  // horizontal ScrollView can never grow taller than its chips and shove the
+  // recordings list down — without an explicit style here, some RN/Android
+  // combinations were letting it claim far more vertical space than the
+  // chips actually needed the moment a folder existed.
+  chipsScroll: { flexGrow: 0, height: 52 },
+  chipsRow: { paddingHorizontal: spacing.screenHorizontal, paddingVertical: spacing.sm, gap: spacing.sm, alignItems: 'center' },
   chip: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, height: 32,
     borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
