@@ -1078,6 +1078,41 @@ async def transcription_webhook(request: Request, background_tasks: BackgroundTa
 #  API ENDPOINT — TRIGGERED BY THE APP AFTER BLOB UPLOAD
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _resolve_open_visit(owner_email: str):
+    """Best-effort: finds the rep's currently-open dealer visit (if any) at
+    the moment a recording is saved, so the manager dashboard's Recordings
+    tab can group it under that dealer. owner_email is actually the rep's
+    employee id as a string (see mobile's meetingApi.js) — named for
+    historical/API-compatibility reasons, not because it's really an email.
+    Returns (dealer_id, visit_id), both None if there's no open visit (or
+    anything about this lookup fails) — never raises, since resolving the
+    dealer link must never block saving the recording itself."""
+    if not db_pool or not owner_email or not owner_email.strip().isdigit():
+        return None, None
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT cv.id, cv.dealer_id
+            FROM client_visits cv
+            JOIN attendance a ON a.id = cv.attendance_id
+            WHERE a.employee_id = %s AND cv.logout_time IS NULL
+            ORDER BY cv.login_time DESC
+            LIMIT 1
+        """, (int(owner_email),))
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            return row[1], row[0]  # dealer_id, visit_id
+    except Exception as e:
+        print(f"[Pipeline] ⚠️ Failed to resolve open dealer visit: {e}")
+    finally:
+        if conn:
+            db_pool.putconn(conn)
+    return None, None
+
+
 @router.post("/start-processing")
 def start_processing(request: ProcessingRequest, background_tasks: BackgroundTasks):
     """Endpoint called by the app after a successful Blob upload of all chunks."""
@@ -1086,28 +1121,33 @@ def start_processing(request: ProcessingRequest, background_tasks: BackgroundTas
     if db_pool:
         conn = None
         try:
+            dealer_id, visit_id = _resolve_open_visit(request.owner_email)
             conn = db_pool.getconn()
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO call_recording (session_id, processing_status, recording_name, owner_id, ui_folder_id, created_at, duration)
-                VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+                INSERT INTO call_recording (session_id, processing_status, recording_name, owner_id, ui_folder_id, created_at, duration, dealer_id, visit_id)
+                VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
                 ON CONFLICT (session_id) DO UPDATE
                     SET processing_status = EXCLUDED.processing_status,
                         recording_name = COALESCE(EXCLUDED.recording_name, call_recording.recording_name),
                         owner_id = COALESCE(EXCLUDED.owner_id, call_recording.owner_id),
                         ui_folder_id = COALESCE(EXCLUDED.ui_folder_id, call_recording.ui_folder_id),
-                        duration = COALESCE(EXCLUDED.duration, call_recording.duration)
+                        duration = COALESCE(EXCLUDED.duration, call_recording.duration),
+                        dealer_id = COALESCE(EXCLUDED.dealer_id, call_recording.dealer_id),
+                        visit_id = COALESCE(EXCLUDED.visit_id, call_recording.visit_id)
             """, (
                 request.session_id,
                 "processing",
                 request.title or "Untitled Recording",
                 request.owner_email or None,
                 request.ui_folder_id or None,
-                f"{request.duration // 60}:{str(request.duration % 60).zfill(2)}" if request.duration else "0:00"
+                f"{request.duration // 60}:{str(request.duration % 60).zfill(2)}" if request.duration else "0:00",
+                dealer_id,
+                visit_id,
             ))
             conn.commit()
             cur.close()
-            print(f"[DB] ✅ Initial row written for session {request.session_id} (title='{request.title}')")
+            print(f"[DB] ✅ Initial row written for session {request.session_id} (title='{request.title}', dealer_id={dealer_id})")
         except Exception as e:
             print(f"[DB] ⚠️ Failed to write initial row: {e}")
         finally:

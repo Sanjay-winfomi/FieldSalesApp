@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard, Bell, Map as MapIcon } from 'lucide-react';
+import { RefreshCw, User, BarChart3, Settings, Menu, X, LogOut, ChevronDown, LayoutDashboard, Bell, Map as MapIcon, Mic } from 'lucide-react';
 import { colors, typography, spacing, shadows } from '../../theme';
 
 // Served from web/public/winfomi-logo.png — see LoginPage.jsx for why this
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'map', label: 'Map', icon: MapIcon },
   { key: 'reports', label: 'Reports', icon: BarChart3 },
+  { key: 'recordings', label: 'Recordings', icon: Mic },
   { key: 'admin', label: 'Admin', icon: Settings },
 ];
 

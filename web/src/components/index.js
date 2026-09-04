@@ -12,6 +12,8 @@ export { default as SearchBar } from './filters/SearchBar';
 export { default as FilterSelect } from './filters/FilterSelect';
 export { default as RepMultiSelect } from './filters/RepMultiSelect';
 export { default as RepSelect } from './filters/RepSelect';
+export { default as DealerMultiSelect } from './filters/DealerMultiSelect';
+export { default as DealerSelect } from './filters/DealerSelect';
 export { default as FilterBar } from './filters/FilterBar';
 
 export { default as SectionHeader } from './headers/SectionHeader';

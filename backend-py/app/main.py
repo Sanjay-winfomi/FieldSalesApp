@@ -106,6 +106,7 @@ from app.routers import (  # noqa: E402
     navigation,
     notes,
     notifications,
+    recordings,
     reminders,
     reports,
     sync_failures,
@@ -128,6 +129,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard")
 app.include_router(employees.router, prefix="/api/employees")
 app.include_router(reports.router, prefix="/api/reports")
 app.include_router(notifications.router, prefix="/api/notifications")
+app.include_router(recordings.router, prefix="/api/recordings")
 
 # Unprefixed (root-level) — matches the mobile app's meetingApi.js exactly as
 # it called the standalone meeting-recorder-app-backend service (e.g.

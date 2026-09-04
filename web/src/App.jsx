@@ -9,6 +9,7 @@ import ForgotPasswordPage from './views/ForgotPasswordPage';
 import RepDetailsPage from './views/RepDetailsPage';
 import DashboardPage from './views/DashboardPage';
 import ReportsPage from './views/ReportsPage';
+import RecordingsPage from './views/RecordingsPage';
 import AdminPage from './views/AdminPage';
 import NotificationsPage from './views/NotificationsPage';
 import MapPage from './views/MapPage';
@@ -172,6 +173,7 @@ export default function App() {
 
         {activeView === 'map' && <MapPage />}
         {activeView === 'reports' && <ReportsPage />}
+        {activeView === 'recordings' && <RecordingsPage />}
         {activeView === 'admin' && <AdminPage currentEmployeeId={manager?.id} currentUsername={manager?.username} />}
         {activeView === 'notifications' && (
           <NotificationsPage onUnreadCountChange={setUnreadNotifications} onBack={() => setActiveView('dashboard')} />
