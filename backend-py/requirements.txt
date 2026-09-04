@@ -13,7 +13,7 @@ python-multipart==0.0.20
 
 # ── Meeting Recorder feature (app/routers/meeting_recorder.py) ──────────────
 requests==2.32.3
-azure-storage-blob==12.28.0
+boto3==1.43.88
 pydub==0.25.1
 # pydub imports the stdlib `audioop` module, which PEP 594 removed entirely
 # in Python 3.13 (the version this venv/Render both run) — without this

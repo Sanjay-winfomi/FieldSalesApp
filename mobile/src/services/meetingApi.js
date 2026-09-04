@@ -79,26 +79,26 @@ export async function getDeleteToken(file) {
   return data; // { url, sasToken }
 }
 
-// Uploads a locally-recorded audio file straight to Azure Blob Storage via
-// the SAS url/token pair from getSasToken — the backend never sees the raw
-// audio bytes at this step, it only issues the token. x-ms-blob-type is
-// required by Azure for a single-shot PUT of a block blob; omitting it
-// makes Azure reject the request outright.
+// Uploads a locally-recorded audio file straight to S3 via the presigned
+// PUT URL from getSasToken (sasUrl is already the complete signed URL;
+// sasToken is always "" now — kept only so this concatenation still works
+// unchanged from when it was an Azure SAS base-url + separate token). No
+// x-ms-blob-type (that was Azure-specific) — a presigned S3 PUT needs no
+// special headers beyond what the signature already covers.
 export async function uploadRecordingToBlob(localUri, sasUrl, sasToken, contentType) {
   const result = await FileSystem.uploadAsync(`${sasUrl}${sasToken}`, localUri, {
     httpMethod: 'PUT',
     headers: {
-      'x-ms-blob-type': 'BlockBlob',
       'Content-Type': contentType,
     },
   });
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Blob upload failed with status ${result.status}`);
+    throw new Error(`Upload failed with status ${result.status}`);
   }
   return result;
 }
 
-// Deletes a raw chunk blob directly from Azure — used when the rep discards
+// Deletes a raw chunk object directly from S3 — used when the rep discards
 // an in-progress recording after it's already been uploaded but before
 // /start-processing is called, so it doesn't linger in storage forever.
 export async function deleteBlobDirect(fileName) {
@@ -116,14 +116,14 @@ export async function getRecordingStatus(sessionId) {
   return data;
 }
 
-// Resolves a Graph driveItem id (audio_file_id/transcript_file_id from
-// getRecordingStatus) to an openable SharePoint URL. The id alone isn't a
-// URL, and the Graph app-only credentials needed to resolve it live only on
-// the backend, so this is a real network call, not a local computation —
-// callers should fetch it lazily (e.g. on "Open in SharePoint" tap) rather
-// than eagerly for every recording in a list.
-export async function getSharePointLink(fileId) {
-  const { data } = await meetingApi.get('/get-sharepoint-link', { params: { file_id: fileId } });
+// Resolves an S3 object key (audio_file_id from getRecordingStatus — the
+// merged recording's own permanent key) to a short-lived openable URL. The
+// key alone isn't a URL, and the AWS credentials needed to sign one live
+// only on the backend, so this is a real network call, not a local
+// computation — callers should fetch it lazily (e.g. on "Open recording"
+// tap) rather than eagerly for every recording in a list.
+export async function getAudioLink(fileId) {
+  const { data } = await meetingApi.get('/get-audio-link', { params: { file_id: fileId } });
   return data.webUrl;
 }
 

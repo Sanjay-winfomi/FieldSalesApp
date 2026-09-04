@@ -103,24 +103,22 @@ services:
       # here only degrades this one feature (see meeting_recorder.py's own
       # ad-hoc os.getenv reads), it never blocks the whole app from starting
       # the way a missing JWT_SECRET above does. ──
-      - key: AZURE_STORAGE_CONNECTION_STRING
+      #
+      # Audio storage — AWS S3, the permanent archive (see
+      # meeting_recorder.py's module docstring). Replaced Azure Blob +
+      # SharePoint entirely; no SharePoint/Graph vars needed anymore.
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: S3_BUCKET_NAME
         sync: false
       - key: AZURE_SPEECH_KEY
         sync: false
       - key: AZURE_SPEECH_REGION
         value: southeastasia
-      - key: SP_CLIENT_ID
-        sync: false
-      - key: SP_TENANT_ID
-        sync: false
-      - key: SP_CLIENT_SECRET
-        sync: false
-      - key: SP_SITE_ID
-        sync: false
-      - key: SP_DRIVE_ID
-        sync: false
-      - key: SP_BASE_PATH
-        value: Salesforce/Mobile Recording
       - key: AZURE_OPENAI_ENDPOINT
         sync: false
       - key: AZURE_OPENAI_KEY

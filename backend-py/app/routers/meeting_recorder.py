@@ -8,16 +8,24 @@ has no on_event of its own).
 
 Deliberately kept as plain `def` (sync) route handlers with a psycopg2
 ThreadedConnectionPool, exactly as in the original — NOT ported to this app's
-own asyncpg pool (app/db/pool.py), which talks to a different Postgres
-database entirely (fieldtrack vs this feature's own "transcript" DB). FastAPI
-runs sync `def` routes in a thread pool automatically, so the blocking
-psycopg2 calls here don't block the event loop used by the rest of the app.
-All of this feature's own env vars (AZURE_*, SP_*, DATABASE_URL, etc.) are
-read ad-hoc via os.getenv with graceful fallbacks (db_pool stays None if
-unset) rather than through app/core/config.py's fail-fast run_boot_checks() —
-so a missing meeting-recorder secret degrades only this feature, and never
-prevents the whole app (and the unrelated, already-in-production field-sales
-API) from booting.
+own asyncpg pool (app/db/pool.py); both point at the same database now (see
+db_pool's own comment below). FastAPI runs sync `def` routes in a thread
+pool automatically, so the blocking psycopg2 calls here don't block the
+event loop used by the rest of the app.
+
+Audio storage is AWS S3 (AWS_*/S3_BUCKET_NAME env vars) — both the working
+area during processing and the permanent archive; nothing gets deleted after
+a recording finishes. Originally Azure Blob (scratch space) + SharePoint
+(the only permanent copy); SharePoint archival was removed entirely, S3 took
+over both roles.
+
+All of this feature's own env vars (AWS_*, AZURE_*, WEBHOOK_SECRET, etc.) are
+read ad-hoc via os.getenv with graceful fallbacks (db_pool/s3_client stay
+usable-but-erroring if unset, matching this module's existing degrade-alone
+pattern) rather than through app/core/config.py's fail-fast
+run_boot_checks() — so a missing meeting-recorder secret degrades only this
+feature, and never prevents the whole app (and the unrelated, already-in-
+production field-sales API) from booting.
 """
 import os
 import json
@@ -35,8 +43,8 @@ import tempfile
 import pydub
 import psycopg2
 from psycopg2 import pool
-from azure.storage.blob import BlobServiceClient, BlobSasPermissions, generate_blob_sas, ContentSettings
-from urllib.parse import quote
+import boto3
+from botocore.client import Config as BotoConfig
 from openai import AzureOpenAI
 from geopy.geocoders import Nominatim
 
@@ -73,87 +81,85 @@ class MeetingPayload(BaseModel):
     latitude: float
     longitude: float
 
-# ── Azure Storage ──────────────────────────────────────────────────────────────────
-CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-CONTAINER_NAME = "recordings"
+# ── AWS S3 (audio storage — both the working area during processing AND the
+# permanent archive; nothing is deleted from here after a recording finishes,
+# unlike the old Azure Blob + SharePoint setup where Blob was scratch space
+# and SharePoint held the only permanent copy) ──────────────────────────────
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
+# Constructed even if the credentials are unset/None — boto3 doesn't
+# validate them until a real request is made, and every call site below
+# already wraps its S3 calls in try/except, matching this module's existing
+# "missing secret degrades this feature only" pattern.
+s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    config=BotoConfig(signature_version="s3v4"),
+)
 
 # ── Azure Speech ──────────────────────────────────────────────────────────────────
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 TRANSCRIBE_URL = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/speechtotext/v3.2/transcriptions"
 
-# ── Azure OpenAI ──────────────────────────────────────────────────────────────────
+# ── Azure OpenAI (translation/summary only — unrelated to storage) ─────────
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
 
-# ── SharePoint / Microsoft Graph (Client Credentials flow) ─────────────────────
-SP_CLIENT_ID = os.getenv("SP_CLIENT_ID")
-SP_TENANT_ID = os.getenv("SP_TENANT_ID")
-SP_CLIENT_SECRET = os.getenv("SP_CLIENT_SECRET")
-SP_SITE_ID = os.getenv("SP_SITE_ID")
-SP_DRIVE_ID = os.getenv("SP_DRIVE_ID")
-SP_BASE_PATH = os.getenv("SP_BASE_PATH", "Salesforce/Mobile Recording")
-
-GRAPH_BASE_URL = f"https://graph.microsoft.com/v1.0/sites/{SP_SITE_ID}/drives/{SP_DRIVE_ID}"
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  AZURE BLOB STORAGE ENDPOINTS
+#  S3 UPLOAD/DELETE LINK ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# The mobile app builds its upload URL as `${url}${sasToken}` (a leftover of
+# the Azure SAS response shape, where the base blob URL and its query-string
+# token were returned separately). A presigned S3 URL is already one
+# complete URL with no separate token, so sasToken stays "" here rather than
+# changing that concatenation on the client — same response shape, zero
+# mobile-side URL-building changes needed.
 @router.get("/get-sas-token")
 def get_sas_token(req: SasTokenRequest = Depends()):
     file_name = req.file_name
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-
-        # Use the file name supplied by the app, or generate a unique fallback
         if not file_name:
             file_name = f"meeting-{int(datetime.now().timestamp())}.wav"
 
-        # Create a 60-minute write-only token
-        sas_token = generate_blob_sas(
-            account_name=blob_service_client.account_name,
-            container_name=CONTAINER_NAME,
-            blob_name=file_name,
-            account_key=blob_service_client.credential.account_key,
-            permission=BlobSasPermissions(write=True),
-            expiry=datetime.now(timezone.utc) + timedelta(minutes=60)
+        # 60-minute, write-only presigned URL — mirrors the old SAS token's
+        # own permission scope and expiry.
+        url = s3_client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": file_name},
+            ExpiresIn=60 * 60,
         )
 
-        url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{file_name}"
-
-        return {"url": url, "sasToken": f"?{sas_token}"}
+        return {"url": url, "sasToken": ""}
 
     except Exception as e:
-        print(f"❌ SAS Generation Error: {str(e)}")
+        print(f"❌ S3 presigned upload URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/get-delete-token")
 def get_delete_token(req: DeleteTokenRequest = Depends()):
     file = req.file
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-
-        # Create a 60-minute delete-only token for the specified blob
-        sas_token = generate_blob_sas(
-            account_name=blob_service_client.account_name,
-            container_name=CONTAINER_NAME,
-            blob_name=file,
-            account_key=blob_service_client.credential.account_key,
-            permission=BlobSasPermissions(delete=True),
-            expiry=datetime.now(timezone.utc) + timedelta(minutes=60)
+        url = s3_client.generate_presigned_url(
+            "delete_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": file},
+            ExpiresIn=60 * 60,
         )
 
-        url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{file}"
-
-        return {"url": url, "sasToken": f"?{sas_token}"}
+        return {"url": url, "sasToken": ""}
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Delete Token Error: {str(e)}")
+        print(f"❌ S3 presigned delete URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -348,142 +354,14 @@ def format_duration(total_seconds: float) -> str:
 
     return " ".join(parts)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SHAREPOINT / MICROSOFT GRAPH HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_graph_access_token() -> str:
-    """Obtain an app-only access token via the Client Credentials OAuth2 flow."""
-    token_url = f"https://login.microsoftonline.com/{SP_TENANT_ID}/oauth2/v2.0/token"
-
-    resp = requests.post(token_url, data={
-        "client_id": SP_CLIENT_ID,
-        "client_secret": SP_CLIENT_SECRET,
-        "scope": "https://graph.microsoft.com/.default",
-        "grant_type": "client_credentials",
-    })
-
-    if resp.status_code != 200:
-        raise Exception(f"Failed to get Graph token: {resp.status_code} {resp.text}")
-
-    token = resp.json().get("access_token")
-    if not token:
-        raise Exception("No access_token in token response")
-
-    return token
-
-
-def ensure_sharepoint_folder(title: str, token: str) -> str:
-    """Create meeting folder under BASE_PATH, or return existing folder's ID."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
-    encoded_path = quote(SP_BASE_PATH)
-    endpoint = f"{GRAPH_BASE_URL}/root:/{encoded_path}:/children"
-
-    safe_title = re.sub(r'[<>:"/\\|?*]', '', title).strip() or 'recording'
-
-    # Try to create — use "fail" conflict behavior so we don't create duplicates
-    resp = requests.post(endpoint, headers=headers, json={
-        "name": safe_title,
-        "folder": {},
-        "@microsoft.graph.conflictBehavior": "fail",
-    })
-
-    if resp.status_code in [200, 201]:
-        folder_id = resp.json()["id"]
-        print(f"[SharePoint] 📁 Created folder: {title} (ID: {folder_id})")
-        return folder_id
-
-    if resp.status_code == 409:
-        # Folder already exists — look it up by path
-        lookup_url = f"{GRAPH_BASE_URL}/root:/{encoded_path}/{quote(safe_title)}"
-        lookup_resp = requests.get(lookup_url, headers=headers)
-
-        if lookup_resp.status_code == 200:
-            folder_id = lookup_resp.json()["id"]
-            return folder_id
-
-        raise Exception(f"Folder exists but lookup failed: {lookup_resp.status_code} {lookup_resp.text}")
-
-    raise Exception(f"Failed to create folder: {resp.status_code} {resp.text}")
-
-
-def upload_transcript_to_sharepoint(folder_id: str, transcript_text: str, file_name: str, token: str):
-    """Upload a plain-text transcript file into the given SharePoint folder."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "text/plain",
-    }
-
-    endpoint = f"{GRAPH_BASE_URL}/items/{folder_id}:/{quote(file_name)}:/content"
-
-    resp = requests.put(endpoint, headers=headers, data=transcript_text.encode("utf-8"))
-
-    if resp.status_code in [200, 201]:
-        print(f"[SharePoint] ✅ Diarized transcript uploaded: {file_name}")
-        return resp.json().get("id")
-    else:
-        raise Exception(f"Transcript upload failed: {resp.status_code} {resp.text}")
-
-def upload_large_file_to_sharepoint(folder_id: str, file_path: str, file_name: str, token: str):
-    """Upload a large file to SharePoint using an upload session."""
-    headers = {"Authorization": f"Bearer {token}"}
-    endpoint = f"{GRAPH_BASE_URL}/items/{folder_id}:/{quote(file_name)}:/createUploadSession"
-    res = requests.post(endpoint, headers=headers, json={"item": {"@microsoft.graph.conflictBehavior": "replace"}})
-
-    if res.status_code not in [200, 201]:
-        raise Exception(f"Failed to create upload session: {res.text}")
-
-    upload_url = res.json()["uploadUrl"]
-    file_size = os.path.getsize(file_path)
-    chunk_size = 320 * 1024 * 10  # 3.2 MB chunks
-
-    with open(file_path, 'rb') as f:
-        for i in range(0, file_size, chunk_size):
-            chunk_data = f.read(chunk_size)
-            chunk_end = min(i + len(chunk_data) - 1, file_size - 1)
-            chunk_headers = {
-                "Content-Length": str(len(chunk_data)),
-                "Content-Range": f"bytes {i}-{chunk_end}/{file_size}"
-            }
-            upload_res = requests.put(upload_url, headers=chunk_headers, data=chunk_data)
-            if upload_res.status_code in [200, 201]:
-                item_id = upload_res.json().get("id")
-                print(f"[SharePoint] ✅ Large file uploaded: {file_name} (ID: {item_id})")
-                return item_id
-            elif upload_res.status_code == 202:
-                continue
-            else:
-                raise Exception(f"Chunk upload failed: {upload_res.text}")
-
-    raise Exception("Upload finished but didn't receive a 200/201 created response.")
-
-
-def delete_blob(blob_file_name: str):
-    """Delete a blob from Azure Storage after processing is complete (cost savings)."""
+def delete_s3_object(key: str):
+    """Delete an object from S3 — used only for the raw per-chunk uploads
+    once they're merged into one file (the merged file itself is never
+    deleted; S3 is this feature's permanent audio archive now)."""
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-        sas_token = generate_blob_sas(
-            account_name=blob_service_client.account_name,
-            container_name=CONTAINER_NAME,
-            blob_name=blob_file_name,
-            account_key=blob_service_client.credential.account_key,
-            permission=BlobSasPermissions(delete=True),
-            expiry=datetime.now(timezone.utc) + timedelta(minutes=10)
-        )
-
-        url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob_file_name}?{sas_token}"
-        resp = requests.delete(url)
-
-        if resp.status_code in [200, 202, 404]:
-            pass
-        else:
-            print(f"[Azure] ⚠️ Blob delete returned {resp.status_code}: {resp.text}")
+        s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=key)
     except Exception as e:
-        print(f"[Azure] ❌ Blob delete error: {e}")
+        print(f"[S3] ❌ Delete error for {key}: {e}")
 
 
 def delete_transcription_job(job_id: str):
@@ -576,7 +454,10 @@ def submit_transcription_job(recording_names: List[str], title: str, session_id:
         set_db_status(session_id, "failed")
 
 def _submit_transcription_job(recording_names: List[str], title: str, session_id: str, translate_tanglish: bool = False, owner_email: str = "", device_os: str = "Unknown", client_upload_time_ms: int = 0, latitude: float = None, longitude: float = None, ui_folder_id: str = None):
-    """Handles merging chunks, Azure Speech → SharePoint pipeline in the background."""
+    """Handles merging chunks, Azure Speech transcription pipeline in the background."""
+    # No longer a SharePoint folder id — kept as a field on the persisted
+    # metadata/DB row for now (unused, always None) rather than removing the
+    # column, to avoid another migration for something harmless to leave.
     folder_id = None
 
     pipeline_start_time = time.time()
@@ -587,18 +468,12 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
 
     set_db_status(session_id, "processing")
 
-    blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-    container_client = blob_service_client.get_container_client(CONTAINER_NAME)
-
     merged_audio = None
 
     with tempfile.TemporaryDirectory() as tmpdirname:
         for i, chunk_name in enumerate(recording_names):
-            blob_client = container_client.get_blob_client(chunk_name)
             download_path = os.path.join(tmpdirname, chunk_name)
-
-            with open(download_path, "wb") as download_file:
-                download_file.write(blob_client.download_blob().readall())
+            s3_client.download_file(S3_BUCKET_NAME, chunk_name, download_path)
 
             # Load and merge using pydub
             ext = chunk_name.split('.')[-1].lower()
@@ -685,70 +560,34 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
 
         print(f"[Pipeline] ✅ Chunks merged successfully. Uploading merged file: {merged_filename}")
 
-        # Upload merged file
-        with open(merged_path, "rb") as data:
-            content_type = "audio/mpeg" if merged_filename.endswith(".mp3") else "audio/wav"
-            container_client.upload_blob(
-                name=merged_filename,
-                data=data,
-                overwrite=True,
-                content_settings=ContentSettings(content_type=content_type)
-            )
-
-        blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{merged_filename}"
-
-        # ── UPLOAD MERGED AUDIO TO SHAREPOINT ─────────────────────────────
-        try:
-            graph_token = get_graph_access_token()
-            folder_id = ensure_sharepoint_folder(title, graph_token)
-            safe_title = re.sub(r'[^a-zA-Z0-9 _-]', '', title).strip() or 'recording'
-            sp_audio_filename = f"{safe_title}_{session_id[:8]}{os.path.splitext(merged_filename)[1]}"
-
-            sp_start = time.time()
-
-            # Retry logic for transient SharePoint serviceReadOnly errors
-            sp_max_retries = 3
-            sp_retry_delay = 15  # seconds between retries
-            audio_file_id = None
-            for sp_attempt in range(1, sp_max_retries + 1):
-                try:
-                    print(f"[SharePoint] Uploading merged audio to SharePoint (attempt {sp_attempt}/{sp_max_retries})...")
-                    audio_file_id = upload_large_file_to_sharepoint(folder_id, merged_path, sp_audio_filename, graph_token)
-                    print(f"[SharePoint] ✅ Audio uploaded successfully on attempt {sp_attempt}.")
-                    break  # Success — exit retry loop
-                except Exception as sp_err:
-                    err_str = str(sp_err)
-                    is_readonly = "serviceReadOnly" in err_str or "Read Only" in err_str
-                    if is_readonly and sp_attempt < sp_max_retries:
-                        print(f"[SharePoint] ⚠️ SharePoint is read-only (Microsoft maintenance). Retrying in {sp_retry_delay}s... (attempt {sp_attempt}/{sp_max_retries})")
-                        time.sleep(sp_retry_delay)
-                        sp_retry_delay *= 2  # Exponential backoff: 15s → 30s → 60s
-                    else:
-                        raise  # Re-raise on final attempt or non-retryable error
-
-        except Exception as e:
-            print(f"[SharePoint] ❌ Failed to upload merged audio to SP after all retries: {e}")
+        # Upload merged file to S3 — this key (merged_filename) IS the
+        # permanent audio_file_id from here on; it's never deleted (see
+        # Step 6 below, which only cleans up the raw per-chunk uploads).
+        content_type = "audio/mpeg" if merged_filename.endswith(".mp3") else "audio/wav"
+        s3_client.upload_file(
+            merged_path, S3_BUCKET_NAME, merged_filename,
+            ExtraArgs={"ContentType": content_type},
+        )
+        audio_file_id = merged_filename
 
     speech_headers = {
         "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
         "Content-Type": "application/json"
     }
 
-    # ── GENERATE READ SAS TOKEN FOR AZURE SPEECH ──────────────────────────────
+    # ── GENERATE A READ URL FOR AZURE SPEECH ───────────────────────────────
+    # Azure's batch transcription API just needs an HTTPS URL it can GET the
+    # audio from — an S3 presigned URL works exactly the same way an Azure
+    # Blob SAS URL did here.
     try:
-        read_sas_token = generate_blob_sas(
-            account_name=blob_service_client.account_name,
-            container_name=CONTAINER_NAME,
-            blob_name=merged_filename,
-            account_key=blob_service_client.credential.account_key,
-            permission=BlobSasPermissions(read=True),
-            expiry=datetime.now(timezone.utc) + timedelta(hours=4)
+        blob_sas_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": merged_filename},
+            ExpiresIn=4 * 60 * 60,
         )
 
-        blob_sas_url = f"{blob_url}?{read_sas_token}"
-
     except Exception as e:
-        print(f"[Pipeline] ❌ Failed to generate Read SAS token: {e}")
+        print(f"[Pipeline] ❌ Failed to generate S3 read URL: {e}")
         set_db_status(session_id, "failed")
         return
 
@@ -858,8 +697,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
 
     # The transcript is safely in hand now, so the job itself has no further
     # purpose on Azure — delete it here (not at the end of the pipeline) so
-    # cleanup still happens even if a later step (SharePoint archive, DB
-    # write) fails.
+    # cleanup still happens even if a later step (the DB write) fails.
     delete_transcription_job(job_id)
 
     # ── STEP 4: Format with Speaker Diarization ──────────────────────────────
@@ -958,22 +796,16 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
         print(f"[Pipeline] ⚠️ Summary generation failed (non-fatal): {e}")
         summary_status = "failed"
 
-    # ── STEP 5: Upload Transcript to SharePoint (Archive) and Save to Database ─────────────────────
+    # ── STEP 5: Save to Database ─────────────────────
+    # No separate transcript file to archive anymore — formatted_transcript
+    # already goes into the transcript_text column below, which is the copy
+    # this app's own UI actually reads (the old SharePoint .txt file was
+    # pure duplication of that same text). transcript_file_id stays None —
+    # kept as an unused column rather than migrated away, same reasoning as
+    # folder_id above.
     pipeline_failed = False
+    transcript_file_id = None
     try:
-        graph_token = get_graph_access_token()
-        folder_id = ensure_sharepoint_folder(title, graph_token)
-
-        # ── Archive to SharePoint ──
-        transcript_file_id = None
-        try:
-            safe_title = re.sub(r'[^a-zA-Z0-9 _-]', '', title).strip() or 'recording'
-            transcript_filename = f"{safe_title}_{session_id[:8]}_diarized_transcript.txt"
-            transcript_file_id = upload_transcript_to_sharepoint(folder_id, formatted_transcript, transcript_filename, graph_token)
-            print(f"[Pipeline] ✅ Diarized transcript archived to SharePoint: {transcript_filename}")
-        except Exception as sp_err:
-            print(f"[Pipeline] ⚠️ Failed to archive transcript to SharePoint (non-fatal): {sp_err}")
-
         # ── Reverse Geocoding ──
         readable_address = "Unknown Location"
         if latitude is not None and longitude is not None:
@@ -1064,17 +896,19 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
                     db_pool.putconn(conn)
 
     except Exception as e:
-        print(f"[Pipeline] ❌ SharePoint upload or DB notification failed: {e}")
+        print(f"[Pipeline] ❌ DB notification failed: {e}")
         pipeline_failed = True
 
-    # ── STEP 6: Delete blobs from Azure Storage (cost savings) ────────────────
+    # ── STEP 6: Delete the raw per-chunk uploads from S3 (cost savings) ───────
+    # The merged file (audio_file_id) is NOT deleted — S3 is the permanent
+    # archive now, unlike the old setup where SharePoint held the only
+    # permanent copy and this step deleted the Azure Blob merged file too.
     try:
-        delete_blob(merged_filename)
         for chunk_name in recording_names:
-            delete_blob(chunk_name)
-        print(f"[Pipeline] 🗑️ Deleted merged audio and chunks from Azure Blob Storage.")
+            delete_s3_object(chunk_name)
+        print(f"[Pipeline] 🗑️ Deleted raw chunk uploads from S3 (merged audio kept permanently).")
     except Exception as e:
-        print(f"[Pipeline] ⚠️ Blob cleanup failed (non-fatal): {e}")
+        print(f"[Pipeline] ⚠️ Chunk cleanup failed (non-fatal): {e}")
 
     if pipeline_failed:
         print(f"\n[Pipeline] ❌ Pipeline FAILED for: {title}\n")
@@ -1339,31 +1173,27 @@ def get_status(req: StatusRequest = Depends()):
             db_pool.putconn(conn)
     return {"processing_status": "unknown"}
 
-class SharePointLinkRequest(BaseModel):
+class AudioLinkRequest(BaseModel):
     file_id: str
 
-@router.get("/get-sharepoint-link")
-def get_sharepoint_link(req: SharePointLinkRequest = Depends()):
-    """Resolves a Graph driveItem id (audio_file_id/transcript_file_id, as
-    stored on call_recording) to an openable SharePoint webUrl. The DB only
-    ever stores the id — the id alone isn't a URL a client can open, and
-    Graph app-only credentials live only on this backend, not on the
-    mobile app — so this proxies one short-lived lookup instead of exposing
-    those credentials to the client."""
+@router.get("/get-audio-link")
+def get_audio_link(req: AudioLinkRequest = Depends()):
+    """Resolves an S3 object key (audio_file_id, as stored on
+    call_recording — the merged/final recording's own key, permanently
+    kept) to a short-lived openable URL. The DB only stores the key, not a
+    URL, and the AWS credentials needed to sign one live only on this
+    backend — so this proxies one presigned-URL generation instead of
+    exposing those credentials to the client. Replaces the old
+    /get-sharepoint-link now that SharePoint archival is gone."""
     try:
-        graph_token = get_graph_access_token()
-        headers = {"Authorization": f"Bearer {graph_token}"}
-        resp = requests.get(f"{GRAPH_BASE_URL}/items/{req.file_id}", headers=headers)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=f"Graph lookup failed: {resp.text}")
-        web_url = resp.json().get("webUrl")
-        if not web_url:
-            raise HTTPException(status_code=404, detail="File has no webUrl")
-        return {"webUrl": web_url}
-    except HTTPException:
-        raise
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": req.file_id},
+            ExpiresIn=60 * 60,
+        )
+        return {"webUrl": url}
     except Exception as e:
-        print(f"[SharePoint] ❌ Failed to resolve link for {req.file_id}: {e}")
+        print(f"[S3] ❌ Failed to resolve link for {req.file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.api_route("/ping", methods=["GET", "HEAD"])

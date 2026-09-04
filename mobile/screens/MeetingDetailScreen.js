@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, Linking } from 'react-native';
-import { FileText, Sparkles, Clock, ExternalLink, Music } from 'lucide-react-native';
-import { getRecordingStatus, getSharePointLink } from '../src/services/meetingApi';
+import { FileText, Sparkles, Clock, Music } from 'lucide-react-native';
+import { getRecordingStatus, getAudioLink } from '../src/services/meetingApi';
 import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LoadingCard, EmptyState, Card, FadeSlideIn, SecondaryButton } from '../src/components';
 import { colors, typography, spacing } from '../src/theme';
@@ -13,11 +13,11 @@ export default function MeetingDetailScreen({ navigation, route }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  // Which SharePoint link is currently being resolved ('audio' | 'transcript'
-  // | null) — Graph lookups are real network calls (see getSharePointLink),
-  // so each button shows its own loading state rather than resolving eagerly
-  // for a file the rep may never tap.
-  const [openingLink, setOpeningLink] = useState(null);
+  // Whether the audio link is currently being resolved — generating a
+  // presigned S3 URL is a real network call (see getAudioLink), so the
+  // button shows its own loading state rather than resolving eagerly for a
+  // recording the rep may never tap.
+  const [openingLink, setOpeningLink] = useState(false);
 
   const isMountedRef = useRef(true);
   useEffect(() => () => { isMountedRef.current = false; }, []);
@@ -47,16 +47,16 @@ export default function MeetingDetailScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, [data?.processing_status, fetchStatus]);
 
-  const handleOpenInSharePoint = async (kind, fileId) => {
-    setOpeningLink(kind);
+  const handleOpenAudio = async (fileId) => {
+    setOpeningLink(true);
     try {
-      const url = await getSharePointLink(fileId);
+      const url = await getAudioLink(fileId);
       await Linking.openURL(url);
     } catch (err) {
-      console.error(`Failed to open ${kind} in SharePoint:`, err);
-      showAlert('Could not open file', 'This file may still be archiving to SharePoint. Please try again in a moment.');
+      console.error('Failed to open audio recording:', err);
+      showAlert('Could not open file', 'Please try again in a moment.');
     } finally {
-      if (isMountedRef.current) setOpeningLink(null);
+      if (isMountedRef.current) setOpeningLink(false);
     }
   };
 
@@ -116,29 +116,17 @@ export default function MeetingDetailScreen({ navigation, route }) {
               </FadeSlideIn>
             )}
 
-            {(!!data.audio_file_id || !!data.transcript_file_id) && (
+            {!!data.audio_file_id && (
               <FadeSlideIn delay={100}>
                 <Card style={{ marginTop: spacing.cardGap }}>
-                  <Text style={styles.sectionTitleStandalone}>Archived on SharePoint</Text>
-                  {!!data.audio_file_id && (
-                    <SecondaryButton
-                      title="Open audio recording"
-                      icon={<Music size={18} color={colors.primary} />}
-                      onPress={() => handleOpenInSharePoint('audio', data.audio_file_id)}
-                      loading={openingLink === 'audio'}
-                      disabled={openingLink !== null && openingLink !== 'audio'}
-                      style={{ marginBottom: spacing.sm }}
-                    />
-                  )}
-                  {!!data.transcript_file_id && (
-                    <SecondaryButton
-                      title="Open transcript file"
-                      icon={<ExternalLink size={18} color={colors.primary} />}
-                      onPress={() => handleOpenInSharePoint('transcript', data.transcript_file_id)}
-                      loading={openingLink === 'transcript'}
-                      disabled={openingLink !== null && openingLink !== 'transcript'}
-                    />
-                  )}
+                  <Text style={styles.sectionTitleStandalone}>Recording file</Text>
+                  <SecondaryButton
+                    title="Open audio recording"
+                    icon={<Music size={18} color={colors.primary} />}
+                    onPress={() => handleOpenAudio(data.audio_file_id)}
+                    loading={openingLink}
+                    disabled={openingLink}
+                  />
                 </Card>
               </FadeSlideIn>
             )}
