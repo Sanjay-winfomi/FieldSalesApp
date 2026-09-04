@@ -46,7 +46,15 @@ function RecordingCard({ recording, subjectLabel, subjectName }) {
       const url = await getAudioLink(recording.audio_file_id);
       setAudioUrl(url);
     } catch (err) {
-      setAudioError('Could not load audio. Please try again.');
+      // Surfaces the real cause (e.g. a network error reaching
+      // NEXT_PUBLIC_MEETING_BACKEND_URL if it's unset/misconfigured, vs. an
+      // actual server error) instead of a single generic message that gives
+      // no signal for diagnosing a real failure.
+      const detail = err.response
+        ? `Server responded ${err.response.status}: ${JSON.stringify(err.response.data)?.slice(0, 200)}`
+        : err.message || String(err);
+      console.error('Failed to load audio link:', err);
+      setAudioError(`Could not load audio — ${detail}`);
     } finally {
       setLoadingAudio(false);
     }
@@ -389,14 +397,18 @@ export default function RecordingsPage() {
   const [selectedRepId, setSelectedRepId] = useState(null);
   const [selectedDealerId, setSelectedDealerId] = useState(null);
 
+  const inDetailView = !!selectedRepId || !!selectedDealerId;
+
   return (
     <div style={styles.page} className="ft-page">
-      <SectionHeader
-        title="Recordings"
-        subtitle="Meeting recordings and transcripts, by representative or by dealer"
-      />
+      {!inDetailView && (
+        <SectionHeader
+          title="Recordings"
+          subtitle="Meeting recordings and transcripts, by representative or by dealer"
+        />
+      )}
 
-      {!selectedRepId && !selectedDealerId && (
+      {!inDetailView && (
         <Card noPadding style={{ padding: spacing.lg, marginBottom: spacing.md }}>
           <div style={styles.tabRow}>
             {SUB_TABS.map((t) => {
