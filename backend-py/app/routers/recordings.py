@@ -19,6 +19,8 @@ isn't guaranteed numeric for every historical row, so every query filters to
 `owner_id ~ '^[0-9]+$'` before casting, rather than letting a stray
 non-numeric value 500 the whole request.
 """
+import re
+
 from fastapi import APIRouter, HTTPException, Request, Depends
 from starlette.responses import JSONResponse
 
@@ -26,8 +28,11 @@ from app.core.logging_config import log_error
 from app.core.security import Employee, require_manager
 from app.db import pool
 from app.utils.json_shape import serialize_rows
+from app.utils.pg_params import parse_date_string
 
 router = APIRouter(dependencies=[Depends(require_manager)])
+
+DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _escape_like(value: str) -> str:
@@ -45,6 +50,26 @@ def _parse_int_list(raw: str | None) -> list[int] | None:
     except ValueError:
         raise HTTPException(status_code=400, detail="ids must be a comma-separated list of integers")
     return ids or None
+
+
+def _add_date_range(date_from: str | None, date_to: str | None, params: list, conditions: list, date_column: str = "cr.created_at"):
+    """Validates and appends from/to date filters. asyncpg (unlike node-pg)
+    requires the bound parameter to already be a Python `date` object
+    matching the `::date` cast's inferred type — passing the raw query-string
+    (a plain str) raises `DataError("... 'str' object has no attribute
+    'toordinal'")` no matter where the `::date` cast appears in the SQL text.
+    See app/utils/pg_params.py's own docstring — this bit the very first
+    version of this router (worked fine locally by luck, failed live)."""
+    if date_from:
+        if not DATE_ONLY_RE.match(date_from):
+            raise HTTPException(status_code=400, detail="Invalid from date (expected YYYY-MM-DD)")
+        params.append(parse_date_string(date_from))
+        conditions.append(f"{date_column} >= ${len(params)}::date")
+    if date_to:
+        if not DATE_ONLY_RE.match(date_to):
+            raise HTTPException(status_code=400, detail="Invalid to date (expected YYYY-MM-DD)")
+        params.append(parse_date_string(date_to))
+        conditions.append(f"{date_column} < (${len(params)}::date + interval '1 day')")
 
 
 RECORDING_FIELDS = """
@@ -66,12 +91,7 @@ async def list_representatives(request: Request, employee: Employee = Depends(re
     conditions = ["cr.owner_id ~ '^[0-9]+$'"]
     params = []
 
-    if date_from:
-        params.append(date_from)
-        conditions.append(f"cr.created_at >= ${len(params)}")
-    if date_to:
-        params.append(date_to)
-        conditions.append(f"cr.created_at < (${len(params)}::date + interval '1 day')")
+    _add_date_range(date_from, date_to, params, conditions)
     if search and search.strip():
         params.append(f"%{_escape_like(search)}%")
         conditions.append(f"e.name ILIKE ${len(params)} ESCAPE '\\'")
@@ -114,12 +134,7 @@ async def get_representative_recordings(employee_id: int, request: Request, empl
     conditions = ["cr.owner_id ~ '^[0-9]+$'", "cr.owner_id::integer = $1"]
     params = [employee_id]
 
-    if date_from:
-        params.append(date_from)
-        conditions.append(f"cr.created_at >= ${len(params)}")
-    if date_to:
-        params.append(date_to)
-        conditions.append(f"cr.created_at < (${len(params)}::date + interval '1 day')")
+    _add_date_range(date_from, date_to, params, conditions)
     if dealer_ids:
         params.append(dealer_ids)
         conditions.append(f"cr.dealer_id = ANY(${len(params)}::int[])")
@@ -171,12 +186,7 @@ async def list_recorded_dealers(request: Request, employee: Employee = Depends(r
     conditions = ["TRUE"]
     params = []
 
-    if date_from:
-        params.append(date_from)
-        conditions.append(f"cr.created_at >= ${len(params)}")
-    if date_to:
-        params.append(date_to)
-        conditions.append(f"cr.created_at < (${len(params)}::date + interval '1 day')")
+    _add_date_range(date_from, date_to, params, conditions)
     if search and search.strip():
         params.append(f"%{_escape_like(search)}%")
         conditions.append(f"d.name ILIKE ${len(params)} ESCAPE '\\'")
@@ -219,12 +229,7 @@ async def get_dealer_recordings(dealer_id: int, request: Request, employee: Empl
     conditions = ["cr.dealer_id = $1"]
     params = [dealer_id]
 
-    if date_from:
-        params.append(date_from)
-        conditions.append(f"cr.created_at >= ${len(params)}")
-    if date_to:
-        params.append(date_to)
-        conditions.append(f"cr.created_at < (${len(params)}::date + interval '1 day')")
+    _add_date_range(date_from, date_to, params, conditions)
     if employee_ids:
         params.append(employee_ids)
         conditions.append(f"cr.owner_id ~ '^[0-9]+$' AND cr.owner_id::integer = ANY(${len(params)}::int[])")
