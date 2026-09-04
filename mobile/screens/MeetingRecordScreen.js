@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, Pressable, Platform, ScrollView, Switch } from 'react-native';
-import { Mic, Square, Trash2 } from 'lucide-react-native';
+import { StyleSheet, Text, View, Pressable, Platform, ScrollView } from 'react-native';
+import { Mic, Trash2 } from 'lucide-react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -39,7 +39,6 @@ export default function MeetingRecordScreen({ navigation, route }) {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [hasStopped, setHasStopped] = useState(false);
   const [title, setTitle] = useState('');
-  const [translateTanglish, setTranslateTanglish] = useState(false);
   const [saving, setSaving] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerRef = useRef(null);
@@ -144,7 +143,6 @@ export default function MeetingRecordScreen({ navigation, route }) {
         recording_names: [fileName],
         title: title.trim() || 'Untitled Recording',
         session_id: sessionId,
-        translate_tanglish: translateTanglish,
         owner_email: String(employee?.id ?? ''),
         device_os: Platform.OS,
         client_upload_time_ms: Date.now(),
@@ -202,7 +200,6 @@ export default function MeetingRecordScreen({ navigation, route }) {
               <SecondaryButton
                 title="Stop recording"
                 tone="danger"
-                icon={<Square size={18} color={colors.danger} />}
                 onPress={handleStop}
                 style={{ marginTop: spacing.lg }}
               />
@@ -219,19 +216,6 @@ export default function MeetingRecordScreen({ navigation, route }) {
                 onChangeText={setTitle}
                 placeholder="Untitled Recording"
               />
-
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchLabel}>Translate Tanglish to English</Text>
-                  <Text style={styles.switchHint}>Tamil speech is auto-translated regardless; this only affects mixed English/Tamil phrasing.</Text>
-                </View>
-                <Switch
-                  value={translateTanglish}
-                  onValueChange={setTranslateTanglish}
-                  trackColor={{ false: colors.disabled, true: colors.primaryLight }}
-                  thumbColor={translateTanglish ? colors.primary : undefined}
-                />
-              </View>
 
               {folder && (
                 <Text style={styles.folderNote}>Will be saved to folder: {folder.name}</Text>
@@ -271,11 +255,5 @@ const styles = StyleSheet.create({
   micCircleActive: { backgroundColor: colors.dangerLight },
   timer: { ...typography.sectionTitle, fontSize: 32, color: colors.text, marginTop: spacing.lg },
   status: { ...typography.body, color: colors.textSecondary, marginTop: spacing.xs },
-  switchRow: {
-    flexDirection: 'row', alignItems: 'center', marginTop: spacing.lg,
-    paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  switchLabel: { ...typography.body, fontWeight: '600', color: colors.text },
-  switchHint: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
   folderNote: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.md },
 });
