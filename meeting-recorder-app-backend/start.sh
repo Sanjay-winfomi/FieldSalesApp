@@ -37,7 +37,11 @@ with tarfile.open('ffmpeg.tar.xz') as t:
 ) &
 
 echo "[INFO] Starting Uvicorn web server..."
+# Render (and most PaaS hosts) assign the port dynamically via $PORT and
+# require the app to bind to it — App Runner's apprunner.yaml instead fixed
+# this at 8000 via its own `network.port` config, so default to 8000 only
+# when $PORT isn't set (e.g. running this script directly on a dev machine).
 exec python3 -m uvicorn main:app \
   --host 0.0.0.0 \
-  --port 8000 \
+  --port "${PORT:-8000}" \
   --workers 1

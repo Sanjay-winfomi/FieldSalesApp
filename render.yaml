@@ -62,3 +62,66 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: info
+
+  # Meeting Recorder backend — records/uploads meetings, transcribes via
+  # Azure Speech, translates/summarizes via Azure OpenAI, and archives to
+  # SharePoint. Previously deployed on AWS App Runner; moved here so its
+  # deploy pipeline is just "push to this repo" like fieldtrack-backend-py,
+  # with no AWS console access needed.
+  - type: web
+    name: meeting-recorder-app-backend
+    runtime: python
+    plan: free
+    rootDir: meeting-recorder-app-backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: sh start.sh
+    healthCheckPath: /ping
+    envVars:
+      - key: AZURE_STORAGE_CONNECTION_STRING
+        sync: false
+      - key: AZURE_SPEECH_KEY
+        sync: false
+      - key: AZURE_SPEECH_REGION
+        value: southeastasia
+      - key: SP_CLIENT_ID
+        sync: false
+      - key: SP_TENANT_ID
+        sync: false
+      - key: SP_CLIENT_SECRET
+        sync: false
+      - key: SP_SITE_ID
+        sync: false
+      - key: SP_DRIVE_ID
+        sync: false
+      - key: SP_BASE_PATH
+        value: Salesforce/Mobile Recording
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_KEY
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT_NAME
+        value: gpt-4o-mini
+      # Same Postgres this service already used on App Runner (db "transcript"
+      # on an AWS RDS instance) — reuse that same connection string here so
+      # existing call_recording/app_folders/pending_transcriptions data isn't
+      # orphaned. Set directly in the Render dashboard.
+      - key: DATABASE_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      # Must be this service's own public URL — used only to register the
+      # Azure Speech webhook callback (ensure_webhook_registered on startup),
+      # so it has to match wherever this actually ends up deployed. Render's
+      # URL for this service is predictable from its `name` above, but is
+      # confirmed only after the first deploy — double-check it in the
+      # dashboard and update here (or override in the dashboard) if different.
+      - key: EXPO_PUBLIC_BACKEND_URL
+        value: https://meeting-recorder-app-backend.onrender.com
+      - key: SUMMARY_WORD_COUNT_THRESHOLD
+        value: 75
+      # A separate agent service (chat/RAG proxy), also previously on AWS App
+      # Runner — out of scope for this migration unless/until that's moved
+      # too. Set to wherever it actually lives, or leave unset to disable the
+      # /agent and /get-rag-chat-messages proxy routes (they'll just 502).
+      - key: AGENT_SERVER_URL
+        sync: false

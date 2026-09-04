@@ -43,6 +43,32 @@ export const meetingApi = axios.create({
   timeout: 60000,
 });
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Render's free tier spins this backend down after ~15min idle — the same
+// cold-start problem api.js already handles for the field-sales backend
+// (see its own comment for why these specific delays). Without this, the
+// first request after any idle period fails outright as a 502/503/504
+// instead of the same request succeeding seconds later once Render finishes
+// booting the container.
+const COLD_START_RETRY_DELAYS_MS = [4000, 8000, 15000];
+
+meetingApi.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if ([502, 503, 504].includes(error.response?.status) && originalRequest) {
+      const attempt = originalRequest._coldStartRetries || 0;
+      if (attempt < COLD_START_RETRY_DELAYS_MS.length) {
+        originalRequest._coldStartRetries = attempt + 1;
+        await sleep(COLD_START_RETRY_DELAYS_MS[attempt]);
+        return meetingApi(originalRequest);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export async function getSasToken(fileName) {
   const { data } = await meetingApi.get('/get-sas-token', { params: { file_name: fileName } });
   return data; // { url, sasToken }
