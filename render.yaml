@@ -20,10 +20,23 @@ services:
     # ffmpeg is a hard runtime dependency of the meeting-recorder pipeline
     # (pydub shells out to it to decode uploaded chunks, denoise, and
     # transcode) — Render's Python runtime doesn't include it by default.
-    # apt-get is available during the build step on Render's standard Python
-    # runtime image.
-    buildCommand: apt-get update && apt-get install -y ffmpeg && pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # apt-get doesn't work here (confirmed live: Render's build container has
+    # /var/lib/apt/lists mounted read-only), so this downloads the same
+    # prebuilt static binary the standalone service's old start.sh used to
+    # fetch at runtime — just done at build time instead, into this repo's
+    # own writable working directory, so it's baked into the build artifact
+    # rather than re-downloaded on every boot. startCommand below prepends
+    # that directory to PATH so both pydub and this app's own subprocess.run
+    # calls (denoise/compress) find it.
+    buildCommand: >-
+      mkdir -p bin &&
+      curl -sSL -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz &&
+      tar -xf ffmpeg.tar.xz &&
+      cp ffmpeg-master-latest-linux64-gpl/bin/ffmpeg ffmpeg-master-latest-linux64-gpl/bin/ffprobe bin/ &&
+      chmod +x bin/ffmpeg bin/ffprobe &&
+      rm -rf ffmpeg.tar.xz ffmpeg-master-latest-linux64-gpl &&
+      pip install -r requirements.txt
+    startCommand: PATH="$PWD/bin:$PATH" uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     rootDir: backend-py
     envVars:
