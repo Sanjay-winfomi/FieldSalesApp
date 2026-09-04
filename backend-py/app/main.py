@@ -17,6 +17,7 @@ from app.core.logging_config import log_error, log_info
 from app.core.rate_limit import API_LIMIT, API_LIMIT_MESSAGE, LOGIN_LIMIT_MESSAGE, limiter
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.db import pool
+from app.routers import meeting_recorder
 from app.scheduler import start_scheduler, stop_scheduler
 
 # ── Fail-fast boot checks — mirrors index.js's synchronous throws before
@@ -28,6 +29,14 @@ config.run_boot_checks()
 async def lifespan(app: FastAPI):
     await pool.connect()
     start_scheduler()
+    # Best-effort, non-fatal — meeting_recorder.ensure_webhook_registered
+    # already no-ops with a warning if its own env vars aren't set, so a
+    # misconfigured/missing meeting-recorder secret degrades only that
+    # feature rather than blocking the whole app's startup.
+    try:
+        meeting_recorder.ensure_webhook_registered()
+    except Exception as err:  # noqa: BLE001
+        log_error("Meeting recorder webhook registration failed", error=str(err))
     log_info(f"FieldTrack backend running", environment=config.NODE_ENV)
     yield
     stop_scheduler()
@@ -119,6 +128,13 @@ app.include_router(dashboard.router, prefix="/api/dashboard")
 app.include_router(employees.router, prefix="/api/employees")
 app.include_router(reports.router, prefix="/api/reports")
 app.include_router(notifications.router, prefix="/api/notifications")
+
+# Unprefixed (root-level) — matches the mobile app's meetingApi.js exactly as
+# it called the standalone meeting-recorder-app-backend service (e.g.
+# /get-sas-token, /start-processing), so merging it in here needed no
+# mobile-side path changes, only pointing EXPO_PUBLIC_MEETING_BACKEND_URL at
+# this same service instead of a separate one.
+app.include_router(meeting_recorder.router)
 
 
 # ── 404 catch-all ──

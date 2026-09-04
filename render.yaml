@@ -3,17 +3,40 @@ services:
   # (fieldtrack-backend) and its database were retired after that database's
   # free-tier instance expired; this service now runs against a separately
   # created database (not managed by this Blueprint — see below).
+  #
+  # Also hosts the Meeting Recorder feature (app/routers/meeting_recorder.py)
+  # — merged in from a standalone service (first on AWS App Runner, briefly
+  # on its own Render service) into this same app/process, since it's simpler
+  # to deploy and operate one service than two. Its routes are unprefixed
+  # (root-level, e.g. /get-sas-token, /start-processing) rather than under
+  # /api/, matching exactly what the mobile app's meetingApi.js already
+  # called on the standalone service — so merging it in needed no mobile-side
+  # path changes, just pointing EXPO_PUBLIC_MEETING_BACKEND_URL at this same
+  # service's URL instead of a separate one.
   - type: web
     name: fieldtrack-backend-py
     runtime: python
     plan: free
-    rootDir: backend-py
-    buildCommand: pip install -r requirements.txt
+    # ffmpeg is a hard runtime dependency of the meeting-recorder pipeline
+    # (pydub shells out to it to decode uploaded chunks, denoise, and
+    # transcode) — Render's Python runtime doesn't include it by default.
+    # apt-get is available during the build step on Render's standard Python
+    # runtime image.
+    buildCommand: apt-get update && apt-get install -y ffmpeg && pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    rootDir: backend-py
     envVars:
       - key: NODE_ENV
         value: production
+      # Several of meeting_recorder.py's print() calls include emoji — on a
+      # non-UTF-8 stdout encoding those raise UnicodeEncodeError and 500 the
+      # request (seen locally on Windows' default cp1252 console). Render's
+      # Linux containers default to a UTF-8 locale already, so this is
+      # defensive rather than a known live issue, matching the standalone
+      # service's own start.sh, which set this for the same reason.
+      - key: PYTHONIOENCODING
+        value: utf-8
       # The database this service actually uses was created by hand in the
       # Render dashboard (not via this Blueprint's `databases:` — a prior
       # attempt at that ran into free-tier account limits and Blueprint's
@@ -63,20 +86,10 @@ services:
       - key: LOG_LEVEL
         value: info
 
-  # Meeting Recorder backend — records/uploads meetings, transcribes via
-  # Azure Speech, translates/summarizes via Azure OpenAI, and archives to
-  # SharePoint. Previously deployed on AWS App Runner; moved here so its
-  # deploy pipeline is just "push to this repo" like fieldtrack-backend-py,
-  # with no AWS console access needed.
-  - type: web
-    name: meeting-recorder-app-backend
-    runtime: python
-    plan: free
-    rootDir: meeting-recorder-app-backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: sh start.sh
-    healthCheckPath: /ping
-    envVars:
+      # ── Meeting Recorder feature — all optional at boot: a missing value
+      # here only degrades this one feature (see meeting_recorder.py's own
+      # ad-hoc os.getenv reads), it never blocks the whole app from starting
+      # the way a missing JWT_SECRET above does. ──
       - key: AZURE_STORAGE_CONNECTION_STRING
         sync: false
       - key: AZURE_SPEECH_KEY
@@ -101,22 +114,24 @@ services:
         sync: false
       - key: AZURE_OPENAI_DEPLOYMENT_NAME
         value: gpt-4o-mini
-      # Same Postgres this service already used on App Runner (db "transcript"
-      # on an AWS RDS instance) — reuse that same connection string here so
-      # existing call_recording/app_folders/pending_transcriptions data isn't
-      # orphaned. Set directly in the Render dashboard.
+      # A DIFFERENT Postgres database than DB_HOST/DB_NAME/etc. above (this
+      # feature's own "transcript" DB on AWS RDS, holding call_recording/
+      # app_folders/pending_transcriptions — not fieldtrack's tables). Reuse
+      # the same connection string this feature already used on App Runner
+      # so existing data isn't orphaned. Set directly in the Render
+      # dashboard.
       - key: DATABASE_URL
         sync: false
       - key: WEBHOOK_SECRET
         sync: false
-      # Must be this service's own public URL — used only to register the
-      # Azure Speech webhook callback (ensure_webhook_registered on startup),
-      # so it has to match wherever this actually ends up deployed. Render's
-      # URL for this service is predictable from its `name` above, but is
-      # confirmed only after the first deploy — double-check it in the
-      # dashboard and update here (or override in the dashboard) if different.
+      # Must be THIS service's own public URL — used only to register the
+      # Azure Speech webhook callback (meeting_recorder.ensure_webhook_
+      # registered, called from app/main.py's lifespan). Render's URL for
+      # this service is predictable from its `name` above, but is confirmed
+      # only after the first deploy — double-check it in the dashboard and
+      # update here (or override in the dashboard) if different.
       - key: EXPO_PUBLIC_BACKEND_URL
-        value: https://meeting-recorder-app-backend.onrender.com
+        value: https://fieldtrack-backend-py.onrender.com
       - key: SUMMARY_WORD_COUNT_THRESHOLD
         value: 75
       # A separate agent service (chat/RAG proxy), also previously on AWS App

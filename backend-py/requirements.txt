@@ -10,3 +10,16 @@ apscheduler==3.11.0
 httpx==0.28.1
 python-dotenv==1.0.1
 python-multipart==0.0.20
+
+# ── Meeting Recorder feature (app/routers/meeting_recorder.py) ──────────────
+requests==2.32.3
+azure-storage-blob==12.28.0
+pydub==0.25.1
+# pydub imports the stdlib `audioop` module, which PEP 594 removed entirely
+# in Python 3.13 (the version this venv/Render both run) — without this
+# backport, `import pydub` itself raises ModuleNotFoundError at process
+# startup, well before any audio ever gets processed.
+audioop-lts==0.2.1
+psycopg2-binary==2.9.12
+openai==2.49.0
+geopy==2.4.1

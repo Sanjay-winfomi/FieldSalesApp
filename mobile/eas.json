@@ -11,7 +11,7 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-py.onrender.com/api",
-        "EXPO_PUBLIC_MEETING_BACKEND_URL": "https://meeting-recorder-app-backend.onrender.com"
+        "EXPO_PUBLIC_MEETING_BACKEND_URL": "https://fieldtrack-backend-py.onrender.com"
       },
       "channel": "preview"
     },
@@ -19,7 +19,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://fieldtrack-backend-py.onrender.com/api",
-        "EXPO_PUBLIC_MEETING_BACKEND_URL": "https://meeting-recorder-app-backend.onrender.com"
+        "EXPO_PUBLIC_MEETING_BACKEND_URL": "https://fieldtrack-backend-py.onrender.com"
       },
       "channel": "production"
     }

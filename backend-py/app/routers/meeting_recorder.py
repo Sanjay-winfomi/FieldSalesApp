@@ -1,14 +1,34 @@
+"""meeting_recorder.py — ported from the standalone meeting-recorder-app-backend
+service (previously its own FastAPI app on AWS App Runner, then Render) into a
+router on this app. Business logic is unchanged from that port; only the
+FastAPI wiring changed (APIRouter instead of a second FastAPI() app, no
+second CORS middleware — this app's own DynamicCORSMiddleware already covers
+these routes, startup hook moved into app/main.py's lifespan since APIRouter
+has no on_event of its own).
+
+Deliberately kept as plain `def` (sync) route handlers with a psycopg2
+ThreadedConnectionPool, exactly as in the original — NOT ported to this app's
+own asyncpg pool (app/db/pool.py), which talks to a different Postgres
+database entirely (fieldtrack vs this feature's own "transcript" DB). FastAPI
+runs sync `def` routes in a thread pool automatically, so the blocking
+psycopg2 calls here don't block the event loop used by the rest of the app.
+All of this feature's own env vars (AZURE_*, SP_*, DATABASE_URL, etc.) are
+read ad-hoc via os.getenv with graceful fallbacks (db_pool stays None if
+unset) rather than through app/core/config.py's fail-fast run_boot_checks() —
+so a missing meeting-recorder secret degrades only this feature, and never
+prevents the whole app (and the unrelated, already-in-production field-sales
+API) from booting.
+"""
 import os
 import json
 import requests
 import time
 import re
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, Depends, Request
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Depends, Request
 import hmac
 import hashlib
 import base64
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import tempfile
@@ -16,23 +36,14 @@ import pydub
 import psycopg2
 from psycopg2 import pool
 from azure.storage.blob import BlobServiceClient, BlobSasPermissions, generate_blob_sas, ContentSettings
-from dotenv import load_dotenv
 from urllib.parse import quote
 from openai import AzureOpenAI
 from geopy.geocoders import Nominatim
 
-load_dotenv()
+router = APIRouter()
 
-app = FastAPI()
 # Added a unique user_agent and increased timeout to 10s to reduce Nominatim Geocoding Errors
 geolocator = Nominatim(user_agent="winfomi_meeting_recorder_production_v2", timeout=10)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────────
 class SasTokenRequest(BaseModel):
@@ -91,16 +102,16 @@ GRAPH_BASE_URL = f"https://graph.microsoft.com/v1.0/sites/{SP_SITE_ID}/drives/{S
 #  AZURE BLOB STORAGE ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/get-sas-token")
+@router.get("/get-sas-token")
 def get_sas_token(req: SasTokenRequest = Depends()):
     file_name = req.file_name
     try:
         blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-        
+
         # Use the file name supplied by the app, or generate a unique fallback
         if not file_name:
             file_name = f"meeting-{int(datetime.now().timestamp())}.wav"
-        
+
         # Create a 60-minute write-only token
         sas_token = generate_blob_sas(
             account_name=blob_service_client.account_name,
@@ -110,21 +121,21 @@ def get_sas_token(req: SasTokenRequest = Depends()):
             permission=BlobSasPermissions(write=True),
             expiry=datetime.now(timezone.utc) + timedelta(minutes=60)
         )
-        
+
         url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{file_name}"
-        
+
         return {"url": url, "sasToken": f"?{sas_token}"}
-        
+
     except Exception as e:
-        print(f"❌ SAS Generation Error: {str(e)}") 
+        print(f"❌ SAS Generation Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/get-delete-token")
+@router.get("/get-delete-token")
 def get_delete_token(req: DeleteTokenRequest = Depends()):
     file = req.file
     try:
         blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
-        
+
         # Create a 60-minute delete-only token for the specified blob
         sas_token = generate_blob_sas(
             account_name=blob_service_client.account_name,
@@ -134,13 +145,11 @@ def get_delete_token(req: DeleteTokenRequest = Depends()):
             permission=BlobSasPermissions(delete=True),
             expiry=datetime.now(timezone.utc) + timedelta(minutes=60)
         )
-        
+
         url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{file}"
-        
-        #print(f"✅ Successfully generated delete token for {file}. (Recording deleted from database and local)")
-        
+
         return {"url": url, "sasToken": f"?{sas_token}"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -258,14 +267,14 @@ def set_db_status(session_id: str, status: str):
     try:
         conn = db_pool.getconn()
         cur = conn.cursor()
-        
+
         update_query = "UPDATE call_recording SET processing_status = %s WHERE session_id = %s"
         cur.execute(update_query, (status, session_id))
-        
+
         if cur.rowcount == 0:
             insert_query = "INSERT INTO call_recording (session_id, processing_status) VALUES (%s, %s)"
             cur.execute(insert_query, (session_id, status))
-            
+
         conn.commit()
         cur.close()
     except Exception as e:
@@ -298,7 +307,7 @@ def format_duration(total_seconds: float) -> str:
     hrs = total_seconds // 3600
     mins = (total_seconds % 3600) // 60
     secs = total_seconds % 60
-    
+
     parts = []
     if hrs > 0:
         parts.append(f"{hrs} hr")
@@ -306,7 +315,7 @@ def format_duration(total_seconds: float) -> str:
         parts.append(f"{mins} min")
     if secs > 0 or not parts:
         parts.append(f"{secs} sec")
-    
+
     return " ".join(parts)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -316,22 +325,21 @@ def format_duration(total_seconds: float) -> str:
 def get_graph_access_token() -> str:
     """Obtain an app-only access token via the Client Credentials OAuth2 flow."""
     token_url = f"https://login.microsoftonline.com/{SP_TENANT_ID}/oauth2/v2.0/token"
-    
+
     resp = requests.post(token_url, data={
         "client_id": SP_CLIENT_ID,
         "client_secret": SP_CLIENT_SECRET,
         "scope": "https://graph.microsoft.com/.default",
         "grant_type": "client_credentials",
     })
-    
+
     if resp.status_code != 200:
         raise Exception(f"Failed to get Graph token: {resp.status_code} {resp.text}")
-    
+
     token = resp.json().get("access_token")
     if not token:
         raise Exception("No access_token in token response")
-    
-    # print("[SharePoint] ✅ Graph access token obtained")
+
     return token
 
 
@@ -341,36 +349,35 @@ def ensure_sharepoint_folder(title: str, token: str) -> str:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    
+
     encoded_path = quote(SP_BASE_PATH)
     endpoint = f"{GRAPH_BASE_URL}/root:/{encoded_path}:/children"
-    
+
     safe_title = re.sub(r'[<>:"/\\|?*]', '', title).strip() or 'recording'
-    
+
     # Try to create — use "fail" conflict behavior so we don't create duplicates
     resp = requests.post(endpoint, headers=headers, json={
         "name": safe_title,
         "folder": {},
         "@microsoft.graph.conflictBehavior": "fail",
     })
-    
+
     if resp.status_code in [200, 201]:
         folder_id = resp.json()["id"]
         print(f"[SharePoint] 📁 Created folder: {title} (ID: {folder_id})")
         return folder_id
-    
+
     if resp.status_code == 409:
         # Folder already exists — look it up by path
         lookup_url = f"{GRAPH_BASE_URL}/root:/{encoded_path}/{quote(safe_title)}"
         lookup_resp = requests.get(lookup_url, headers=headers)
-        
+
         if lookup_resp.status_code == 200:
             folder_id = lookup_resp.json()["id"]
-            # print(f"[SharePoint] 📁 Found existing folder: {title} (ID: {folder_id})")
             return folder_id
-        
+
         raise Exception(f"Folder exists but lookup failed: {lookup_resp.status_code} {lookup_resp.text}")
-    
+
     raise Exception(f"Failed to create folder: {resp.status_code} {resp.text}")
 
 
@@ -380,11 +387,11 @@ def upload_transcript_to_sharepoint(folder_id: str, transcript_text: str, file_n
         "Authorization": f"Bearer {token}",
         "Content-Type": "text/plain",
     }
-    
+
     endpoint = f"{GRAPH_BASE_URL}/items/{folder_id}:/{quote(file_name)}:/content"
-    
+
     resp = requests.put(endpoint, headers=headers, data=transcript_text.encode("utf-8"))
-    
+
     if resp.status_code in [200, 201]:
         print(f"[SharePoint] ✅ Diarized transcript uploaded: {file_name}")
         return resp.json().get("id")
@@ -396,14 +403,14 @@ def upload_large_file_to_sharepoint(folder_id: str, file_path: str, file_name: s
     headers = {"Authorization": f"Bearer {token}"}
     endpoint = f"{GRAPH_BASE_URL}/items/{folder_id}:/{quote(file_name)}:/createUploadSession"
     res = requests.post(endpoint, headers=headers, json={"item": {"@microsoft.graph.conflictBehavior": "replace"}})
-    
+
     if res.status_code not in [200, 201]:
         raise Exception(f"Failed to create upload session: {res.text}")
-    
+
     upload_url = res.json()["uploadUrl"]
     file_size = os.path.getsize(file_path)
     chunk_size = 320 * 1024 * 10  # 3.2 MB chunks
-    
+
     with open(file_path, 'rb') as f:
         for i in range(0, file_size, chunk_size):
             chunk_data = f.read(chunk_size)
@@ -421,7 +428,7 @@ def upload_large_file_to_sharepoint(folder_id: str, file_path: str, file_name: s
                 continue
             else:
                 raise Exception(f"Chunk upload failed: {upload_res.text}")
-                
+
     raise Exception("Upload finished but didn't receive a 200/201 created response.")
 
 
@@ -437,12 +444,11 @@ def delete_blob(blob_file_name: str):
             permission=BlobSasPermissions(delete=True),
             expiry=datetime.now(timezone.utc) + timedelta(minutes=10)
         )
-        
+
         url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob_file_name}?{sas_token}"
         resp = requests.delete(url)
-        
+
         if resp.status_code in [200, 202, 404]:
-            # print(f"[Azure] 🗑️ Blob deleted: {blob_file_name}")
             pass
         else:
             print(f"[Azure] ⚠️ Blob delete returned {resp.status_code}: {resp.text}")
@@ -542,54 +548,50 @@ def submit_transcription_job(recording_names: List[str], title: str, session_id:
 def _submit_transcription_job(recording_names: List[str], title: str, session_id: str, translate_tanglish: bool = False, owner_email: str = "", device_os: str = "Unknown", client_upload_time_ms: int = 0, latitude: float = None, longitude: float = None, ui_folder_id: str = None):
     """Handles merging chunks, Azure Speech → SharePoint pipeline in the background."""
     folder_id = None
-    
+
     pipeline_start_time = time.time()
-    
+
     print(f"\n{'='*60}")
     print(f"[Pipeline] Starting processing for: {title} (Session: {session_id})")
-    # print(f"[Pipeline] Chunks to merge: {recording_names}")
     print(f"{'='*60}\n")
-    
+
     set_db_status(session_id, "processing")
-    
+
     blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING)
     container_client = blob_service_client.get_container_client(CONTAINER_NAME)
-    
+
     merged_audio = None
-    
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         for i, chunk_name in enumerate(recording_names):
-            # print(f"[Pipeline] Downloading chunk {i+1}/{len(recording_names)}: {chunk_name}")
             blob_client = container_client.get_blob_client(chunk_name)
             download_path = os.path.join(tmpdirname, chunk_name)
-            
+
             with open(download_path, "wb") as download_file:
                 download_file.write(blob_client.download_blob().readall())
-            
+
             # Load and merge using pydub
             ext = chunk_name.split('.')[-1].lower()
             try:
                 segment = pydub.AudioSegment.from_file(download_path, format=ext)
-                # print(f"[Pipeline]   -> Chunk {i+1} duration: {segment.duration_seconds:.2f}s")
                 if merged_audio is None:
                     merged_audio = segment
                 else:
                     merged_audio += segment
-                # print(f"[Pipeline]   -> Total merged duration so far: {merged_audio.duration_seconds:.2f}s")
             except Exception as e:
                 print(f"[Pipeline] ❌ Failed to process chunk {chunk_name}: {e}")
-        
+
         if merged_audio is None:
             print("[Pipeline] ❌ No valid audio chunks to process.")
             set_db_status(session_id, "failed")
             return
-            
+
         # Ensure 16kHz Mono for Azure Speech optimal diarization and transcription
         merged_audio = merged_audio.set_frame_rate(16000).set_channels(1)
-            
+
         merged_filename = f"merged_{session_id}_{int(datetime.now().timestamp())}.wav"
         merged_path = os.path.join(tmpdirname, merged_filename)
-        
+
         ffmpeg_start = time.time()
         merged_audio.export(merged_path, format="wav")
 
@@ -649,32 +651,31 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
         except Exception as e:
             print(f"[Pipeline] ⚠️ MP3 compression skipped: {e}")
 
-        # Get final file size
         file_size_bytes = os.path.getsize(merged_path)
-        
+
         print(f"[Pipeline] ✅ Chunks merged successfully. Uploading merged file: {merged_filename}")
-        
+
         # Upload merged file
         with open(merged_path, "rb") as data:
             content_type = "audio/mpeg" if merged_filename.endswith(".mp3") else "audio/wav"
             container_client.upload_blob(
-                name=merged_filename, 
-                data=data, 
+                name=merged_filename,
+                data=data,
                 overwrite=True,
                 content_settings=ContentSettings(content_type=content_type)
             )
-        
+
         blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{merged_filename}"
-        
+
         # ── UPLOAD MERGED AUDIO TO SHAREPOINT ─────────────────────────────
         try:
             graph_token = get_graph_access_token()
             folder_id = ensure_sharepoint_folder(title, graph_token)
             safe_title = re.sub(r'[^a-zA-Z0-9 _-]', '', title).strip() or 'recording'
             sp_audio_filename = f"{safe_title}_{session_id[:8]}{os.path.splitext(merged_filename)[1]}"
-            
+
             sp_start = time.time()
-            
+
             # Retry logic for transient SharePoint serviceReadOnly errors
             sp_max_retries = 3
             sp_retry_delay = 15  # seconds between retries
@@ -713,11 +714,9 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
             permission=BlobSasPermissions(read=True),
             expiry=datetime.now(timezone.utc) + timedelta(hours=4)
         )
-        
-        # Combine the base URL with the new token
+
         blob_sas_url = f"{blob_url}?{read_sas_token}"
-        # print("[Pipeline] ✅ Read SAS Token generated for Speech Service.")
-        
+
     except Exception as e:
         print(f"[Pipeline] ❌ Failed to generate Read SAS token: {e}")
         set_db_status(session_id, "failed")
@@ -725,13 +724,13 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
 
     # ── STEP 1: Start Azure Batch Transcription ───────────────────────────────
     azure_speech_start = time.time()
-    # We now always use the Microsoft Base Model which naturally captures Tanglish 
+    # We now always use the Microsoft Base Model which naturally captures Tanglish
     # perfectly and outputs native Tamil script.
 
     payload = {
         "contentUrls": [blob_sas_url],
         "locale": "en-IN",
-        "displayName": title, 
+        "displayName": title,
         "properties": {
             "diarizationEnabled": True,
             "languageIdentification": {"candidateLocales": ["en-IN", "ta-IN"]},
@@ -744,27 +743,6 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
         }
     }
 
-    # === START OF COMMENTED OUT OLD LOGIC ===
-    # else:
-    # payload = {
-    #     "contentUrls": [blob_sas_url],
-    #     "locale": "en-IN",
-    #     "displayName": title,
-    #     "model": {
-    #         "self": "https://southeastasia.api.cognitive.microsoft.com/speechtotext/models/base/ad38cffe-d981-4cf2-a062-4108c3c2b48f?api-version=2024-11-15"
-    #     },  
-    #     "properties": {
-    #         "diarizationEnabled": True,
-    #         "wordLevelTimestampsEnabled": False,
-    #         "punctuationMode": "DictatedAndAutomatic",
-    #         "profanityFilterMode": "Masked",
-    #         "diarization": {
-    #             "speakers": {"minCount": 1, "maxCount": 10}
-    #         }
-    #     }
-    # }
-    # === END OF COMMENTED OUT OLD LOGIC ===
-    
     start_res = requests.post(TRANSCRIBE_URL, headers=speech_headers, json=payload)
     if start_res.status_code != 201:
         print(f"[Pipeline] ❌ Failed to start transcription: {start_res.text}")
@@ -776,9 +754,9 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
         print("[Pipeline] ❌ Failed to get self_url from transcription start.")
         set_db_status(session_id, "failed")
         return
-        
+
     job_id = self_url.split("/")[-1]
-    
+
     save_pending_transcription(job_id, {
         "session_id": session_id,
         "title": title,
@@ -792,7 +770,7 @@ def _submit_transcription_job(recording_names: List[str], title: str, session_id
         "longitude": longitude,
         "final_duration_seconds": final_duration_seconds
     })
-    
+
     print(f"[Pipeline] ⏳ Transcription job started (File: {merged_filename}). Webhook will resume pipeline.")
     return
 
@@ -823,7 +801,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     print(f"\n{'='*60}")
     print(f"[Pipeline Resume] Resuming processing for: {title} (Session: {session_id})")
     print(f"{'='*60}\n")
-    
+
     speech_headers = {
         "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
         "Content-Type": "application/json"
@@ -833,7 +811,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     try:
         files_res = requests.get(files_url, headers=speech_headers).json()
         content_url = next(
-            (item["links"]["contentUrl"] for item in files_res.get("values", []) if item["kind"] == "Transcription"), 
+            (item["links"]["contentUrl"] for item in files_res.get("values", []) if item["kind"] == "Transcription"),
             None
         )
 
@@ -853,9 +831,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     # cleanup still happens even if a later step (SharePoint archive, DB
     # write) fails.
     delete_transcription_job(job_id)
-    
 
-    
     # ── STEP 4: Format with Speaker Diarization ──────────────────────────────
     phrases = transcript_data.get("recognizedPhrases", [])
     formatted_transcript = ""
@@ -868,9 +844,9 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
         confidence = phrase.get("nBest", [{}])[0].get("confidence", 0.0)
         start_time = phrase.get("offset", "")
         end_time = phrase.get("duration", "")
-        
+
         if not text: continue
-        
+
         segments_list.append({
             "speaker": f"Speaker {speaker_id or 1}",
             "start_time": start_time,
@@ -885,7 +861,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
             current_speaker = speaker_id
         else:
             formatted_transcript += " "
-            
+
         formatted_transcript += text
 
     if not formatted_transcript.strip():
@@ -893,22 +869,20 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
         formatted_transcript = "No speech detected or empty transcript."
 
     print(f"[Pipeline] ✅ Transcription complete ({len(phrases)} phrases, {len(formatted_transcript)} chars)")
-    # print(f"[Pipeline] Preview: {formatted_transcript[:200]}...")
 
     translation_cost = 0.0
     # ── STEP 4b (conditional): Tanglish → English translation ───────────────────────
-    # if translate_tanglish:
-    has_tamil = bool(re.search(r'[\u0B80-\u0BFF]', formatted_transcript))
+    has_tamil = bool(re.search(r'[஀-௿]', formatted_transcript))
     if has_tamil:
         print("[Pipeline] 🌐 Tamil characters detected — translating to English...")
         llm_start = time.time()
         formatted_transcript, usage = translate_tanglish_to_english(formatted_transcript)
-        
+
         # Estimate cost: gpt-4o-mini ($0.15 / 1M input, $0.60 / 1M output)
         input_cost = (usage.get("prompt_tokens", 0) / 1_000_000) * 0.15
         output_cost = (usage.get("completion_tokens", 0) / 1_000_000) * 0.60
         translation_cost = input_cost + output_cost
-    
+
     # Extract speaker count
     unique_speakers = len(set(phrase.get("speaker", 0) for phrase in phrases))
 
@@ -918,7 +892,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     try:
         summary_threshold = int(os.getenv("SUMMARY_WORD_COUNT_THRESHOLD", "75"))
         filtered_word_count = get_filtered_word_count(segments_list)
-        
+
         if filtered_word_count < summary_threshold:
             print(f"[Pipeline] ⏭️ Transcript word count ({filtered_word_count}) below threshold ({summary_threshold}). Skipping summary.")
             summary_status = "skipped"
@@ -959,7 +933,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     try:
         graph_token = get_graph_access_token()
         folder_id = ensure_sharepoint_folder(title, graph_token)
-        
+
         # ── Archive to SharePoint ──
         transcript_file_id = None
         try:
@@ -992,11 +966,11 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
                 duration_val = int(final_duration_seconds) if 'final_duration_seconds' in locals() else 0
                 formatted_dur = format_duration(duration_val)
                 audio_id = audio_file_id if 'audio_file_id' in locals() else None
-                
+
                 conn = db_pool.getconn()
                 cur = conn.cursor()
                 update_query = """
-                    UPDATE call_recording 
+                    UPDATE call_recording
                     SET recording_name = %s,
                         transcript_file_id = %s,
                         audio_file_id = %s,
@@ -1012,12 +986,12 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
                     WHERE session_id = %s
                 """
                 cur.execute(update_query, (
-                    title, 
-                    transcript_file_id, 
-                    audio_id, 
-                    folder_id, 
-                    owner_email, 
-                    formatted_dur, 
+                    title,
+                    transcript_file_id,
+                    audio_id,
+                    folder_id,
+                    owner_email,
+                    formatted_dur,
                     readable_address,
                     json.dumps(segments_list),
                     formatted_transcript,
@@ -1026,21 +1000,21 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
                     summary_status,
                     session_id
                 ))
-                
+
                 if cur.rowcount == 0:
                     insert_query = """
-                        INSERT INTO call_recording 
+                        INSERT INTO call_recording
                         (session_id, recording_name, transcript_file_id, audio_file_id, folder_id, owner_id, duration, location, transcript_segments, transcript_text, translation_cost, summary, summary_status)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     cur.execute(insert_query, (
                         session_id,
-                        title, 
-                        transcript_file_id, 
-                        audio_id, 
-                        folder_id, 
-                        owner_email, 
-                        formatted_dur, 
+                        title,
+                        transcript_file_id,
+                        audio_id,
+                        folder_id,
+                        owner_email,
+                        formatted_dur,
                         readable_address,
                         json.dumps(segments_list),
                         formatted_transcript,
@@ -1058,7 +1032,7 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
             finally:
                 if conn:
                     db_pool.putconn(conn)
-                
+
     except Exception as e:
         print(f"[Pipeline] ❌ SharePoint upload or DB notification failed: {e}")
         pipeline_failed = True
@@ -1078,15 +1052,15 @@ def _resume_pipeline_after_transcription(job_id: str, files_url: str, metadata: 
     else:
         print(f"\n[Pipeline] 🎉 Pipeline complete for: {title}\n")
         set_db_status(session_id, "success")
-    
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  WEBHOOK SETUP & RECEIVER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.on_event("startup")
 def ensure_webhook_registered():
+    """Called from app/main.py's lifespan startup (this module has no
+    FastAPI() app of its own to hang an @app.on_event off of anymore)."""
     webhook_secret = os.getenv("WEBHOOK_SECRET")
     public_url = os.getenv("EXPO_PUBLIC_BACKEND_URL")
     region = os.getenv("AZURE_SPEECH_REGION")
@@ -1095,7 +1069,7 @@ def ensure_webhook_registered():
     if not webhook_secret or not public_url:
         print("⚠️ WEBHOOK_SECRET or EXPO_PUBLIC_BACKEND_URL not set. Azure Speech Webhook will not be registered.")
         return
-        
+
     webhook_secret = webhook_secret.strip()
 
     endpoint = f"https://{region}.api.cognitive.microsoft.com/speechtotext/v3.2/webhooks"
@@ -1123,7 +1097,7 @@ def ensure_webhook_registered():
                         webhook_id = wh.get("self", "").rstrip("/").split("/")[-1]
                         print(f"✅ Webhook already registered with Azure: {webhook_id}")
                         return
-        
+
         # Register new webhook
         payload = {
             "displayName": "MeetingRecorderTranscriptionWebhook",
@@ -1144,7 +1118,7 @@ def ensure_webhook_registered():
     except Exception as e:
         print(f"⚠️ Error during webhook registration: {e}")
 
-@app.post("/webhook/transcription-complete")
+@router.post("/webhook/transcription-complete")
 async def transcription_webhook(request: Request, background_tasks: BackgroundTasks):
     # Azure Webhook Creation Challenge Handshake
     validation_token = request.query_params.get("validationToken")
@@ -1157,46 +1131,42 @@ async def transcription_webhook(request: Request, background_tasks: BackgroundTa
         )
 
     raw_body = await request.body()
-    
+
     # Fallback Ping Check
     if raw_body == b'':
         print("🔔 Received Azure Webhook Ping (Empty Body)! Answering 200 OK.")
         return Response(status_code=200)
 
     webhook_secret = os.getenv("WEBHOOK_SECRET")
-    
+
     # 1. Verify Signature
     if webhook_secret:
         webhook_secret = webhook_secret.strip()
         signature = request.headers.get("X-MicrosoftSpeechServices-Signature", "")
         expected_sig = base64.b64encode(hmac.new(webhook_secret.encode('utf-8'), raw_body, hashlib.sha256).digest()).decode('utf-8')
-        
+
         if not hmac.compare_digest(signature, expected_sig):
             print(f"❌ Webhook Invalid Signature")
-            # print(f"   Header Sig: {signature}")
-            # print(f"   Expected:   {expected_sig}")
-            # print(f"   Raw Body:   {raw_body}")
             raise HTTPException(status_code=401, detail="Invalid signature")
 
     # 2. Parse Payload
     payload = await request.json()
-    # print(f"🔔 Raw Webhook Payload from Azure: {payload}")
-    
+
     self_url = payload.get("self", "")
     status = payload.get("status", "")
-    
+
     # Check if Azure webhook payload structure is different (it might be in a wrapper)
     if not self_url and not status and "transcription" in payload:
         transcription_obj = payload.get("transcription", {})
         self_url = transcription_obj.get("self", "")
         status = transcription_obj.get("status", "")
-    
+
     if not self_url:
         print("⚠️ Could not find self_url in webhook payload.")
         return Response(status_code=200)
 
     job_id = self_url.split("/")[-1]
-    
+
     job_metadata = load_pending_transcription(job_id)
     if job_metadata is None:
         print(f"⚠️ Webhook received for unknown job_id: {job_id}")
@@ -1211,7 +1181,6 @@ async def transcription_webhook(request: Request, background_tasks: BackgroundTa
             headers = {"Ocp-Apim-Subscription-Key": speech_key}
             try:
                 resp = requests.get(self_url, headers=headers)
-                # print(f"🔍 Status enrichment GET → {resp.status_code} | body: {resp.text[:300]}")
                 if resp.status_code == 200:
                     transcription_data = resp.json()
                     status = transcription_data.get("status", "")
@@ -1245,10 +1214,10 @@ async def transcription_webhook(request: Request, background_tasks: BackgroundTa
 #  API ENDPOINT — TRIGGERED BY THE APP AFTER BLOB UPLOAD
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/start-processing")
+@router.post("/start-processing")
 def start_processing(request: ProcessingRequest, background_tasks: BackgroundTasks):
-    """Endpoint called by the iPhone after a successful Blob upload of all chunks."""
-    
+    """Endpoint called by the app after a successful Blob upload of all chunks."""
+
     # Upsert full available metadata into DB immediately — don't wait for pipeline to finish
     if db_pool:
         conn = None
@@ -1280,7 +1249,7 @@ def start_processing(request: ProcessingRequest, background_tasks: BackgroundTas
         finally:
             if conn:
                 db_pool.putconn(conn)
-    
+
     background_tasks.add_task(
         submit_transcription_job,
         request.recording_names,
@@ -1294,11 +1263,11 @@ def start_processing(request: ProcessingRequest, background_tasks: BackgroundTas
         request.longitude,
         request.ui_folder_id
     )
-    
-    # Immediately return success to the iPhone so the app can close
+
+    # Immediately return success to the app so it can close
     return {"message": "Transcription started in the background.", "title": request.title, "session_id": request.session_id}
 
-@app.get("/status")
+@router.get("/status")
 def get_status(req: StatusRequest = Depends()):
     session_id = req.session_id
     """Returns the current status + transcript data of the pipeline for a given session ID."""
@@ -1315,7 +1284,6 @@ def get_status(req: StatusRequest = Depends()):
         row = cur.fetchone()
         cur.close()
         if row:
-            import json
             segments = row[5]
             if isinstance(segments, str):
                 try:
@@ -1344,7 +1312,7 @@ def get_status(req: StatusRequest = Depends()):
 class SharePointLinkRequest(BaseModel):
     file_id: str
 
-@app.get("/get-sharepoint-link")
+@router.get("/get-sharepoint-link")
 def get_sharepoint_link(req: SharePointLinkRequest = Depends()):
     """Resolves a Graph driveItem id (audio_file_id/transcript_file_id, as
     stored on call_recording) to an openable SharePoint webUrl. The DB only
@@ -1368,59 +1336,9 @@ def get_sharepoint_link(req: SharePointLinkRequest = Depends()):
         print(f"[SharePoint] ❌ Failed to resolve link for {req.file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.api_route("/ping", methods=["GET", "HEAD"])
+@router.api_route("/ping", methods=["GET", "HEAD"])
 async def ping_endpoint(response: Response):
     return {"status": "healthy"}
-
-# @app.get("/get-azure-models")
-# def get_azure_models():
-#     region = os.getenv("AZURE_SPEECH_REGION")
-#     speech_key = os.getenv("AZURE_SPEECH_KEY")
-
-#     if not region or not speech_key:
-#         raise HTTPException(status_code=500, detail="Missing env variables")
-
-#     headers = {"Ocp-Apim-Subscription-Key": speech_key}
-#     skip = 0
-#     top = 100
-#     whisper_models = []
-#     total_models_checked = 0
-
-#     while True:
-#         url = (
-#             f"https://{region}.api.cognitive.microsoft.com/speechtotext/models/base"
-#             f"?api-version=2024-11-15&skip={skip}&top={top}"
-#         )
-#         response = requests.get(url, headers=headers)
-
-#         if response.status_code != 200:
-#             raise HTTPException(status_code=response.status_code, detail=f"Azure error: {response.text}")
-
-#         data = response.json()
-#         models = data.get("values", [])
-
-#         if not models:
-#             break
-
-#         total_models_checked += len(models)
-
-#         for model in models:
-#             display_name = model.get("displayName", "").lower()
-#             if "whisper" in display_name:
-#                 whisper_models.append({
-#                     "found_model": model.get("displayName"),
-#                     "model_self_url": model.get("self"),
-#                     "locale": model.get("locale"),
-#                     "status": model.get("status"),
-#                 })
-
-#         skip += top
-
-#     return {
-#         "total_models_checked": total_models_checked,
-#         "whisper_models_found": len(whisper_models),
-#         "whisper_models": whisper_models if whisper_models else "None found"
-#     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  FOLDER & RECORDING SYNC APIs (For Mobile UI Folders)
@@ -1439,14 +1357,14 @@ class UpdateRecordingFolderRequest(BaseModel):
     session_id: str
     ui_folder_id: Optional[str] = None
 
-@app.get("/get-recording-data")
+@router.get("/get-recording-data")
 def get_recording_data(owner_id: str, search_query: str = None):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not configured")
     try:
         conn = db_pool.getconn()
         cur = conn.cursor()
-        
+
         if search_query and search_query.strip():
             cur.execute("""
                 SELECT session_id, recording_name, transcript_file_id, audio_file_id, folder_id, duration, location, created_at, ui_folder_id, transcript_text, processing_status, transcript_segments, summary, summary_status,
@@ -1464,10 +1382,10 @@ def get_recording_data(owner_id: str, search_query: str = None):
                 FROM call_recording
                 WHERE owner_id = %s
             """, (owner_id,))
-            
+
         rows = cur.fetchall()
         db_pool.putconn(conn)
-        
+
         result = []
         for r in rows:
             result.append({
@@ -1494,7 +1412,7 @@ def get_recording_data(owner_id: str, search_query: str = None):
             db_pool.putconn(conn)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/delete-recording")
+@router.delete("/delete-recording")
 def delete_recording_api(record_id: str):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -1511,7 +1429,7 @@ def delete_recording_api(record_id: str):
             db_pool.putconn(conn)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/sync-folders")
+@router.post("/sync-folders")
 def sync_folders(req: SyncFoldersRequest):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -1525,17 +1443,17 @@ def sync_folders(req: SyncFoldersRequest):
             cur.execute("""
                 INSERT INTO app_folders (id, name, owner_id, created_at)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE 
+                ON CONFLICT (id) DO UPDATE
                 SET name = EXCLUDED.name
             """, (folder.id, folder.name, req.owner_id, folder.created_at))
-        
+
         # Delete folders that are not in the list anymore
         if active_ids:
             format_strings = ','.join(['%s'] * len(active_ids))
             cur.execute(f"DELETE FROM app_folders WHERE owner_id = %s AND id NOT IN ({format_strings})", [req.owner_id] + active_ids)
         else:
             cur.execute("DELETE FROM app_folders WHERE owner_id = %s", (req.owner_id,))
-        
+
         conn.commit()
         db_pool.putconn(conn)
         return {"status": "success"}
@@ -1545,7 +1463,7 @@ def sync_folders(req: SyncFoldersRequest):
             db_pool.putconn(conn)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/get-folders")
+@router.get("/get-folders")
 def get_folders(owner_id: str):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -1555,7 +1473,7 @@ def get_folders(owner_id: str):
         cur.execute("SELECT id, name, created_at FROM app_folders WHERE owner_id = %s", (owner_id,))
         rows = cur.fetchall()
         db_pool.putconn(conn)
-        
+
         result = []
         for r in rows:
             result.append({
@@ -1569,7 +1487,7 @@ def get_folders(owner_id: str):
             db_pool.putconn(conn)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/update-recording-folder")
+@router.post("/update-recording-folder")
 def update_recording_folder(req: UpdateRecordingFolderRequest):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -1587,21 +1505,22 @@ def update_recording_folder(req: UpdateRecordingFolderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-import requests as sync_requests
-from fastapi.responses import Response
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AGENT / RAG PROXY — forwards to a separate chat/RAG service
+# ═══════════════════════════════════════════════════════════════════════════════
 
-@app.api_route('/{agent_id}/agent/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@router.api_route('/{agent_id}/agent/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 async def proxy_agent_with_id(request: Request, agent_id: str, path: str):
     agent_base_url = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:8001")
     url = f'{agent_base_url}/{agent_id}/agent/{path}'
     if request.url.query:
         url += f'?{request.url.query}'
-    
+
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
     body = await request.body()
-    
+
     try:
-        resp = sync_requests.request(
+        resp = requests.request(
             method=request.method,
             url=url,
             headers=headers,
@@ -1613,18 +1532,18 @@ async def proxy_agent_with_id(request: Request, agent_id: str, path: str):
         print(f"Proxy Error: {e}")
         raise HTTPException(status_code=502, detail="Bad Gateway")
 
-@app.api_route('/agent/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@router.api_route('/agent/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 async def proxy_agent(request: Request, path: str):
     agent_base_url = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:8001")
     url = f'{agent_base_url}/agent/{path}'
     if request.url.query:
         url += f'?{request.url.query}'
-    
+
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
     body = await request.body()
-    
+
     try:
-        resp = sync_requests.request(
+        resp = requests.request(
             method=request.method,
             url=url,
             headers=headers,
@@ -1636,18 +1555,18 @@ async def proxy_agent(request: Request, path: str):
         print(f"Proxy Error: {e}")
         raise HTTPException(status_code=502, detail="Bad Gateway")
 
-@app.api_route('/get-rag-chat-messages', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@router.api_route('/get-rag-chat-messages', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 async def proxy_rag(request: Request):
     agent_base_url = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:8001")
     url = f'{agent_base_url}/get-rag-chat-messages'
     if request.url.query:
         url += f'?{request.url.query}'
-        
+
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
     body = await request.body()
-    
+
     try:
-        resp = sync_requests.request(
+        resp = requests.request(
             method=request.method,
             url=url,
             headers=headers,
