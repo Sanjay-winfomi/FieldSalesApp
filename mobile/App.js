@@ -43,6 +43,9 @@ import RemindersScreen from './screens/RemindersScreen';
 import ReminderEditorScreen from './screens/ReminderEditorScreen';
 import AboutScreen from './screens/AboutScreen';
 import MiuiOnboardingScreen from './screens/MiuiOnboardingScreen';
+import MeetingRecordScreen from './screens/MeetingRecordScreen';
+import MeetingDetailScreen from './screens/MeetingDetailScreen';
+import MeetingFoldersScreen from './screens/MeetingFoldersScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -966,6 +969,10 @@ export default function App() {
               <Stack.Screen name="ReminderEditor" component={ReminderEditorScreen} />
               <Stack.Screen name="About" component={AboutScreen} />
               <Stack.Screen name="MiuiOnboarding" component={MiuiOnboardingScreen} />
+
+              <Stack.Screen name="MeetingRecord" component={MeetingRecordScreen} />
+              <Stack.Screen name="MeetingDetail" component={MeetingDetailScreen} />
+              <Stack.Screen name="MeetingFolders" component={MeetingFoldersScreen} />
             </Stack.Navigator>
           </PendingSyncContext.Provider>
           </AppStateContext.Provider>

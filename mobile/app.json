@@ -57,6 +57,12 @@
       ],
       "@react-native-community/datetimepicker",
       [
+        "expo-audio",
+        {
+          "microphonePermission": "Winfomi uses your microphone to record meetings you choose to save, transcribe, and summarize."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
@@ -71,7 +77,8 @@
           "imageWidth": 1,
           "resizeMode": "contain"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "owner": "sanjay-org",
     "extra": {

@@ -1,10 +1,11 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, User } from 'lucide-react-native';
+import { Home, User, Mic } from 'lucide-react-native';
 import { colors } from '../theme';
 
 import HomeScreen from '../../screens/HomeScreen';
+import MeetingsScreen from '../../screens/MeetingsScreen';
 import ProfileScreen from '../../screens/ProfileScreen';
 
 const Tab = createBottomTabNavigator();
@@ -60,6 +61,14 @@ export default function MainTabs() {
         options={{
           tabBarIcon: ({ color, size }) => <Home size={size ?? 22} color={color} />,
           tabBarAccessibilityLabel: 'Home tab',
+        }}
+      />
+      <Tab.Screen
+        name="Meetings"
+        component={MeetingsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => <Mic size={size ?? 22} color={color} />,
+          tabBarAccessibilityLabel: 'Meetings tab',
         }}
       />
       <Tab.Screen
