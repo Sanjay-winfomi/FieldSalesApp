@@ -59,7 +59,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Winfomi uses your microphone to record meetings you choose to save, transcribe, and summarize."
+          "microphonePermission": "Winfomi uses your microphone to record meetings you choose to save, transcribe, and summarize.",
+          "enableBackgroundRecording": true
         }
       ],
       [

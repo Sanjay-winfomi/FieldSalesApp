@@ -56,7 +56,20 @@ export default function MeetingRecordScreen({ navigation, route }) {
         setPermissionDenied(true);
         return;
       }
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      // allowsBackgroundRecording (+ shouldPlayInBackground, which gates the
+      // whole audio session staying active, not just playback) are what stop
+      // the recording being cut off the moment the screen locks or the rep
+      // switches away mid-meeting — both default to false. Paired with
+      // app.json's expo-audio plugin enableBackgroundRecording:true, which
+      // adds the native permissions/manifest entries (UIBackgroundModes
+      // "audio" on iOS, FOREGROUND_SERVICE_MICROPHONE on Android) this
+      // setting actually needs to take effect.
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        allowsBackgroundRecording: true,
+        shouldPlayInBackground: true,
+      });
       startRecording();
     })();
 
