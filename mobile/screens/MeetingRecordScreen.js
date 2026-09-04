@@ -44,8 +44,8 @@ export default function MeetingRecordScreen({ navigation, route }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerRef = useRef(null);
   const sessionIdRef = useRef(generateSessionId());
-  // Tracks whether the recorded chunk has already been uploaded to Azure —
-  // only then does "Discard" need to also clean up the orphaned blob via
+  // Tracks whether the recorded chunk has already been uploaded to S3 —
+  // only then does "Discard" need to also clean up the orphaned object via
   // deleteBlobDirect, rather than just dropping the local file.
   const uploadedFileNameRef = useRef(null);
 
