@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, Linking } from 'react-native';
-import { FileText, Sparkles, Clock, Music } from 'lucide-react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { FileText, Sparkles, Clock, Music, Play, Pause } from 'lucide-react-native';
 import { getRecordingStatus, getAudioLink } from '../src/services/meetingApi';
 import { showAlert } from '../src/services/themedAlert';
 import { AppHeader, LoadingCard, EmptyState, Card, FadeSlideIn, SecondaryButton } from '../src/components';
@@ -8,16 +9,56 @@ import { colors, typography, spacing } from '../src/theme';
 
 const POLL_INTERVAL_MS = 5000;
 
+function formatSeconds(s) {
+  if (!Number.isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+/** In-app audio player — plays straight from the presigned S3 URL, no
+ * jumping out to the browser. `url` starts null; useAudioPlayer accepts
+ * that and swaps in the real source (recreating its underlying player)
+ * once resolved, so this can be mounted immediately rather than only after
+ * the link is ready. */
+function AudioPlayerBar({ url }) {
+  const player = useAudioPlayer(url);
+  const status = useAudioPlayerStatus(player);
+
+  // Autoplay the moment a real source is loaded — matches the "tap to
+  // listen" expectation the old Linking.openURL button set.
+  useEffect(() => {
+    if (url) player.play();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
+  return (
+    <View style={styles.playerBar}>
+      <Pressable
+        onPress={() => (status.playing ? player.pause() : player.play())}
+        style={styles.playButton}
+        accessibilityRole="button"
+        accessibilityLabel={status.playing ? 'Pause' : 'Play'}
+      >
+        {status.playing ? <Pause size={20} color={colors.textInverse} /> : <Play size={20} color={colors.textInverse} />}
+      </Pressable>
+      <Text style={styles.playerTime}>{formatSeconds(status.currentTime)} / {formatSeconds(status.duration)}</Text>
+    </View>
+  );
+}
+
 export default function MeetingDetailScreen({ navigation, route }) {
   const { sessionId, title } = route.params;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   // Whether the audio link is currently being resolved — generating a
-  // presigned S3 URL is a real network call (see getAudioLink), so the
-  // button shows its own loading state rather than resolving eagerly for a
-  // recording the rep may never tap.
+  // presigned S3 URL is a real network call (see getAudioLink), so this
+  // resolves lazily (on tap) rather than eagerly for a recording the rep
+  // may never play. Once resolved, audioUrl feeds AudioPlayerBar directly —
+  // playback happens in-app now, not by handing off to the browser.
   const [openingLink, setOpeningLink] = useState(false);
+  const [audioUrl, setAudioUrl] = useState(null);
 
   const isMountedRef = useRef(true);
   useEffect(() => () => { isMountedRef.current = false; }, []);
@@ -47,14 +88,14 @@ export default function MeetingDetailScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, [data?.processing_status, fetchStatus]);
 
-  const handleOpenAudio = async (fileId) => {
+  const handleLoadAudio = async (fileId) => {
     setOpeningLink(true);
     try {
       const url = await getAudioLink(fileId);
-      await Linking.openURL(url);
+      if (isMountedRef.current) setAudioUrl(url);
     } catch (err) {
-      console.error('Failed to open audio recording:', err);
-      showAlert('Could not open file', 'Please try again in a moment.');
+      console.error('Failed to load audio recording:', err);
+      showAlert('Could not load audio', 'Please try again in a moment.');
     } finally {
       if (isMountedRef.current) setOpeningLink(false);
     }
@@ -120,13 +161,17 @@ export default function MeetingDetailScreen({ navigation, route }) {
               <FadeSlideIn delay={100}>
                 <Card style={{ marginTop: spacing.cardGap }}>
                   <Text style={styles.sectionTitleStandalone}>Audio Recording</Text>
-                  <SecondaryButton
-                    title="Open audio recording"
-                    icon={<Music size={18} color={colors.primary} />}
-                    onPress={() => handleOpenAudio(data.audio_file_id)}
-                    loading={openingLink}
-                    disabled={openingLink}
-                  />
+                  {audioUrl ? (
+                    <AudioPlayerBar url={audioUrl} />
+                  ) : (
+                    <SecondaryButton
+                      title="Play recording"
+                      icon={<Music size={18} color={colors.primary} />}
+                      onPress={() => handleLoadAudio(data.audio_file_id)}
+                      loading={openingLink}
+                      disabled={openingLink}
+                    />
+                  )}
                 </Card>
               </FadeSlideIn>
             )}
@@ -154,4 +199,10 @@ const styles = StyleSheet.create({
   sectionTitle: { ...typography.body, fontWeight: '700', color: colors.text, marginLeft: spacing.xs },
   sectionTitleStandalone: { ...typography.body, fontWeight: '700', color: colors.text, marginBottom: spacing.md },
   bodyText: { ...typography.body, color: colors.text, lineHeight: 22 },
+  playerBar: { flexDirection: 'row', alignItems: 'center' },
+  playButton: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', marginRight: spacing.md,
+  },
+  playerTime: { ...typography.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
 });
