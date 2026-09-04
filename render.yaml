@@ -114,14 +114,11 @@ services:
         sync: false
       - key: AZURE_OPENAI_DEPLOYMENT_NAME
         value: gpt-4o-mini
-      # A DIFFERENT Postgres database than DB_HOST/DB_NAME/etc. above (this
-      # feature's own "transcript" DB on AWS RDS, holding call_recording/
-      # app_folders/pending_transcriptions — not fieldtrack's tables). Reuse
-      # the same connection string this feature already used on App Runner
-      # so existing data isn't orphaned. Set directly in the Render
-      # dashboard.
-      - key: DATABASE_URL
-        sync: false
+      # No separate DATABASE_URL — this feature reuses the SAME database as
+      # the rest of this app (DB_HOST/DB_NAME/etc. above), via its own
+      # psycopg2 pool (see meeting_recorder.py). Its tables must exist there
+      # first: run migrations/001_meeting_recorder_tables.sql once against
+      # that database before this deploy's first request.
       - key: WEBHOOK_SECRET
         sync: false
       # Must be THIS service's own public URL — used only to register the

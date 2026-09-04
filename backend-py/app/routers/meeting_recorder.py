@@ -161,10 +161,40 @@ def get_delete_token(req: DeleteTokenRequest = Depends()):
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Reuses this app's own database (app/core/config.py's DB_HOST/etc — the
+# same Postgres fieldtrack's asyncpg pool connects to) instead of a separate
+# DATABASE_URL for a standalone "transcript" database, now that this feature
+# lives in the same app. Its tables (call_recording, app_folders,
+# pending_transcriptions) must exist there first — see
+# migrations/001_meeting_recorder_tables.sql.
+#
+# psycopg2 (sync, this feature's own pool) rather than this app's own
+# asyncpg pool (app/db/pool.py) — this module's routes are plain `def`
+# (not `async def`) and FastAPI runs those in a thread pool automatically,
+# so a second, blocking connection pool here doesn't block the event loop
+# the rest of the app relies on. Mirrors pool.py's own SSL-mode mapping:
+# DB_SSL=false -> no SSL; DB_SSL=true and DB_SSL_REJECT_UNAUTHORIZED=false
+# -> encrypted but not certificate-verified (Render's managed Postgres
+# cert doesn't chain to a standard root CA, same reason pool.py disables
+# verification); DB_SSL=true and DB_SSL_REJECT_UNAUTHORIZED=true -> fully
+# verified.
+from app.core import config as _config
+
+if _config.DB_SSL:
+    _sslmode = "verify-full" if _config.DB_SSL_REJECT_UNAUTHORIZED else "require"
+else:
+    _sslmode = "disable"
 
 try:
-    db_pool = pool.ThreadedConnectionPool(1, 30, DATABASE_URL) if DATABASE_URL else None
+    db_pool = pool.ThreadedConnectionPool(
+        1, 30,
+        host=_config.DB_HOST,
+        port=_config.DB_PORT,
+        dbname=_config.DB_NAME,
+        user=_config.DB_USER,
+        password=_config.DB_PASSWORD,
+        sslmode=_sslmode,
+    )
 except Exception as e:
     print(f"⚠️ Failed to initialize connection pool: {e}")
     db_pool = None
