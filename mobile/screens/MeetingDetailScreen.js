@@ -119,7 +119,7 @@ export default function MeetingDetailScreen({ navigation, route }) {
             {!!data.audio_file_id && (
               <FadeSlideIn delay={100}>
                 <Card style={{ marginTop: spacing.cardGap }}>
-                  <Text style={styles.sectionTitleStandalone}>Recording file</Text>
+                  <Text style={styles.sectionTitleStandalone}>Audio Recording</Text>
                   <SecondaryButton
                     title="Open audio recording"
                     icon={<Music size={18} color={colors.primary} />}

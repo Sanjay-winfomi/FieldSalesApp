@@ -1,11 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Pressable, Dimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Mic, Plus, FolderOpen, ChevronRight, Trash2, Folder } from 'lucide-react-native';
 import { useAppState } from '../src/context/AppStateContext';
 import { showAlert } from '../src/services/themedAlert';
 import { getRecordings, getFolders, deleteRecording } from '../src/services/meetingApi';
-import { AppHeader, LoadingCard, EmptyState, FadeSlideIn, Card, SearchBar } from '../src/components';
+import { LoadingCard, EmptyState, FadeSlideIn, Card, SearchBar } from '../src/components';
 import { colors, typography, spacing, radius, shadows } from '../src/theme';
+
+// Same relative-to-screen-width decorative glow used by HomeScreen/ProfileScreen's
+// own gradient headers, so this tab's header reads as the same design system
+// rather than a bolted-on plain white bar.
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Any status other than these still-in-flight ones is treated as terminal
 // for polling purposes — matches the backend's own set_db_status values
@@ -41,6 +48,7 @@ const pillStyles = StyleSheet.create({
 });
 
 export default function MeetingsScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { employee } = useAppState();
   const ownerId = String(employee?.id ?? '');
 
@@ -139,22 +147,29 @@ export default function MeetingsScreen({ navigation }) {
 
   return (
     <View style={styles.screen}>
-      <AppHeader
-        title="Meetings"
-        rightAction={
-          <Pressable
-            onPress={() => rootNavigation.navigate('MeetingFolders')}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityRole="button"
-            accessibilityLabel="Manage folders"
-          >
-            <FolderOpen size={22} color={colors.primary} />
-          </Pressable>
-        }
-      />
+      <View style={styles.headerShadowWrap}>
+        <LinearGradient
+          colors={colors.gradientHeader}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.header, { paddingTop: insets.top + 16 }]}
+        >
+          <View style={styles.headerGlow} pointerEvents="none" />
+          <View style={styles.headerRow}>
+            <Text style={styles.title}>Meetings</Text>
+            <Pressable
+              onPress={() => rootNavigation.navigate('MeetingFolders')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Manage folders"
+              style={styles.headerIconButton}
+            >
+              <FolderOpen size={20} color={colors.text} />
+            </Pressable>
+          </View>
 
-      <View style={styles.searchWrap}>
-        <SearchBar value={searchQuery} onChangeText={setSearchQuery} placeholder="Search transcripts..." />
+          <SearchBar value={searchQuery} onChangeText={setSearchQuery} placeholder="Search transcripts..." style={{ marginTop: spacing.md }} />
+        </LinearGradient>
       </View>
 
       {folders.length > 0 && (
@@ -183,6 +198,7 @@ export default function MeetingsScreen({ navigation }) {
       )}
 
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.listContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
@@ -246,7 +262,32 @@ export default function MeetingsScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  searchWrap: { paddingHorizontal: spacing.screenHorizontal, paddingTop: spacing.md },
+  // See HomeScreen.js's own headerShadowWrap comment: the shadow and the
+  // overflow:hidden clip are split across two nested views on Android.
+  headerShadowWrap: {
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    ...shadows.raised,
+  },
+  header: {
+    paddingHorizontal: spacing.screenHorizontal,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  headerGlow: {
+    position: 'absolute', top: -SCREEN_WIDTH * 0.13, right: -SCREEN_WIDTH * 0.1,
+    width: SCREEN_WIDTH * 0.47, height: SCREEN_WIDTH * 0.47, borderRadius: SCREEN_WIDTH * 0.235,
+    backgroundColor: 'rgba(34,197,94,0.14)',
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  title: { ...typography.sectionTitle, color: colors.text, fontSize: 22 },
+  headerIconButton: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   chipsRow: { paddingHorizontal: spacing.screenHorizontal, paddingVertical: spacing.md, gap: spacing.sm },
   chip: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, height: 32,
